@@ -9,9 +9,10 @@ import os
 import re
 
 import bpy
+import numpy
 
 BASE_GROUP = "VP_Valorant_Base"
-BLEND_GROUP = "VP_Valorant_Blend"
+BLEND_GROUP = "VP_Valorant_Blend_v2"  # bump when the group changes: old .blend files keep the old one
 
 # Master shaders whose look can't be rebuilt from these two templates: keep the USD material for them.
 SPECIAL_MASTERS = re.compile(r"glass|decal|hologram|screen|lcd|lightshift|water|waterfall|smoke|vfx|unlit|sky|opacity_rgb",
@@ -159,7 +160,7 @@ def _build_blend_group():
         ("DF B", 'color', (0.5, 0.5, 0.5, 1)), ("DF B Alpha", 'float', 0.0), ("MRA B", 'color', (0, 0.5, 1, 1)),
         ("NM B", 'color', (0.5, 0.5, 1, 1)), ("Tint B", 'color', (1, 1, 1, 1)),
         ("AO Color", 'color', (0, 0, 0, 1)), ("VC", 'color', (1, 1, 1, 1)),
-        ("Vertex Alpha", 'float', 0.0), ("Vertex Blend", 'float', 10.0), ("Vertex Mix", 'float', 1.0),
+        ("Vertex Color", 'color', (1, 1, 1, 1)), ("Use Vertex Color", 'float', 0.0), ("Vertex Alpha", 'float', 0.0), ("Vertex Blend", 'float', 10.0), ("Vertex Mix", 'float', 1.0),
         ("Invert Vertex", 'float', 0.0), ("Use B Alpha", 'float', 0.0), ("Invert Alpha", 'float', 0.0),
         ("Use 2 DF Maps", 'float', 1.0), ("Use 2 NM Maps", 'float', 1.0), ("Blend Tint Only", 'float', 0.0),
         ("Normal Strength", 'float', 1.0), ("Normal Strength B", 'float', 1.0)]:
@@ -186,7 +187,8 @@ def _build_blend_group():
                                                  inp.outputs['Tint B'], inp.outputs['MRA B'], inp.outputs['AO Color'],
                                                  inp.outputs['NM B'], inp.outputs['Normal Strength B'])
 
-    # Layer mask: (vertex alpha ^ 2.2) / (1 - texture alpha), remapped by the blend sharpness.
+    # Layer mask: (vertex alpha ^ 2.2) / (1 - texture alpha), remapped from 0..Vertex Mix to -sharpness/2..1, so layer B
+    # only shows where the painted alpha is (nearly) full and the texture alpha breaks up the edge.
     vertex = _math(nodes, 'POWER', 2.2)
     links.new(inp.outputs['Vertex Alpha'], vertex.inputs[0])
     vertex_inv = _math(nodes, 'SUBTRACT')
@@ -221,7 +223,7 @@ def _build_blend_group():
     links.new(vertex_sel.outputs['Result'], dodge.inputs[0])
     links.new(denominator_safe.outputs['Value'], dodge.inputs[1])
 
-    half_blend = _math(nodes, 'DIVIDE', 2.0)
+    half_blend = _math(nodes, 'MULTIPLY', -0.5)
     links.new(inp.outputs['Vertex Blend'], half_blend.inputs[0])
     remap = nodes.new('ShaderNodeMapRange')
     remap.clamp = True
@@ -242,7 +244,11 @@ def _build_blend_group():
     lit = _mix(nodes, 'MULTIPLY', 1.0)
     links.new(color.outputs['Result'], lit.inputs['A'])
     links.new(inp.outputs['VC'], lit.inputs['B'])
-    links.new(lit.outputs['Result'], bsdf.inputs['Base Color'])
+    vertex_tint = _mix(nodes, 'MULTIPLY')
+    links.new(inp.outputs['Use Vertex Color'], vertex_tint.inputs['Factor'])
+    links.new(lit.outputs['Result'], vertex_tint.inputs['A'])
+    links.new(inp.outputs['Vertex Color'], vertex_tint.inputs['B'])
+    links.new(vertex_tint.outputs['Result'], bsdf.inputs['Base Color'])
 
     for a_value, b_value, target in [(a_metal, b_metal, 'Metallic'), (a_rough, b_rough, 'Roughness')]:
         mixed = nodes.new('ShaderNodeMix')
@@ -389,7 +395,16 @@ def rebuild_material(material, info, assets_root):
     set_switch("Use B Alpha", "Use Diffuse B Alpha")
     set_switch("Invert Alpha", "Invert Alpha (Texture)")
     set_switch("Use Alpha as Emissive", "Use Alpha as Emissive")
-    if blend and images.get("DF B") is None and "Blend Tint Only" in shader.inputs:
+    # "Blend To Flat" (plaster over brick etc.): layer B is just its tint, no texture; same idea for its MRA/normal.
+    for switch, input_name, flat in [("Blend To Flat", "DF B", (1, 1, 1, 1)), ("Blend To Flat MRA", "MRA B", (0, 0.5, 1, 1)),
+                                     ("Flat Normal B", "NM B", (0.5, 0.5, 1, 1))]:
+        if blend and _find(switches, [switch]) and input_name in shader.inputs:
+            for link in list(shader.inputs[input_name].links):
+                links.remove(link)
+            shader.inputs[input_name].default_value = flat
+    if blend and _find(switches, ["Blend To Flat"]):
+        shader.inputs["Blend Tint Only"].default_value = 0.0
+    elif blend and images.get("DF B") is None and "Blend Tint Only" in shader.inputs:
         shader.inputs["Blend Tint Only"].default_value = 1.0  # no second texture: layer B = layer A with its own tint
 
     # Vertex color / alpha painted on the mesh (USD: displayColor / displayOpacity).
@@ -407,6 +422,39 @@ def rebuild_material(material, info, assets_root):
         shader.inputs["Use Alpha"].default_value = 1.0
         material.surface_render_method = 'DITHERED'
     return "blend" if blend else "base"
+
+
+def _uses_vertex_data(material):
+    """(needs displayColor, needs displayOpacity) for a rebuilt material."""
+    if material is None or not material.use_nodes:
+        return False, False
+    for node in material.node_tree.nodes:
+        if node.type == 'GROUP' and node.node_tree and node.node_tree.name in (BASE_GROUP, BLEND_GROUP):
+            color = node.inputs["Use Vertex Color"].default_value > 0 if "Use Vertex Color" in node.inputs else False
+            return color, "Vertex Alpha" in node.inputs
+    return False, False
+
+
+def add_default_vertex_colors(objects):
+    """Unreal treats a mesh without vertex colors as painted white; Blender reads a missing attribute as black.
+    Give such meshes a white displayColor / opaque displayOpacity where a rebuilt material reads them."""
+    added = 0
+    for mesh in {o.data for o in objects if o.type == 'MESH' and o.data is not None}:
+        needs_color = needs_alpha = False
+        for material in mesh.materials:
+            color, alpha = _uses_vertex_data(material)
+            needs_color |= color
+            needs_alpha |= alpha
+        count = len(mesh.vertices)
+        if needs_color and "displayColor" not in mesh.attributes and count:
+            mesh.attributes.new("displayColor", 'FLOAT_COLOR', 'POINT').data.foreach_set(
+                "color", numpy.ones(count * 4, dtype=numpy.float32))
+            added += 1
+        if needs_alpha and "displayOpacity" not in mesh.attributes and count:
+            mesh.attributes.new("displayOpacity", 'FLOAT', 'POINT').data.foreach_set(
+                "value", numpy.ones(count, dtype=numpy.float32))
+            added += 1
+    return added
 
 
 def rebuild_materials(materials, summary, assets_root):

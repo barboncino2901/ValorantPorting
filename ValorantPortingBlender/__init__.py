@@ -9,14 +9,15 @@ import traceback
 import bpy
 import os
 import bpy.props
-from mathutils import Matrix
+from mathutils import Matrix, Vector
+import math
 from .valorant_psk_psa_b5 import pskimport, psaimport
-from .valorant_shaders import rebuild_materials
+from .valorant_shaders import rebuild_materials, add_default_vertex_colors
 
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 5, 0),
+    "version": (1, 5, 1),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -493,12 +494,65 @@ def remove_helper_objects(objects):
     Log.information(f"Removed {removed} editor helper objects (blockout grids, light shafts)")
 
 
+SKY_MESHES = re.compile(r"sky ?(dome|sphere|box)|^sky_|_sky_", re.IGNORECASE)
+
+
+def setup_map_lighting(objects, map_name):
+    """Daylight like in game: the map's own sun (UE bakes everything else into lightmaps, which don't export),
+    a soft sky fill, and the sky dome kept out of the lighting so it doesn't shade the whole map."""
+    lights = [o for o in objects if o.type == 'LIGHT']
+    suns = []
+    for light in lights:
+        if light.data.type != 'SUN':
+            continue
+        direction = (light.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized()
+        if direction.z < -0.05:  # skip the "look up" helper lights that shine upward
+            suns.append((light.data.energy, direction, tuple(light.data.color)))
+    for obj in objects:
+        if obj.type == 'MESH' and (SKY_MESHES.search(obj.name) or (obj.parent and SKY_MESHES.search(obj.parent.name))):
+            obj.visible_shadow = False
+            obj.visible_diffuse = False
+            obj.visible_glossy = False
+    for light in lights:  # local UE lights only add to the baked lighting; their units don't match Blender's
+        bpy.data.objects.remove(light, do_unlink=True)
+
+    scene = bpy.context.scene
+    if suns:
+        _, direction, color = max(suns, key=lambda s: s[0])
+        # the USD export mirrors the light direction on X (checked against in-game shadows)
+        direction = Vector((-direction.x, direction.y, direction.z))
+        sun_data = bpy.data.lights.new(f"{map_name} Sun", 'SUN')
+        sun_data.energy = MAP_SUN_STRENGTH
+        sun_data.color = color
+        sun_data.angle = math.radians(1.5)
+        sun = bpy.data.objects.new(f"{map_name} Sun", sun_data)
+        sun.rotation_mode = 'QUATERNION'
+        sun.rotation_quaternion = direction.to_track_quat('-Z', 'Y')
+        target = next((c for c in bpy.data.collections if c.name.startswith(map_name)), scene.collection)
+        target.objects.link(sun)
+
+    world = bpy.data.worlds.get("Valorant Sky") or bpy.data.worlds.new("Valorant Sky")
+    world.use_nodes = True
+    background = next((n for n in world.node_tree.nodes if n.type == 'BACKGROUND'), None)
+    if background is not None:
+        background.inputs['Color'].default_value = MAP_SKY_COLOR
+        background.inputs['Strength'].default_value = MAP_SKY_STRENGTH
+    scene.world = world
+    scene.view_settings.view_transform = 'Standard'  # closest to the game's saturated look (AgX washes it out)
+    Log.information(f"Map lighting: {'sun from the map' if suns else 'no sun found'}, sky fill")
+
+
+MAP_SUN_STRENGTH = 5.0
+MAP_SKY_COLOR = (0.62, 0.72, 0.88, 1.0)
+MAP_SKY_STRENGTH = 0.8
+
+
 def import_map(data, assets_root=""):
     name = data.get("Name")
     path = data.get("MapPath")
     Log.information(f"Importing map {name} from {path}")
     options = dict(filepath=path, import_usd_preview=True, support_scene_instancing=True, import_visible_only=True,
-                   create_collection=True, import_lights=False, import_cameras=False, set_frame_range=False,
+                   create_collection=True, import_lights=True, import_cameras=False, set_frame_range=False,
                    read_mesh_colors=True, apply_unit_conversion_scale=True)
     materials_before = set(bpy.data.materials)
     objects_before = set(bpy.data.objects)
@@ -519,6 +573,8 @@ def import_map(data, assets_root=""):
     base, blend, kept = rebuild_materials(new_materials, summary, assets_root)
     Log.information(f"Valorant shaders: {base} base, {blend} two-layer blend, {kept} kept as imported")
     fix_valorant_materials(new_materials, summary)  # fallback fixes for materials that weren't rebuilt
+    add_default_vertex_colors([o for o in bpy.data.objects if o not in objects_before])
+    setup_map_lighting([o for o in bpy.data.objects if o not in objects_before], name)
     Log.information(f"Imported map {name}")
 
 
