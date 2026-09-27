@@ -55,7 +55,7 @@ public partial class AnimationFilterOption : ObservableObject
         if (parts[0] == "weapon")
         {
             var isMelee = parts[1].Contains("/Melee", StringComparison.OrdinalIgnoreCase);
-            return (parts[1], isMelee ? ["EQ_", "GN_"] : ["GN_"], false);
+            return (parts[1], isMelee ? ["EQ_", "GN_"] : ["GN_", "GNTP_"], false); // GN_: 1st person, GNTP_: 3rd person
         }
 
         return null;

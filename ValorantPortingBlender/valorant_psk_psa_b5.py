@@ -1362,6 +1362,9 @@ def _fcurve_new(action, owner, data_path, index):
     return action.fcurve_ensure_for_datablock(owner, data_path, index=index)
 
 
+ANIMATION_PLACED_BONES = re.compile(r"weapon|handtarget|^ik_", re.IGNORECASE)
+
+
 def psaimport(filepath,
         context = None,
         oArmature = None,
@@ -1771,6 +1774,11 @@ def psaimport(filepath,
         if bKeepProportions:
             eps = 0.0005 if bScaleDown else 0.05
             for j in range(Totalbones):
+                # Weapon/IK bones rest at the origin and only the animation places them (e.g. the weapon in
+                # the hand), so they always take the animation's position, like in Unreal.
+                if j not in BoneNotFoundList and PsaBonesToProcess[j] is not None and \
+                        ANIMATION_PLACED_BONES.search(PsaBonesToProcess[j].pose_bone.name):
+                    continue
                 p0 = Raw_Key_List[raw_key_index + j][0]
                 if all((Raw_Key_List[raw_key_index + f * Totalbones + j][0] - p0).length < eps
                        for f in range(NumRawFrames)):

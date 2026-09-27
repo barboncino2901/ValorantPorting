@@ -10,7 +10,7 @@ import time
 import bpy
 import os
 import bpy.props
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector, Quaternion
 import math
 from .valorant_psk_psa_b5 import pskimport, psaimport
 from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merge_duplicate_materials, find_material_info
@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 5, 4),
+    "version": (1, 5, 5),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -402,6 +402,45 @@ def find_selected_armature():
     return None
 
 
+# Guns attach to the agent's right-hand weapon bone, which the animations place in the palm (3rd and 1st person).
+WEAPON_SOCKET_BONE = "R_WeaponPoint"
+# Unreal's weapon socket axes vs. the gun model's (checked on Vandal/Sheriff/Operator, Jett/Brimstone, 1P and 3P).
+WEAPON_SOCKET_ROTATION = Matrix.Rotation(-math.pi / 2, 4, 'Y') @ Matrix.Rotation(-math.pi / 2, 4, 'X')
+BUDDY_SOCKET_BONE = "Gun_Buddy"
+
+
+def unreal_bone_frame(armature, bone_name):
+    """Rotation from a Blender bone's frame to its original Unreal frame. Agents are imported with reoriented bones
+    (nicer in Blender, but no longer Unreal's axes); the importer stores what it changed on each bone."""
+    bone = armature.data.bones[bone_name]
+    if "post_quat" not in bone or "orig_quat" not in bone:
+        return Matrix()
+    post = Quaternion(bone["post_quat"])
+    orig = Quaternion(bone["orig_quat"])
+    return (post.inverted() @ orig.conjugated()).to_matrix().to_4x4()
+
+
+def attach_to_bone(child, holder, bone_name, socket_rotation, place):
+    """Snap an imported gun/buddy onto a bone of the selected armature so it follows its animations."""
+    if child is None or holder is None or child == holder or bone_name not in holder.data.bones:
+        return False
+    for old in [c for c in child.constraints if c.type == 'CHILD_OF']:
+        child.constraints.remove(old)
+    child.location = (0.0, 0.0, 0.0)
+    child.rotation_mode = 'QUATERNION'
+    child.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+    constraint = child.constraints.new('CHILD_OF')
+    constraint.name = "Valorant Porting attach"
+    constraint.target = holder
+    constraint.subtarget = bone_name
+    # Child Of: world = bone @ inverse_matrix @ own transform. The inverse matrix carries the Unreal frame + socket.
+    constraint.inverse_matrix = unreal_bone_frame(holder, bone_name) @ socket_rotation
+    Log.information(f"Attached {child.name} to {holder.name} ({bone_name})")
+    show_message(f"Attached to the selected {'agent' if place == 'hand' else 'gun'} ({bone_name}). "
+                 f"To detach, delete the \"Valorant Porting attach\" constraint.")
+    return True
+
+
 def show_message(message, title="Valorant Porting", icon='INFO'):
     def draw(self, context):
         self.layout.label(text=message)
@@ -693,6 +732,9 @@ def import_response(response):
         import_map(response.get("Data"), response.get("AssetsRoot") or "")
         return
 
+    # whatever was selected before the import: a gun is attached to a selected agent, a buddy to a selected gun
+    holder = find_selected_armature()
+
     import_shaders("VALORANT_Weapon.blend")
     import_shaders("VALORANT_Agent.blend")
 
@@ -781,6 +823,15 @@ def import_response(response):
                     constraint_object(child_obj, parent_obj, attachment.get("BoneName"), attachment.get("Offset"), attachment.get("Rotation"))
         if new_collection not in parent_obj.users_collection:
             new_collection.objects.link(parent_obj)
+
+    if imported_parts and holder is not None:
+        # the main body: the first part that isn't itself attached to another part (scopes, magazines, ...)
+        main = next((p["Parent"] for p in imported_parts
+                     if not [c for c in p["Parent"].constraints if c.type == 'CHILD_OF']), imported_parts[0]["Parent"])
+        if import_type == "Weapon":
+            attach_to_bone(main, holder, WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION, "hand")
+        elif import_type == "GunBuddy":
+            attach_to_bone(main, holder, BUDDY_SOCKET_BONE, Matrix(), "gun")
 
 
 def register():
