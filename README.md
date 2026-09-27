@@ -60,7 +60,7 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
 ## Building from source
 Clone the repository with its submodules:
 ```
-git clone <this repository's URL> --recursive
+git clone https://github.com/barboncino2901/ValorantPorting --recursive
 ```
 Build the app (needs the [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)):
 ```
