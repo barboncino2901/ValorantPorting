@@ -5,6 +5,7 @@ import os
 import socket
 import threading
 import re
+import traceback
 import bpy
 import os
 import bpy.props
@@ -14,7 +15,7 @@ from .valorant_psk_psa_b5 import pskimport, psaimport
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 3, 0),
+    "version": (1, 3, 1),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -72,17 +73,14 @@ class Receiver(threading.Thread):
                         if data == "MessageFinished":
                             break
                         data_string += data
-                self.event.set()
                 self.data = json.loads(data_string)
+                self.event.set()
 
-            except OSError as e:
-                pass
-            except EOFError as e:
-                Log.error(e)
-            except zlib.error as e:
-                Log.error(e)
-            except json.JSONDecodeError as e:
-                Log.error(e)
+            except OSError:
+                pass  # timeouts / socket resets: keep listening
+            except Exception as e:
+                # a broken or partial message must never stop the receiver
+                Log.error(f"Could not read message from Valorant Porting: {e}")
 
     def stop(self):
         self.keep_alive = False
@@ -303,8 +301,9 @@ def import_shaders(shaderName):
 
 def create_collection(name):
     if name in bpy.context.view_layer.layer_collection.children:
-        bpy.context.view_layer.active_layer_collection = bpy.context.view_layer.layer_collection.children.get(name)
-        return
+        existing = bpy.context.view_layer.layer_collection.children.get(name)
+        bpy.context.view_layer.active_layer_collection = existing
+        return existing.collection
     bpy.ops.object.select_all(action='DESELECT')
 
     new_collection = bpy.data.collections.new(name)
@@ -403,8 +402,15 @@ def find_selected_armature():
 def show_message(message, title="Valorant Porting", icon='INFO'):
     def draw(self, context):
         self.layout.label(text=message)
+    if bpy.app.background:
+        return
+    window_manager = bpy.context.window_manager
+    if not window_manager.windows:
+        return
     try:
-        bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
+        # called from a timer, so give the popup an explicit window to appear in
+        with bpy.context.temp_override(window=window_manager.windows[0]):
+            window_manager.popup_menu(draw, title=title, icon=icon)
     except Exception:
         pass
 
@@ -532,15 +538,25 @@ def register():
 
     def handler():
         if import_event.is_set():
-            import_response(server.data)
             import_event.clear()
+            try:
+                import_response(server.data)
+            except Exception as e:
+                # Never let one failed import stop the timer (Blender unregisters timers that raise).
+                Log.error(f"Import failed: {e}")
+                traceback.print_exc()
+                show_message(f"Valorant Porting: import failed ({e}). See the system console for details.", icon='ERROR')
         return 0.01
 
-    bpy.app.timers.register(handler)
+    global import_handler
+    import_handler = handler
+    bpy.app.timers.register(handler, persistent=True)
     bpy.app.timers.register(watch_selection, persistent=True)
 
 
 def unregister():
     server.stop()
+    if bpy.app.timers.is_registered(import_handler):
+        bpy.app.timers.unregister(import_handler)
     if bpy.app.timers.is_registered(watch_selection):
         bpy.app.timers.unregister(watch_selection)
