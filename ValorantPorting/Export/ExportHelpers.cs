@@ -176,6 +176,7 @@ public static class ExportHelpers
         exportParts.First().Attatchments.Add(attachMag);
 
         //attachment (scope & silencer)
+        var usedSockets = new HashSet<string>();
         if (mainAsset.TryGetValue(out UScriptMap attachmentOverrides, "AttachmentOverrides"))
         {
             var attachmentTuple = GetWeaponAttatchments(attachmentOverrides);
@@ -189,43 +190,96 @@ public static class ExportHelpers
                 // sniper scope's correct materials were immediately overwritten by the main body's).
                 if (attachmentTuple.Item2[i] == null) continue;
 
-                Mesh(attachmentTuple.Item2[i], exportParts);
-                var scope_tach = new ExportAttatchment();
-                scope_tach.BoneName = attachmentTuple.Item1[i];
-                scope_tach.AttatchmentName = exportParts.Last().MeshName;
-                exportParts.First().Attatchments.Add(scope_tach);
-                if (attachmentTuple.Item3[i] != null) OverrideMaterials(attachmentTuple.Item3[i], exportParts.Last().OverrideMaterials);
-                
-                                //handle attachment style mats
-                if (style != null)
-                {
-                    bool foundAttachmentMats = false;
-                    
-                    //scope, muzzle
-                    string[] matNames = { "3p MaterialOverrides", "1p MaterialOverrides" };
-                    foreach (var matName in matNames)
-                    {
-                        var styleAttachmentMats = GetStyleAttatchmentMats(style, matName, attachmentTuple.Item1[i]);
-                        if (styleAttachmentMats != null)
-                        {
-                            OverrideMaterials(styleAttachmentMats, exportParts.Last().StyleMaterials);
-                            foundAttachmentMats = true;
-                        }
-                    }
-                    
-                    LogSilencerDiagnostic($"[call site] socket={attachmentTuple.Item1[i]}, mesh={exportParts.Last().MeshName}, foundAttachmentMats={foundAttachmentMats}, handledStyleGun null={handledStyleGun == null}");
+                AddAttachment(attachmentTuple.Item1[i], attachmentTuple.Item2[i], attachmentTuple.Item3[i]);
+            }
+        }
 
-                    // Fallback: some skins store all chroma materials (gun + attachments) in the main chroma CDO
-                    if (!foundAttachmentMats && handledStyleGun != null)
+        // The gun's own default attachments (e.g. the Guardian's ACOG scope) for skins that don't replace them.
+        foreach (var (socket, mesh, materials) in GetForcedAttachments())
+        {
+            if (usedSockets.Contains(socket)) continue;
+            AddAttachment(socket, mesh, materials);
+        }
+
+        void AddAttachment(string socket, USkeletalMesh mesh, UMaterialInstanceConstant[]? materials)
+        {
+            usedSockets.Add(socket);
+            Mesh(mesh, exportParts);
+            var scope_tach = new ExportAttatchment();
+            scope_tach.BoneName = socket;
+            scope_tach.AttatchmentName = exportParts.Last().MeshName;
+            exportParts.First().Attatchments.Add(scope_tach);
+            if (materials != null) OverrideMaterials(materials, exportParts.Last().OverrideMaterials);
+
+            //handle attachment style mats
+            if (style != null)
+            {
+                bool foundAttachmentMats = false;
+
+                //scope, muzzle
+                string[] matNames = { "3p MaterialOverrides", "1p MaterialOverrides" };
+                foreach (var matName in matNames)
+                {
+                    var styleAttachmentMats = GetStyleAttatchmentMats(style, matName, socket);
+                    if (styleAttachmentMats != null)
                     {
-                        var fallbackMats = handledStyleGun.GetOrDefault("3p Material Overrides", Array.Empty<UMaterialInstanceConstant>());
-                        LogSilencerDiagnostic($"[call site] fallback check for socket={attachmentTuple.Item1[i]}, fallbackMats.Length={fallbackMats.Length}");
-                        if (fallbackMats.Length > 0)
-                            OverrideMaterials(fallbackMats, exportParts.Last().StyleMaterials);
+                        OverrideMaterials(styleAttachmentMats, exportParts.Last().StyleMaterials);
+                        foundAttachmentMats = true;
                     }
+                }
+
+                LogSilencerDiagnostic($"[call site] socket={socket}, mesh={exportParts.Last().MeshName}, foundAttachmentMats={foundAttachmentMats}, handledStyleGun null={handledStyleGun == null}");
+
+                // Fallback: some skins store all chroma materials (gun + attachments) in the main chroma CDO
+                if (!foundAttachmentMats && handledStyleGun != null)
+                {
+                    var fallbackMats = handledStyleGun.GetOrDefault("3p Material Overrides", Array.Empty<UMaterialInstanceConstant>());
+                    LogSilencerDiagnostic($"[call site] fallback check for socket={socket}, fallbackMats.Length={fallbackMats.Length}");
+                    if (fallbackMats.Length > 0)
+                        OverrideMaterials(fallbackMats, exportParts.Last().StyleMaterials);
                 }
             }
         }
+    }
+
+    // Attachments a gun always carries unless the skin replaces them: its primary asset lists them as
+    // "ForcedAttachments" (attachment primary asset -> "Attachment" blueprint with the mesh and materials).
+    private static List<(string Socket, USkeletalMesh Mesh, UMaterialInstanceConstant[]? Materials)> GetForcedAttachments()
+    {
+        var found = new List<(string, USkeletalMesh, UMaterialInstanceConstant[]?)>();
+        try
+        {
+            var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
+            if (!mainAsset.TryGetValue(out UBlueprintGeneratedClass gunPrimary, "Equippable")) return found;
+            var gunDefaults = gunPrimary.ClassDefaultObject.Load();
+            if (gunDefaults is null || !gunDefaults.TryGetValue(out FSoftObjectPath[] forced, "ForcedAttachments")) return found;
+
+            foreach (var forcedPath in forced)
+            {
+                if (!forcedPath.TryLoad(out UBlueprintGeneratedClass attachmentPrimary)) continue;
+                var primaryDefaults = attachmentPrimary.ClassDefaultObject.Load();
+                if (primaryDefaults is null || !primaryDefaults.TryGetValue(out FSoftObjectPath attachmentPath, "Attachment") ||
+                    !attachmentPath.TryLoad(out UBlueprintGeneratedClass attachmentClass)) continue;
+                var attachment = attachmentClass.ClassDefaultObject.Load();
+                if (attachment is null) continue;
+
+                // same property/socket pairs as skin attachment overrides: scopes, then silencers
+                foreach (var (meshName, materialsName, socket) in new[]
+                         { ("1pReflexMesh", "MaterialOverrides", "Reflex"), ("1p Mesh", "3p MaterialOverrides", "Barrel") })
+                {
+                    if (!attachment.TryGetValue(out USkeletalMesh mesh, meshName) || mesh is null) continue;
+                    attachment.TryGetValue(out UMaterialInstanceConstant[] materials, materialsName);
+                    found.Add((socket, mesh, materials));
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warning($"Could not read the gun's default attachments: {ex.Message}");
+        }
+
+        return found;
     }
     
     public static UObject? HandleStyle(UObject style)
