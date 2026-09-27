@@ -98,7 +98,8 @@ public static class MapExport
                 var textures = new JObject();
                 foreach (var texture in (material["Textures"] as JObject)?.Properties() ?? [])
                 {
-                    var texturePath = texture.Value["ObjectPath"]?.ToString();
+                    // hard references carry "ObjectPath", soft ones (newer V5 materials) "AssetPathName"
+                    var texturePath = (texture.Value["ObjectPath"] ?? texture.Value["AssetPathName"])?.ToString();
                     if (!string.IsNullOrEmpty(texturePath)) textures[texture.Name] = TextureFile(texturePath);
                 }
 

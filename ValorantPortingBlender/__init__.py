@@ -17,7 +17,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 5, 2),
+    "version": (1, 5, 3),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -440,7 +440,7 @@ def fix_valorant_materials(materials, summary):
     """Valorant-specific fixes on top of Blender's USD material import:
     - MRA textures pack Metallic (R), Roughness (G), AO (B); the USD export wires them as G/B.
     - Stylized foliage fills the transparent part of its diffuse texture with the material's "AO color"."""
-    mra_fixed = ao_fixed = 0
+    mra_fixed = ao_fixed = flat_colored = 0
     for material in materials:
         if not material.use_nodes:
             continue
@@ -461,6 +461,14 @@ def fix_valorant_materials(materials, summary):
             mra_fixed += 1
 
         info = find_material_info(summary, material.name) or {}
+        base_input = principled.inputs['Base Color']
+        if not base_input.is_linked:
+            # untextured material left white by the USD import: use its own color parameter if it has one
+            color = next((c for name, c in (info.get("Colors") or {}).items()
+                          if isinstance(c, dict) and "R" in c and not NON_ALBEDO_COLORS.search(name)), None)
+            if color is not None:
+                base_input.default_value = (color["R"], color["G"], color["B"], 1.0)
+                flat_colored += 1
         ao = (info.get("Colors") or {}).get("AO color")
         base_link = principled.inputs['Base Color'].links[0] if principled.inputs['Base Color'].is_linked else None
         if ao and base_link is not None and not principled.inputs['Alpha'].is_linked:
@@ -474,24 +482,50 @@ def fix_valorant_materials(materials, summary):
                 links.new(base_link.from_socket, mix.inputs['B'])
                 links.new(mix.outputs['Result'], principled.inputs['Base Color'])
                 ao_fixed += 1
-    Log.information(f"Material fixes: {mra_fixed} MRA, {ao_fixed} foliage AO color")
+    Log.information(f"Material fixes: {mra_fixed} MRA, {ao_fixed} foliage AO color, {flat_colored} flat colors")
+
+
+# Color parameters that aren't the surface color itself.
+NON_ALBEDO_COLORS = re.compile(r"AO|Emissi|Lightmass|Min Light|Specular|Sparkle|Channel|Normal|Mult|Impurity|Glow|Fog",
+                               re.IGNORECASE)
 
 
 # Materials that only exist in the editor or as effects: developer grids/blockouts, light-shaft cards and smoke/glow effect meshes.
-HELPER_MATERIALS = re.compile(r"^(M_SuperGrid|WorldGridMaterial|M_Flat_|MI_LS_|M_LightShaft|LightShaft|OmenFunLand|MI_Smoke|MI_SpriteGlow|Callout_Volume)", re.IGNORECASE)
+HELPER_MATERIALS = re.compile(r"^(M_SuperGrid|WorldGridMaterial|M_Flat_|MI_LS_|M_LightShaft|LightShaft|OmenFunLand|MI_Smoke|MI_SpriteGlow|Callout_Volume|[A-Za-z]*_HeadHeightRef)", re.IGNORECASE)
+
+
+def _hidden_material():
+    material = bpy.data.materials.get("VP_Hidden")
+    if material is None:
+        material = bpy.data.materials.new("VP_Hidden")
+        material.use_nodes = True
+        nodes = material.node_tree.nodes
+        nodes.clear()
+        output = nodes.new('ShaderNodeOutputMaterial')
+        transparent = nodes.new('ShaderNodeBsdfTransparent')
+        material.node_tree.links.new(transparent.outputs['BSDF'], output.inputs['Surface'])
+        material.surface_render_method = 'DITHERED'
+    return material
 
 
 def remove_helper_objects(objects):
-    """Deletes imported objects whose materials are all editor helpers (they show up as white/grid shapes)."""
-    removed = 0
+    """Deletes imported objects whose materials are all editor helpers (they show up as white/grid shapes); on objects
+    that mix helpers with real materials, only the helper parts are made invisible."""
+    removed = hidden = 0
     for obj in list(objects):
         if obj.type != 'MESH':
             continue
-        materials = [slot.material for slot in obj.material_slots if slot.material]
-        if materials and all(HELPER_MATERIALS.match(re.sub(r"\.\d{3}$", "", m.name)) for m in materials):
+        helpers = [HELPER_MATERIALS.match(re.sub(r"\.\d{3}$", "", slot.material.name)) is not None if slot.material else False
+                   for slot in obj.material_slots]
+        if helpers and all(helpers):
             bpy.data.objects.remove(obj, do_unlink=True)
             removed += 1
-    Log.information(f"Removed {removed} editor helper objects (blockout grids, light shafts)")
+        elif True in helpers:  # (this module defines its own any())
+            for slot, helper in zip(obj.material_slots, helpers):
+                if helper:
+                    slot.material = _hidden_material()
+            hidden += 1
+    Log.information(f"Removed {removed} editor helper objects (blockout grids, light shafts), hid helper parts of {hidden}")
 
 
 SKY_MESHES = re.compile(r"sky ?(dome|sphere|box)|^sky_|_sky_", re.IGNORECASE)
@@ -518,11 +552,12 @@ def setup_map_lighting(objects, map_name):
 
     scene = bpy.context.scene
     if suns:
-        _, direction, color = max(suns, key=lambda s: s[0])
+        energy, direction, color = max(suns, key=lambda s: s[0])
         # the USD export mirrors the light direction on X (checked against in-game shadows)
         direction = Vector((-direction.x, direction.y, direction.z))
         sun_data = bpy.data.lights.new(f"{map_name} Sun", 'SUN')
-        sun_data.energy = MAP_SUN_STRENGTH
+        # relative to Ascent's sun (intensity 7, imported as 28): brighter/dimmer maps keep their difference
+        sun_data.energy = MAP_SUN_STRENGTH * min(max(energy / 28.0, 0.5), 1.5)
         sun_data.color = color
         sun_data.angle = math.radians(1.5)
         sun = bpy.data.objects.new(f"{map_name} Sun", sun_data)

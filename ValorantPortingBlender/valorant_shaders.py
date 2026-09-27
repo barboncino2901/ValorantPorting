@@ -306,7 +306,62 @@ def _image(assets_root, relative_path, non_color):
     image = bpy.data.images.load(path, check_existing=True)
     if non_color:
         image.colorspace_settings.name = 'Non-Color'
+    # Riot packs masks into the alpha channel (mortar lines, layer masks, emissive masks); as regular transparency
+    # Blender would drop the color wherever alpha is 0 (e.g. bricks turning black)
+    image.alpha_mode = 'CHANNEL_PACKED'
     return image
+
+
+def _build_radianite(material, info, assets_root):
+    """Summit's jade/emerald "radianite" roofs and crystals: a glossy green stone with cloudy color variation and a
+    faint glow, approximated from the material's cloud colors (the real shader is animated VFX)."""
+    colors = info.get("Colors") or {}
+    scalars = info.get("Scalars") or {}
+    textures = info.get("Textures") or {}
+    dark = _color(colors.get("Cloud Color A", {"R": 0.0, "G": 0.1, "B": 0.1}))
+    bright = _color(colors.get("Cloud Color B", {"R": 0.0, "G": 0.8, "B": 0.5}))
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+    output = nodes.new('ShaderNodeOutputMaterial')
+    bsdf = nodes.new('ShaderNodeBsdfPrincipled')
+    links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    coords = nodes.new('ShaderNodeTexCoord')
+    noise = nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = 0.4 * scalars.get("Cloud UV Scale", 1.0)
+    noise.inputs['Detail'].default_value = 4.0
+    links.new(coords.outputs['Object'], noise.inputs['Vector'])
+    ramp = nodes.new('ShaderNodeValToRGB')
+    ramp.color_ramp.elements[0].position = 0.3
+    ramp.color_ramp.elements[0].color = dark
+    ramp.color_ramp.elements[1].position = 0.75
+    ramp.color_ramp.elements[1].color = tuple(c * 0.6 for c in bright[:3]) + (1.0,)
+    links.new(noise.outputs['Fac'], ramp.inputs['Fac'])
+    links.new(ramp.outputs['Color'], bsdf.inputs['Base Color'])
+    links.new(ramp.outputs['Color'], bsdf.inputs['Emission Color'])
+    bsdf.inputs['Emission Strength'].default_value = 0.35
+    bsdf.inputs['Metallic'].default_value = 0.2
+    bsdf.inputs['Roughness'].default_value = 0.2
+    relative = _find(textures, TEXTURE_SLOTS["NM"])
+    image = _image(assets_root, relative, True) if relative else None
+    if image is not None:
+        uv = nodes.new('ShaderNodeUVMap')
+        uv.uv_map = "st"
+        tex = nodes.new('ShaderNodeTexImage')
+        tex.image = image
+        links.new(uv.outputs['UV'], tex.inputs['Vector'])
+        split = nodes.new('ShaderNodeSeparateColor')
+        links.new(tex.outputs['Color'], split.inputs['Color'])
+        flip = _math(nodes, 'SUBTRACT')
+        flip.inputs[0].default_value = 1.0
+        links.new(split.outputs['Green'], flip.inputs[1])
+        join = nodes.new('ShaderNodeCombineColor')
+        links.new(split.outputs['Red'], join.inputs['Red'])
+        links.new(flip.outputs['Value'], join.inputs['Green'])
+        links.new(split.outputs['Blue'], join.inputs['Blue'])
+        normal = nodes.new('ShaderNodeNormalMap')
+        links.new(join.outputs['Color'], normal.inputs['Color'])
+        links.new(normal.outputs['Normal'], bsdf.inputs['Normal'])
 
 
 def _is_blend(info, master):
@@ -321,6 +376,9 @@ def rebuild_material(material, info, assets_root):
     """Replaces an imported USD material with a Valorant Base/Blend setup. Returns 'base', 'blend' or None."""
     parents = info.get("Parents") or []
     master = parents[-1] if parents else ""
+    if re.search(r"radianite", master, re.IGNORECASE):
+        _build_radianite(material, info, assets_root)
+        return "base"
     if SPECIAL_MASTERS.search(master) or SPECIAL_MASTERS.search(material.name):
         return None
 
@@ -334,7 +392,7 @@ def rebuild_material(material, info, assets_root):
         relative = _find(textures, names)
         if relative:
             images[slot] = _image(assets_root, relative, slot in NON_COLOR_SLOTS)
-    if images.get("DF") is None and not any(k.startswith("Color A") for k in colors):
+    if images.get("DF") is None and not any(k.startswith("Color A") for k in colors) and "DiffuseColor" not in colors:
         return None  # nothing to build a color from: keep the USD material
 
     blend = _is_blend(info, master)
@@ -363,6 +421,8 @@ def rebuild_material(material, info, assets_root):
         a = [colors[k] for k in ("Color A1", "Color A2") if k in colors]
         if a:
             shader.inputs["DF"].default_value = tuple(sum(c[ch] for c in a) / len(a) for ch in "RGB") + (1.0,)
+        else:
+            shader.inputs["DF"].default_value = (1, 1, 1, 1)  # flat material: its DiffuseColor is the color
         b = [colors[k] for k in ("Color B1", "Color B2") if k in colors]
         if b and "DF B" in shader.inputs:
             shader.inputs["DF B"].default_value = tuple(sum(c[ch] for c in b) / len(b) for ch in "RGB") + (1.0,)
@@ -501,7 +561,7 @@ def rebuild_materials(materials, summary, assets_root):
     base = blend = kept = 0
     for material in materials:
         info = find_material_info(summary, material.name)
-        if not info or not material.use_nodes or not info.get("Textures"):
+        if not info or not material.use_nodes or not (info.get("Textures") or info.get("Colors")):
             kept += 1
             continue
         try:
