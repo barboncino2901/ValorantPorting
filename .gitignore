@@ -421,3 +421,6 @@ FodyWeavers.xsd
 .vs/ProjectEvaluation/fortniteporting.projects.v5.1
 
 executable/
+
+# Blender backups
+*.blend1

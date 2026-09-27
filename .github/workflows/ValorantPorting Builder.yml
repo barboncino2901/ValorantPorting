@@ -32,6 +32,12 @@ jobs:
       - name: .NET Publish
         run: dotnet publish ValorantPorting -c Release --no-self-contained -r win-x64 -f net10.0-windows -o "./ValorantPorting/bin/Publish/" -p:PublishReadyToRun=false -p:PublishSingleFile=true -p:DebugType=None -p:GenerateDocumentationFile=false -p:DebugSymbols=false -p:AssemblyVersion=${{ github.event.inputs.appVersion }} -p:FileVersion=${{ github.event.inputs.appVersion }}
    
+      - name: CUE4Parse-Natives (animation decompression)
+        run: |
+          cmake -S CUE4Parse/CUE4Parse-Natives -B natives-build -A x64
+          cmake --build natives-build --config Release
+          Copy-Item natives-build/Release/CUE4Parse-Natives.dll ./ValorantPorting/bin/Publish/
+
       - name: Blender ZIP File
         uses: papeloto/action-zip@v1
         with:
@@ -53,4 +59,7 @@ jobs:
           prerelease: false
           files: |
             ./ValorantPorting/bin/Publish/ValorantPorting.exe
+            ./ValorantPorting/bin/Publish/CUE4Parse-Natives.dll
             ValorantPortingBlender.zip
+            ValorantPortingBlenderOctane.zip
+            ./ValorantPortingBlender/valorant_psk_psa_b5.py
