@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.MappingsProvider;
+using CUE4Parse.MappingsProvider.Usmap;
 using CUE4Parse.UE4.AssetRegistry;
 using CUE4Parse.UE4.AssetRegistry.Objects;
 using CUE4Parse.UE4.Versions;
@@ -17,23 +18,9 @@ namespace ValorantPorting.ViewModels;
 
 public class CUE4ParseViewModel : ObservableObject
 {
-    public static readonly VersionContainer Version = new(EGame.GAME_UE5_3);
+    public static readonly VersionContainer Version = new(EGame.GAME_Valorant);
 
-    private static readonly string MappingsPath = FindMappingsFile();
-
-    // Update this URL whenever Valorant patches and the mappings go stale.
-    private const string MappingsDownloadUrl = "https://data.uedb.dev/mappings/68c7964faa9ff725d91c8302/VALORANT_13.02_zs.usmap";
-
-    private static string FindMappingsFile()
-    {
-        var mappingsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Mappings");
-        if (Directory.Exists(mappingsDir))
-        {
-            var usmapFiles = Directory.GetFiles(mappingsDir, "*.usmap");
-            if (usmapFiles.Length > 0) return usmapFiles[0];
-        }
-        return Path.Combine(mappingsDir, "VALORANT_13_00_zs.usmap");
-    }
+    private static readonly string MappingsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Mappings");
 
     public readonly List<FAssetData> AssetDataBuffers = new();
     public readonly ValorantPortingFileProvider Provider;
@@ -62,34 +49,21 @@ public class CUE4ParseViewModel : ObservableObject
     {
         if (Provider is null) return;
 
-        if (!File.Exists(MappingsPath))
+        var mappingsPath = UedbMappings.ResolveMappings(MappingsDir);
+        if (mappingsPath is null)
         {
-            AppLog.Information("Mappings file not found locally, downloading a copy from uedb.dev...");
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(MappingsPath)!);
-                using var mappingsHttpClient = new System.Net.Http.HttpClient();
-                var mappingsBytes = mappingsHttpClient.GetByteArrayAsync(MappingsDownloadUrl).GetAwaiter().GetResult();
-                File.WriteAllBytes(MappingsPath, mappingsBytes);
-                AppLog.Information("Mappings file downloaded successfully.");
-            }
-            catch (Exception ex)
-            {
-                AppLog.Warning($"Automatic Mappings download failed: {ex.Message}");
-            }
-        }
-
-        if (!File.Exists(MappingsPath))
-        {
-            AppLog.Warning(
-                $"Mappings file not found at \"{MappingsPath}\". UE5 Valorant assets will fail to parse without it.");
+            AppLog.Warning($"No mappings found in \"{MappingsDir}\" and none could be downloaded. Valorant assets will fail to parse without them.");
         }
         else
         {
-            Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(MappingsPath);
+            AppLog.Information($"Using mappings: {Path.GetFileName(mappingsPath)}");
+            Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(mappingsPath);
         }
 
-        var oodlePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CUE4Parse.Compression.OodleHelper.OODLE_DLL_NAME);
+        var oodlePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CUE4Parse.Compression.OodleHelper.OodleFileName);
+        var legacyOodlePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CUE4Parse.Compression.OodleHelper.OODLE_NAME_OLD);
+        if (!File.Exists(oodlePath) && File.Exists(legacyOodlePath))
+            oodlePath = legacyOodlePath; // reuse the Oodle DLL older versions of the app already downloaded
         if (!File.Exists(oodlePath))
         {
             AppLog.Information("Oodle DLL not found locally, downloading a known-good copy from GitHub...");
@@ -127,9 +101,7 @@ public class CUE4ParseViewModel : ObservableObject
 
     private async Task InitializeKeys()
     {
-        var keyResponse = AppSettings.Current.AesResponse;
-        var keyString = "0x4BE71AF2459CF83899EC9DC2CB60E22AC4B3047E0211034BBABE9D174C069DD6";
-        await Provider.SubmitKeyAsync(Globals.ZERO_GUID, new FAesKey(keyString));
+        await Provider.SubmitKeyAsync(Globals.ZERO_GUID, new FAesKey(UedbMappings.AesKey));
     }
 
 

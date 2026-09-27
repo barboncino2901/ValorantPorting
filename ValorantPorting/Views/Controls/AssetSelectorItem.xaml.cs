@@ -30,7 +30,7 @@ public partial class AssetSelectorItem : IExportableAsset
         TooltipName = $"{DisplayName} ({ID})";
         IsRandom = isRandomSelector;
 
-        var iconBitmap = previewTexture.Decode();
+        var iconBitmap = previewTexture.Decode()?.ToSkBitmap();
         if (iconBitmap is null) return;
         IconBitmap = iconBitmap;
 

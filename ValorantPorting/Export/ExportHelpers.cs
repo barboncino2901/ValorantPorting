@@ -5,7 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CUE4Parse_Conversion;
+using CUE4Parse_Conversion.Exporters;
 using CUE4Parse_Conversion.Meshes;
+using CUE4Parse_Conversion.Options;
 using CUE4Parse_Conversion.Textures;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Material;
@@ -26,15 +28,46 @@ public static class ExportHelpers
 {
     public static readonly List<Task> Tasks = new();
 
-    private static readonly ExporterOptions ExportOptions = new()
+    private static readonly ExportOptions ExportOptions = new(
+        meshFormat: EMeshFormat.ActorX,
+        meshQuality: EMeshQuality.Highest,
+        texturePlatform: ETexturePlatform.DesktopMobile,
+        textureFormat: ETextureFormat.Png,
+        exportMaterials: false,
+        exportMorphTargets: false);
+
+    // Exports a mesh with CUE4Parse's session API and saves it as "<name>_LOD0.psk/pskx",
+    // the file name the Blender add-on looks for.
+    private static void ExportMeshLod0(ExporterBase exporter, UObject obj)
     {
-        Platform = ETexturePlatform.DesktopMobile,
-        LodFormat = ELodFormat.AllLods,
-        MeshFormat = EMeshFormat.ActorX,
-        TextureFormat = ETextureFormat.Png,
-        ExportMorphTargets = false,
-        ExportMaterials = false
-    };
+        var results = new ExportSession { MaxDegreeOfParallelism = 1 }
+            .Add(exporter)
+            .RunAsync(App.AssetsFolder.FullName, ExportOptions)
+            .GetAwaiter().GetResult();
+
+        foreach (var result in results)
+        {
+            if (!result.Success)
+            {
+                AppLog.Warning($"Mesh export failed for {result.ObjectPath}: {result.Error?.Message}");
+                continue;
+            }
+
+            foreach (var file in result.DiskFilePaths ?? [])
+            {
+                var ext = Path.GetExtension(file).TrimStart('.').ToLower();
+                if (ext is not ("psk" or "pskx")) continue;
+                if (Path.GetFileNameWithoutExtension(file) != obj.Name) continue; // only the main (LOD0) file
+
+                var target = GetExportPath(obj, ext, "_LOD0");
+                if (File.Exists(target)) File.Delete(target);
+                File.Move(file, target);
+            }
+        }
+    }
+
+    private static bool Lod0Exists(UObject obj) =>
+        File.Exists(GetExportPath(obj, "psk", "_LOD0")) || File.Exists(GetExportPath(obj, "pskx", "_LOD0"));
     
     public static void GunBuddy(List<ExportPart> exportParts, UObject asset)
     {
@@ -542,7 +575,8 @@ public static class ExportHelpers
     public static int Mesh(USkeletalMesh? skeletalMesh, List<ExportPart> exportParts)
     {
         if (skeletalMesh is null) return -1;
-        if (!skeletalMesh.TryConvert(out var convertedMesh)) return -1;
+        if (!skeletalMesh.TryConvert(out var convertedMesh, EMeshQuality.Highest)) return -1;
+        using var convertedMeshScope = convertedMesh;
         if (convertedMesh.LODs.Count <= 0) return -1;
 
         var exportPart = new ExportPart();
@@ -550,13 +584,14 @@ public static class ExportHelpers
         exportPart.MeshName = skeletalMesh.Name + "_LOD0.ao";
         Save(skeletalMesh);
 
-        var sections = convertedMesh.LODs[0].Sections.Value;
+        var sections = convertedMesh.LODs[0].Sections;
         for (var idx = 0; idx < sections.Length; idx++)
         {
             var section = sections[idx];
-            if (section.Material is null) continue;
+            var sectionMaterial = convertedMesh.GetMaterial(section)?.Material;
+            if (sectionMaterial is null) continue;
 
-            if (!section.Material.TryLoad(out var material)) continue;
+            if (!sectionMaterial.TryLoad(out var material)) continue;
 
             var exportMaterial = new ExportMaterial
             {
@@ -583,21 +618,23 @@ public static class ExportHelpers
     public static int SMesh(UStaticMesh? staticMesh, List<ExportPart> exportParts)
     {
         if (staticMesh is null) return -1;
-        if (!staticMesh.TryConvert(out var convertedMesh)) return -1;
+        if (!staticMesh.TryConvert(out var convertedMesh, EMeshQuality.Highest)) return -1;
+        using var convertedMeshScope = convertedMesh;
         if (convertedMesh.LODs.Count <= 0) return -1;
         var exportPart = new ExportPart();
         exportPart.MeshPath = staticMesh.GetPathName();
         exportPart.MeshName = staticMesh.Name + "_LOD0.mo";
         Save(staticMesh);
 
-        var sections = convertedMesh.LODs[0].Sections.Value;
+        var sections = convertedMesh.LODs[0].Sections;
         for (var idx = 0; idx < sections.Length; idx++)
         {
             var section = sections[idx];
-            if (section.Material is null) continue;
+            var sectionMaterial = convertedMesh.GetMaterial(section)?.Material;
+            if (sectionMaterial is null) continue;
 
 
-            if (!section.Material.TryLoad(out var material)) continue;
+            if (!sectionMaterial.TryLoad(out var material)) continue;
 
             var exportMaterial = new ExportMaterial
             {
@@ -696,7 +733,7 @@ public static class ExportHelpers
             vectors.Add(new VectorParameter(parameter.ParameterInfo.Name.PlainText, parameter.ParameterValue.Value));
         }
 
-        if (materialInstance.Parent != null && materialInstance.Parent is UMaterialInstanceConstant parent)
+        if (materialInstance.Parent != null && materialInstance.Parent.TryLoad(out var parentExport) && parentExport is UMaterialInstanceConstant parent)
             ParentMaterialInstanceParameters(parent, textures, scalars, vectors);
     }
 
@@ -710,23 +747,15 @@ public static class ExportHelpers
                 {
                     case USkeletalMesh skeletalMesh:
                     {
-                        var path = GetExportPath(obj, "psk");
-                        if (File.Exists(path)) return;
-
-                        var exporter = new MeshExporter(skeletalMesh, ExportOptions);
-                        string SavedFilePath;
-                        exporter.TryWriteToDir(App.AssetsFolder, out _, out SavedFilePath);
+                        if (Lod0Exists(obj)) return;
+                        ExportMeshLod0(new SkinnedAssetExporter(skeletalMesh), obj);
                         break;
                     }
 
                     case UStaticMesh staticMesh:
                     {
-                        var path = GetExportPath(obj, "pskx");
-                        if (File.Exists(path)) return;
-
-                        var exporter = new MeshExporter(staticMesh, ExportOptions);
-                        string SavedFilePath;
-                        exporter.TryWriteToDir(App.AssetsFolder, out _, out SavedFilePath);
+                        if (Lod0Exists(obj)) return;
+                        ExportMeshLod0(new StaticMeshExporter(staticMesh), obj);
                         break;
                     }
                     case UTexture2D texture:
@@ -735,11 +764,10 @@ public static class ExportHelpers
                         if (File.Exists(path)) return;
                         Directory.CreateDirectory(path.Replace('\\', '/').SubstringBeforeLast('/'));
 
-                        using var bitmap = texture.Decode(texture.GetFirstMip());
-                        using var data = bitmap?.Encode(SKEncodedImageFormat.Png, 100);
-
-                        if (data is null) return;
-                        File.WriteAllBytes(path, data.ToArray());
+                        var decoded = texture.Decode(ETexturePlatform.DesktopMobile);
+                        if (decoded is null) return;
+                        var data = decoded.Encode(ETextureFormat.Png, false, out _);
+                        File.WriteAllBytes(path, data);
                         break;
                     }
                 }
