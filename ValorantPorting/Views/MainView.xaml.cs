@@ -90,15 +90,16 @@ public partial class MainView
 
     private static void ApplySearchFilter(ListBox listBox, string text)
     {
-        listBox.Items.Filter = string.IsNullOrWhiteSpace(text)
-            ? null
-            : o => o switch
-            {
-                AssetSelectorItem asset => asset.Match(text),
-                AnimationItem animation => animation.Match(text),
-                _ => true
-            };
+        var hasText = !string.IsNullOrWhiteSpace(text);
+        listBox.Items.Filter = o => o switch
+        {
+            AssetSelectorItem asset => !hasText || asset.Match(text),
+            AnimationItem animation => (!hasText || animation.Match(text)) && AppVM.MainVM.MatchesAnimationContext(animation),
+            _ => true
+        };
     }
+
+    private void OnAnimationFilterToggled(object sender, RoutedEventArgs e) => ApplySearchFilter(AnimationList, SearchText);
 
     private void OnAnimationDoubleClick(object sender, MouseButtonEventArgs e)
     {

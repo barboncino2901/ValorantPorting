@@ -116,10 +116,15 @@
                         </TabItem.Header>
                         <Grid>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <ListBox Grid.Row="0" x:Name="AnimationList" ItemsSource="{Binding Animations}"
+                            <CheckBox Grid.Row="0" Margin="{adonisUi:Space 1}" IsChecked="{Binding AnimationFilterEnabled, Mode=TwoWay}"
+                                      Content="{Binding AnimationFilterLabel}" Visibility="{Binding AnimationFilterVisibility}"
+                                      Click="OnAnimationFilterToggled"
+                                      ToolTip="Filters the list to animations that fit the last agent or weapon you sent to Blender. Untick to show everything." />
+                            <ListBox Grid.Row="1" x:Name="AnimationList" ItemsSource="{Binding Animations}"
                                      SelectedItem="{Binding SelectedAnimation, Mode=TwoWay}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                      MouseDoubleClick="OnAnimationDoubleClick">
@@ -132,7 +137,7 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                            <DockPanel Grid.Row="1" Margin="{adonisUi:Space 1}">
+                            <DockPanel Grid.Row="2" Margin="{adonisUi:Space 1}">
                                 <Button DockPanel.Dock="Right" Command="{Binding ExportAnimationBlenderCommand}">
                                     <StackPanel Orientation="Horizontal">
                                         <Image Source="/ValorantPorting;component/Resources/Blender.png"

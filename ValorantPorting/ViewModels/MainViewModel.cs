@@ -47,6 +47,14 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private AnimationItem? selectedAnimation;
     private bool animationsLoaded;
 
+    // Animations tab filter: follows the last agent/weapon sent to Blender.
+    [ObservableProperty] private bool animationFilterEnabled = true;
+    [ObservableProperty] private string animationFilterLabel = "";
+    [ObservableProperty] private Visibility animationFilterVisibility = Visibility.Collapsed;
+    private string? animationContextFolder;
+    private string[] animationContextPrefixes = [];
+    private bool animationContextIsAgent;
+
     public ImageSource StyleImage => currentAsset?.FullSource;
     public Visibility StyleVisibility => currentAsset is null ? Visibility.Collapsed : Visibility.Visible;
 
@@ -153,6 +161,7 @@ public partial class MainViewModel : ObservableObject
         }
 
         data.Name = currentAsset.DisplayName;
+        SetAnimationContext(CurrentAssetType, currentAsset);
         var reorient = CurrentAssetType != EAssetType.Weapon;
         BlenderService.Send(data, new BlenderExportSettings
         {
@@ -161,6 +170,57 @@ public partial class MainViewModel : ObservableObject
         loadTimez.Stop();
         AppLog.Information(
             $"Finished exporting {data.Name} to BLENDER in {Math.Round(loadTimez.Elapsed.TotalSeconds, 3)}s");
+    }
+
+    // Remembers what was last sent to Blender so the Animations tab only lists animations that fit it:
+    // agents get their own + shared body animations (TP_/FP_/CS_), weapons get their gun's animations (GN_/EQ_).
+    public void SetAnimationContext(EAssetType type, IExportableAsset asset)
+    {
+        var package = asset.MainAsset?.Owner?.Name ?? string.Empty;
+        if (package.StartsWith("/Game/")) package = package["/Game/".Length..];
+        var folder = package.Contains('/') ? package[..package.LastIndexOf('/')] : package;
+
+        switch (type)
+        {
+            case EAssetType.Character:
+                animationContextFolder = folder + "/";
+                animationContextPrefixes = ["TP_", "FP_", "CS_"];
+                animationContextIsAgent = true;
+                break;
+            case EAssetType.Weapon:
+                // Animations for a gun and all its skins live under Equippables/Guns/<category>/<gun>/
+                // (skins are usually in a subfolder of that, but not always, e.g. the standard Bandit).
+                var segments = folder.Split('/');
+                var isMelee = segments.Length >= 2 && segments[1].Equals("Melee", StringComparison.OrdinalIgnoreCase);
+                var gunFolder = isMelee
+                    ? string.Join('/', segments.Take(2))
+                    : string.Join('/', segments.Take(Math.Min(4, segments.Length)));
+                animationContextFolder = gunFolder + "/";
+                animationContextPrefixes = isMelee ? ["EQ_", "GN_"] : ["GN_"];
+                animationContextIsAgent = false;
+                break;
+            default:
+                animationContextFolder = null;
+                break;
+        }
+
+        AnimationFilterLabel = animationContextFolder is null ? string.Empty : $"Only animations for: {asset.DisplayName}";
+        AnimationFilterVisibility = animationContextFolder is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    public bool MatchesAnimationContext(AnimationItem item)
+    {
+        if (!AnimationFilterEnabled || animationContextFolder is null) return true;
+        if (!animationContextPrefixes.Any(p => item.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase))) return false;
+
+        var folder = item.Folder + "/";
+        if (folder.StartsWith(animationContextFolder, StringComparison.OrdinalIgnoreCase)) return true;
+
+        // Shared agent animations (e.g. TP_Core_AK_* in weapon folders), but not other agents' own animations.
+        return animationContextIsAgent &&
+               item.Name.Contains("_Core_", StringComparison.OrdinalIgnoreCase) &&
+               (!folder.StartsWith("Characters/", StringComparison.OrdinalIgnoreCase) ||
+                folder.StartsWith("Characters/_", StringComparison.OrdinalIgnoreCase));
     }
 
     // Lists every animation sequence in the game from the asset registry (once).
