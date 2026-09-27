@@ -177,7 +177,16 @@ public static class ExportHelpers
 
         //attachment (scope & silencer)
         var usedSockets = new HashSet<string>();
-        if (mainAsset.TryGetValue(out UScriptMap attachmentOverrides, "AttachmentOverrides"))
+        mainAsset.TryGetValue(out UScriptMap attachmentOverrides, "AttachmentOverrides");
+        var forcedAttachments = GetForcedAttachments(attachmentOverrides);
+        if (forcedAttachments.Count > 0)
+        {
+            // Guns with default attachments (e.g. the Warden's ACOG scope): the skin's AttachmentOverrides replace
+            // those specific attachments; entries for other attachments (like the generic ACOG) don't apply.
+            foreach (var (socket, mesh, materials) in forcedAttachments)
+                AddAttachment(socket, mesh, materials);
+        }
+        else if (attachmentOverrides is not null)
         {
             var attachmentTuple = GetWeaponAttatchments(attachmentOverrides);
             for (var i = 0; i < attachmentTuple.Item2.Length; i++)
@@ -192,13 +201,6 @@ public static class ExportHelpers
 
                 AddAttachment(attachmentTuple.Item1[i], attachmentTuple.Item2[i], attachmentTuple.Item3[i]);
             }
-        }
-
-        // The gun's own default attachments (e.g. the Guardian's ACOG scope) for skins that don't replace them.
-        foreach (var (socket, mesh, materials) in GetForcedAttachments())
-        {
-            if (usedSockets.Contains(socket)) continue;
-            AddAttachment(socket, mesh, materials);
         }
 
         void AddAttachment(string socket, USkeletalMesh mesh, UMaterialInstanceConstant[]? materials)
@@ -242,9 +244,11 @@ public static class ExportHelpers
         }
     }
 
-    // Attachments a gun always carries unless the skin replaces them: its primary asset lists them as
-    // "ForcedAttachments" (attachment primary asset -> "Attachment" blueprint with the mesh and materials).
-    private static List<(string Socket, USkeletalMesh Mesh, UMaterialInstanceConstant[]? Materials)> GetForcedAttachments()
+    // Attachments a gun always carries (its primary asset's "ForcedAttachments", e.g. the Warden's ACOG scope),
+    // each replaced by the skin's version when its AttachmentOverrides map that attachment to another one.
+    // Attachment primary asset -> "Attachment" blueprint -> mesh + materials (possibly inherited from a parent).
+    private static List<(string Socket, USkeletalMesh Mesh, UMaterialInstanceConstant[]? Materials)> GetForcedAttachments(
+        UScriptMap? overrides)
     {
         var found = new List<(string, USkeletalMesh, UMaterialInstanceConstant[]?)>();
         try
@@ -254,12 +258,23 @@ public static class ExportHelpers
             var gunDefaults = gunPrimary.ClassDefaultObject.Load();
             if (gunDefaults is null || !gunDefaults.TryGetValue(out FSoftObjectPath[] forced, "ForcedAttachments")) return found;
 
+            // skin overrides: replaced attachment class -> replacement class
+            var replacements = new Dictionary<string, FSoftObjectPath>(StringComparer.OrdinalIgnoreCase);
+            if (overrides is not null)
+            foreach (var entry in overrides.Properties)
+            {
+                if (entry.Value?.GenericValue is FSoftObjectPath replacement && SoftPathText(entry.Key.GenericValue) is { } key)
+                    replacements[key] = replacement;
+            }
+
             foreach (var forcedPath in forced)
             {
                 if (!forcedPath.TryLoad(out UBlueprintGeneratedClass attachmentPrimary)) continue;
                 var primaryDefaults = attachmentPrimary.ClassDefaultObject.Load();
-                if (primaryDefaults is null || !primaryDefaults.TryGetValue(out FSoftObjectPath attachmentPath, "Attachment") ||
-                    !attachmentPath.TryLoad(out UBlueprintGeneratedClass attachmentClass)) continue;
+                if (primaryDefaults is null || !primaryDefaults.TryGetValue(out FSoftObjectPath attachmentPath, "Attachment")) continue;
+
+                var chosen = replacements.TryGetValue(attachmentPath.AssetPathName.Text, out var skinVersion) ? skinVersion : attachmentPath;
+                if (!chosen.TryLoad(out UBlueprintGeneratedClass attachmentClass)) continue;
                 var attachment = attachmentClass.ClassDefaultObject.Load();
                 if (attachment is null) continue;
 
@@ -267,9 +282,8 @@ public static class ExportHelpers
                 foreach (var (meshName, materialsName, socket) in new[]
                          { ("1pReflexMesh", "MaterialOverrides", "Reflex"), ("1p Mesh", "3p MaterialOverrides", "Barrel") })
                 {
-                    if (!attachment.TryGetValue(out USkeletalMesh mesh, meshName) || mesh is null) continue;
-                    attachment.TryGetValue(out UMaterialInstanceConstant[] materials, materialsName);
-                    found.Add((socket, mesh, materials));
+                    if (GetInherited<USkeletalMesh>(attachment, meshName) is not { } mesh) continue;
+                    found.Add((socket, mesh, GetInherited<UMaterialInstanceConstant[]>(attachment, materialsName)));
                     break;
                 }
             }
@@ -280,6 +294,25 @@ public static class ExportHelpers
         }
 
         return found;
+    }
+
+    private static string? SoftPathText(object? value) => value switch
+    {
+        FSoftObjectPath path => path.AssetPathName.Text,
+        null => null,
+        _ => value.ToString()
+    };
+
+    // A property from a blueprint default object or, if it isn't set there, from the blueprint it's based on
+    // (e.g. a skin's scope that only changes materials keeps its parent scope's mesh).
+    private static T? GetInherited<T>(UObject obj, string name)
+    {
+        for (var current = obj; current is not null; current = current.Template?.Load())
+        {
+            if (current.TryGetValue(out T value, name) && value is not null) return value;
+        }
+
+        return default;
     }
     
     public static UObject? HandleStyle(UObject style)
@@ -501,8 +534,8 @@ public static class ExportHelpers
             for (var i = 0; i < currentAttatchList.Count; i++)
             {
                 var currentAttach = currentAttatchList[i];
-                classDefaultObject.TryGetValue(out USkeletalMesh localMesh, currentAttach[0]);
-                classDefaultObject.TryGetValue(out UMaterialInstanceConstant[] localmat, currentAttach[1]);
+                var localMesh = GetInherited<USkeletalMesh>(classDefaultObject, currentAttach[0]);
+                var localmat = GetInherited<UMaterialInstanceConstant[]>(classDefaultObject, currentAttach[1]);
                 if (localMesh == null) continue;
                 fullSockets[i] = currentAttach[2];
                 meshes[i] = localMesh;
