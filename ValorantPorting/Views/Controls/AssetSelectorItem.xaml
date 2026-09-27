@@ -16,7 +16,7 @@
                 </StackPanel>
             </ToolTip>
         </StackPanel.ToolTip>
-        <Image x:Name="DisplayImage" Width="64" Height="64" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+        <Image x:Name="DisplayImage" Width="64" Height="64" RenderOptions.BitmapScalingMode="HighQuality" />
         <TextBlock Text="{Binding DisplayName, RelativeSource={RelativeSource AncestorType=local:AssetSelectorItem}}"
                    VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="WordEllipsis" />
     </StackPanel>

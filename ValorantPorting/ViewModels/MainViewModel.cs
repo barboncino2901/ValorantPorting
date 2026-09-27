@@ -350,13 +350,24 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var timer = Stopwatch.StartNew();
-        var psaPath = await Task.Run(() => AnimationExport.ExportPsa(item));
-        if (psaPath is null) return;
+        if (animationExportRunning) return; // ignore double-click spam while an export is running
+        animationExportRunning = true;
+        try
+        {
+            var timer = Stopwatch.StartNew();
+            var psaPath = await Task.Run(() => AnimationExport.ExportPsa(item));
+            if (psaPath is null) return;
 
-        BlenderService.SendAnimation(item.Name, psaPath);
-        AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
+            BlenderService.SendAnimation(item.Name, psaPath);
+            AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
+        }
+        finally
+        {
+            animationExportRunning = false;
+        }
     }
+
+    private bool animationExportRunning;
 
     [RelayCommand]
     public async Task ExportUnreal()

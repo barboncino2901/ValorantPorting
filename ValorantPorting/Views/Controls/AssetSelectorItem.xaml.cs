@@ -12,8 +12,7 @@ namespace ValorantPorting.Views.Controls;
 public partial class AssetSelectorItem : IExportableAsset
 {
     private const int MARGIN = 2;
-    public SKBitmap FullBitmap;
-    public SKBitmap IconBitmap;
+    private const int THUMBNAIL_SIZE = 128; // tiles are 64px, the details panel 88px; 128 stays sharp on high-DPI screens
 
     public AssetSelectorItem(UObject asset, UObject UIasset, UObject MainDataAsset, UTexture2D previewTexture,
         bool isRandomSelector = false)
@@ -30,23 +29,33 @@ public partial class AssetSelectorItem : IExportableAsset
         TooltipName = $"{DisplayName} ({ID})";
         IsRandom = isRandomSelector;
 
-        var iconBitmap = previewTexture.Decode()?.ToSkBitmap();
+        using var iconBitmap = previewTexture.Decode()?.ToSkBitmap();
         if (iconBitmap is null) return;
-        IconBitmap = iconBitmap;
 
-        FullBitmap = new SKBitmap(iconBitmap.Width, iconBitmap.Height, iconBitmap.ColorType, iconBitmap.AlphaType);
-        using (var fullCanvas = new SKCanvas(FullBitmap))
-        {
-            fullCanvas.DrawBitmap(iconBitmap, 0, 0);
-        }
-
-        FullSource = new BitmapImage { CacheOption = BitmapCacheOption.OnDemand };
-        FullSource.BeginInit();
-        FullSource.StreamSource = FullBitmap.Encode(SKEncodedImageFormat.Png, 100).AsStream();
-        FullSource.EndInit();
-
+        FullSource = CreateThumbnail(iconBitmap);
         DisplayImage.Source = FullSource;
         //BeginAnimation(OpacityProperty, AppearAnimation);
+    }
+
+    // Downscales the icon and returns a frozen WPF image that owns no Skia memory.
+    private static BitmapImage CreateThumbnail(SKBitmap source)
+    {
+        var scale = Math.Min(1.0, (double) THUMBNAIL_SIZE / Math.Max(source.Width, source.Height));
+        var width = Math.Max(1, (int) Math.Round(source.Width * scale));
+        var height = Math.Max(1, (int) Math.Round(source.Height * scale));
+
+        using var resized = scale < 1.0
+            ? source.Resize(new SKImageInfo(width, height, source.ColorType, source.AlphaType), SKFilterQuality.High)
+            : source.Copy();
+        using var png = resized.Encode(SKEncodedImageFormat.Png, 100);
+
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = png.AsStream();
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     public UObject UIAsset { get; set; }

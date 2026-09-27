@@ -44,6 +44,7 @@ public class ExportData
         });
 
         await Task.WhenAll(ExportHelpers.Tasks);
+        ExportHelpers.Tasks.Clear();
         return data;
     }
 }

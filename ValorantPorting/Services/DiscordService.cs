@@ -33,7 +33,7 @@ public static class DiscordService
 
         Client = new DiscordRpcClient(ID);
         Client.OnReady += (_, args) =>
-            Log.Information("Discord Service Started for {0}#{1}", args.User.Username, args.User.Discriminator);
+            Log.Information("Discord Service Started");
         Client.OnError += (_, args) =>
             Log.Information("Discord Service Error {0}: {1}", args.Type.ToString(), args.Message);
 
