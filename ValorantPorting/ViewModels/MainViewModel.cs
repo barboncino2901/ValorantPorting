@@ -316,10 +316,6 @@ public partial class MainViewModel : ObservableObject
         {
             // Valorant's shipped asset registry leaves animations out, so fall back to the file list:
             // every package inside a folder whose path mentions "anim".
-            var topClasses = registry.GroupBy(a => a.AssetClass.Text).OrderByDescending(g => g.Count()).Take(15)
-                .Select(g => $"{g.Key}={g.Count()}");
-            AppLog.Information($"[Diag] Asset registry classes: {string.Join(", ", topClasses)}");
-
             items = AppVM.CUE4ParseVM.Provider.Files.Keys
                 .Where(p => p.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) &&
                             p.Contains("/anim", StringComparison.OrdinalIgnoreCase))
@@ -330,11 +326,6 @@ public partial class MainViewModel : ObservableObject
                     return new AnimationItem(package, name);
                 })
                 .ToList();
-
-            var prefixes = items.GroupBy(i => i.Name.Split('_')[0]).OrderByDescending(g => g.Count()).Take(20)
-                .Select(g => $"{g.Key}={g.Count()}");
-            AppLog.Information($"[Diag] Files in anim folders: {items.Count}. Name prefixes: {string.Join(", ", prefixes)}");
-            AppLog.Information($"[Diag] Samples: {string.Join(" | ", items.Where((_, i) => i % Math.Max(1, items.Count / 12) == 0).Take(12).Select(i => i.Folder + "/" + i.Name))}");
         }
 
         items = items
