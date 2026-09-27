@@ -6,6 +6,7 @@ import socket
 import threading
 import re
 import traceback
+import time
 import bpy
 import os
 import bpy.props
@@ -17,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 5, 3),
+    "version": (1, 5, 4),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -511,20 +512,24 @@ def _hidden_material():
 def remove_helper_objects(objects):
     """Deletes imported objects whose materials are all editor helpers (they show up as white/grid shapes); on objects
     that mix helpers with real materials, only the helper parts are made invisible."""
-    removed = hidden = 0
+    hidden = 0
+    doomed = []
     for obj in list(objects):
         if obj.type != 'MESH':
             continue
         helpers = [HELPER_MATERIALS.match(re.sub(r"\.\d{3}$", "", slot.material.name)) is not None if slot.material else False
                    for slot in obj.material_slots]
         if helpers and all(helpers):
-            bpy.data.objects.remove(obj, do_unlink=True)
-            removed += 1
+            doomed.append(obj)
         elif True in helpers:  # (this module defines its own any())
             for slot, helper in zip(obj.material_slots, helpers):
                 if helper:
                     slot.material = _hidden_material()
             hidden += 1
+    meshes = {obj.data for obj in doomed if obj.data is not None}
+    bpy.data.batch_remove(doomed)  # one batch: removing objects one by one is very slow in big scenes
+    bpy.data.batch_remove([mesh for mesh in meshes if mesh.users == 0])
+    removed = len(doomed)
     Log.information(f"Removed {removed} editor helper objects (blockout grids, light shafts), hid helper parts of {hidden}")
 
 
@@ -547,8 +552,8 @@ def setup_map_lighting(objects, map_name):
             obj.visible_shadow = False
             obj.visible_diffuse = False
             obj.visible_glossy = False
-    for light in lights:  # local UE lights only add to the baked lighting; their units don't match Blender's
-        bpy.data.objects.remove(light, do_unlink=True)
+    # local UE lights only add to the baked lighting; their units don't match Blender's
+    bpy.data.batch_remove(lights)
 
     scene = bpy.context.scene
     if suns:
@@ -582,21 +587,78 @@ MAP_SKY_COLOR = (0.62, 0.72, 0.88, 1.0)
 MAP_SKY_STRENGTH = 0.8
 
 
+def share_identical_meshes(objects):
+    """The USD import gives every placed copy of an asset its own mesh data. Copies with identical geometry, materials
+    and vertex colors now share one mesh (like linked duplicates): same look, far less memory."""
+    import numpy
+    first = {}
+    replaced = []
+    for obj in objects:
+        if obj.type != 'MESH' or obj.data is None or obj.data.users > 1:
+            continue
+        mesh = obj.data
+        if len(mesh.vertices) == 0 or mesh.shape_keys is not None:
+            continue
+        coords = numpy.empty(len(mesh.vertices) * 3, dtype=numpy.float32)
+        mesh.vertices.foreach_get("co", coords)
+        corners = numpy.empty(len(mesh.loops), dtype=numpy.int32)
+        mesh.loops.foreach_get("vertex_index", corners)
+        slots = numpy.empty(len(mesh.polygons), dtype=numpy.int32)
+        mesh.polygons.foreach_get("material_index", slots)
+        parts = [len(mesh.vertices), len(mesh.polygons), len(mesh.loops), coords.tobytes(), corners.tobytes(),
+                 slots.tobytes(), tuple(m.name if m else "" for m in mesh.materials)]
+        for layer in mesh.uv_layers:  # same shape can be textured differently
+            uvs = numpy.empty(len(mesh.loops) * 2, dtype=numpy.float32)
+            layer.data.foreach_get("uv", uvs)
+            parts.append((layer.name, uvs.tobytes()))
+        for name in ("displayColor", "displayOpacity"):  # painted colors differ per placed copy
+            attribute = mesh.attributes.get(name)
+            if attribute is not None:
+                size = 4 if attribute.data_type in ('FLOAT_COLOR', 'BYTE_COLOR') else 1
+                values = numpy.empty(len(attribute.data) * size, dtype=numpy.float32)
+                attribute.data.foreach_get("color" if size == 4 else "value", values)
+                parts.append((name, attribute.domain, values.tobytes()))
+        key = hash(tuple(parts))
+        original = first.get(key)
+        if original is None:
+            first[key] = mesh
+        else:
+            obj.data = original
+            replaced.append(mesh)
+    unused = [m for m in replaced if m.users == 0]
+    bpy.data.batch_remove(unused)
+    return len(unused)
+
+
 def import_map(data, assets_root=""):
     name = data.get("Name")
     path = data.get("MapPath")
     Log.information(f"Importing map {name} from {path}")
     options = dict(filepath=path, import_usd_preview=True, support_scene_instancing=True, import_visible_only=True,
                    create_collection=True, import_lights=True, import_cameras=False, set_frame_range=False,
-                   read_mesh_colors=True, apply_unit_conversion_scale=True)
+                   read_mesh_colors=True, apply_unit_conversion_scale=True,
+                   # one Blender material per Valorant material instead of a copy per mesh
+                   mtl_name_collision_mode='REFERENCE_EXISTING',
+                   # collision/trigger shapes are never visible in game
+                   import_shapes=False, create_world_material=False)
     materials_before = set(bpy.data.materials)
     objects_before = set(bpy.data.objects)
+    timings = []
+    clock = time.perf_counter()
+
+    def step(label):
+        nonlocal clock
+        now = time.perf_counter()
+        timings.append(f"{label} {now - clock:.1f}s")
+        clock = now
+
     window_manager = bpy.context.window_manager
     if window_manager.windows:
         with bpy.context.temp_override(window=window_manager.windows[0]):
             bpy.ops.wm.usd_import(**options)
     else:
         bpy.ops.wm.usd_import(**options)
+    step("USD read")
 
     summary = {}
     materials_path = data.get("MaterialsPath")
@@ -605,13 +667,22 @@ def import_map(data, assets_root=""):
             summary = json.load(file)
     remove_helper_objects([o for o in bpy.data.objects if o not in objects_before])
     new_objects = [o for o in bpy.data.objects if o not in objects_before]
+    step("helpers")
     new_materials = merge_duplicate_materials([m for m in bpy.data.materials if m not in materials_before], new_objects)
+    step("merge materials")
+    shared = share_identical_meshes(new_objects)
+    Log.information(f"Shared mesh data: {shared} duplicate meshes removed")
+    step("share meshes")
     base, blend, kept = rebuild_materials(new_materials, summary, assets_root)
     Log.information(f"Valorant shaders: {base} base, {blend} two-layer blend, {kept} kept as imported")
+    step("shaders")
     fix_valorant_materials(new_materials, summary)  # fallback fixes for materials that weren't rebuilt
-    add_default_vertex_colors([o for o in bpy.data.objects if o not in objects_before])
-    setup_map_lighting([o for o in bpy.data.objects if o not in objects_before], name)
-    Log.information(f"Imported map {name}")
+    step("fallback fixes")
+    add_default_vertex_colors(new_objects)
+    step("vertex colors")
+    setup_map_lighting(new_objects, name)
+    step("lighting")
+    Log.information(f"Imported map {name} ({', '.join(timings)})")
 
 
 def import_response(response):

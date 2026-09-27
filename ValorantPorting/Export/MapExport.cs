@@ -45,7 +45,9 @@ public static class MapExport
 
         var session = new ExportSession(SelectSubLevels)
         {
-            MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2)
+            MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2),
+            // textures exported since the last game update are reused (decoding them is most of the export time)
+            ReuseTexturesWrittenAfter = LastGameUpdate()
         };
         session.Add(world);
 
@@ -80,6 +82,21 @@ public static class MapExport
         }
 
         return (worldFile, WriteMaterialSummary(results, worldFile));
+    }
+
+    // When the installed game files last changed (newest archive); null if unknown, which disables texture reuse.
+    private static DateTime? LastGameUpdate()
+    {
+        try
+        {
+            var paks = AppSettings.Current.ArchivePath;
+            if (string.IsNullOrEmpty(paks) || !Directory.Exists(paks)) return null;
+            return new DirectoryInfo(paks).EnumerateFiles("*", SearchOption.AllDirectories).Max(f => f.LastWriteTimeUtc);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     // Everything the Blender add-on needs to rebuild Valorant's shaders, per exported material: its parent chain

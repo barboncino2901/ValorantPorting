@@ -356,12 +356,13 @@ public static class ExportHelpers
                             }
                         }
 
-                        System.IO.File.AppendAllText(logPath, sb.ToString() + "\n");
+                        if (WriteDiagnosticLogs) System.IO.File.AppendAllText(logPath, sb.ToString() + "\n");
                     }
                     catch (Exception ex)
                     {
                         try
                         {
+                            if (!WriteDiagnosticLogs) throw;
                             System.IO.Directory.CreateDirectory(logDir);
                             System.IO.File.AppendAllText(logPath, $"--- {DateTime.Now:HH:mm:ss} --- EXCEPTION: {ex}\n\n");
                         }
@@ -459,8 +460,13 @@ public static class ExportHelpers
         return Tuple.Create(fullSockets, meshes, fullOverrideMaterials, paramNames);
     }
 
+    // Debug dumps from the silencer/bone-check fixes (logs\*_diagnostics.log). Off, so the files don't grow on every
+    // gun export; set to true when debugging those fixes.
+    private const bool WriteDiagnosticLogs = false;
+
     private static void LogSilencerDiagnostic(string line)
     {
+        if (!WriteDiagnosticLogs) return;
         try
         {
             var logDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
