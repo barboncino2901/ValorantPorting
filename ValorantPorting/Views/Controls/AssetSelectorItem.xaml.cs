@@ -6,6 +6,7 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.i18N;
 using SkiaSharp;
+using ValorantPorting.ViewModels;
 
 namespace ValorantPorting.Views.Controls;
 
@@ -14,17 +15,20 @@ public partial class AssetSelectorItem : IExportableAsset
     private const int MARGIN = 2;
     private const int THUMBNAIL_SIZE = 128; // tiles are 64px, the details panel 88px; 128 stays sharp on high-DPI screens
 
-    public AssetSelectorItem(UObject asset, UObject UIasset, UObject MainDataAsset, UTexture2D previewTexture,
-        bool isRandomSelector = false)
+    private readonly Func<AssetHandlerData.ResolvedAsset?> resolver;
+    private AssetHandlerData.ResolvedAsset? resolved;
+
+    // uiAsset is only read here (name/description); the tile keeps its path and resolves the game objects when needed.
+    public AssetSelectorItem(string packagePath, UObject uiAsset, UTexture2D previewTexture, bool isRandomSelector,
+        Func<AssetHandlerData.ResolvedAsset?> resolver)
     {
         InitializeComponent();
         DataContext = this;
-        UIAsset = UIasset;
-        Asset = asset;
-        MainAsset = MainDataAsset;
-        DisplayName = UIAsset.GetOrDefault("DisplayName", new FText("")).Text;
-        Description = UIAsset.GetOrDefault("Description", new FText("")).Text;
-        ID = UIAsset.Name;
+        this.resolver = resolver;
+        PackagePath = packagePath;
+        DisplayName = uiAsset.GetOrDefault("DisplayName", new FText("")).Text;
+        Description = uiAsset.GetOrDefault("Description", new FText("")).Text;
+        ID = uiAsset.Name;
 
         TooltipName = $"{DisplayName} ({ID})";
         IsRandom = isRandomSelector;
@@ -58,10 +62,16 @@ public partial class AssetSelectorItem : IExportableAsset
         return image;
     }
 
-    public UObject UIAsset { get; set; }
-    public UObject MainAsset { get; set; }
+    private AssetHandlerData.ResolvedAsset? Resolved => resolved ??= resolver();
+
+    // Frees the game objects again (called when another tile gets selected).
+    public void ReleaseGameData() => resolved = null;
+
+    public string PackagePath { get; }
+    public UObject UIAsset { get => Resolved?.UiAsset ?? new UObject(); set { } }
+    public UObject MainAsset { get => Resolved?.MainAsset ?? new UObject(); set { } }
     public BitmapImage FullSource { get; set; }
-    public UObject Asset { get; set; }
+    public UObject Asset { get => Resolved?.Asset ?? new UObject(); set { } }
     public bool IsRandom { get; set; }
     public string DisplayName { get; set; }
     public EAssetType aType { get; set; }

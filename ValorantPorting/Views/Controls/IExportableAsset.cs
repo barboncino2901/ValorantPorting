@@ -5,6 +5,7 @@ namespace ValorantPorting.Views.Controls;
 
 public interface IExportableAsset
 {
+    public string PackagePath { get; }
     public UObject UIAsset { get; set; }
     public UObject MainAsset { get; set; }
     public BitmapImage FullSource { get; set; }

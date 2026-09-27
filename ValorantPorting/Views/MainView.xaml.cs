@@ -113,6 +113,8 @@ public partial class MainView
         if (listBox.SelectedItem is null) return;
         var selected = (AssetSelectorItem)listBox.SelectedItem;
 
+        if (AppVM.MainVM.CurrentAsset is AssetSelectorItem previous && !ReferenceEquals(previous, selected))
+            previous.ReleaseGameData();
         AppVM.MainVM.CurrentAsset = selected;
         AppVM.MainVM.Styles.Clear();
         var chromas = selected.MainAsset.GetOrDefault("Chromas", Array.Empty<UObject>());

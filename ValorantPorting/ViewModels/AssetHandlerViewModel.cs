@@ -152,15 +152,18 @@ public class AssetHandlerData
         return uiObject?.ClassDefaultObject?.Load();
     }
 
-    private async Task DoLoad(FAssetData data, bool random = false)
+    // The game objects behind one item (agent / skin / buddy). Tiles don't keep these (they are large: ~11 MB per
+    // agent); they are resolved again from the item's path when the tile is clicked.
+    public record ResolvedAsset(UObject Asset, UObject UiAsset, UObject? LevelUiAsset, UObject MainAsset);
+
+    private ResolvedAsset? Resolve(string firstTag, bool log)
     {
-        await PauseState.WaitIfPaused();
-        var actualAsset = new UObject();
-        var uiAsset = new UObject();
-        var firstTag = data.ObjectPath;
+        void Warn(string message)
+        {
+            if (log) AppLog.Warning(message);
+        }
 
-        if (firstTag.Contains("NPE") || firstTag.Contains("Random")) return;
-
+        UObject actualAsset;
         try
         {
             actualAsset = AppVM.CUE4ParseVM.Provider.LoadPackageObject(firstTag);
@@ -173,33 +176,34 @@ public class AssetHandlerData
             }
             catch (Exception ex2)
             {
-                AppLog.Warning($"[{AssetType}] LoadPackageObject failed even with _C fallback for: {firstTag}\n{ex2}");
-                return;
+                Warn($"[{AssetType}] LoadPackageObject failed even with _C fallback for: {firstTag}\n{ex2}");
+                return null;
             }
         }
-        if (actualAsset == null) return;
+        if (actualAsset == null) return null;
 
         if (actualAsset is not UBlueprintGeneratedClass uBlueprintGeneratedClass)
         {
-            AppLog.Warning($"[{AssetType}] Loaded asset was not a UBlueprintGeneratedClass for: {firstTag} (actual type: {actualAsset.GetType().Name})");
-            return;
+            Warn($"[{AssetType}] Loaded asset was not a UBlueprintGeneratedClass for: {firstTag} (actual type: {actualAsset.GetType().Name})");
+            return null;
         }
 
         var classDefaultObject = uBlueprintGeneratedClass.ClassDefaultObject?.Load();
         if (classDefaultObject == null)
         {
-            AppLog.Warning($"[{AssetType}] ClassDefaultObject was null/failed to load for: {firstTag}");
-            return;
+            Warn($"[{AssetType}] ClassDefaultObject was null/failed to load for: {firstTag}");
+            return null;
         }
 
         actualAsset = classDefaultObject;
         var mainA = actualAsset;
 
-        var uiDefaultObject = ResolveUiData(actualAsset);
-        if (uiDefaultObject != null)
-            uiAsset = uiDefaultObject;
-        else
-            AppLog.Warning($"[{AssetType}] Could not resolve UIData for: {firstTag}");
+        var uiAsset = ResolveUiData(actualAsset);
+        if (uiAsset == null)
+        {
+            Warn($"[{AssetType}] Could not resolve UIData for: {firstTag}");
+            uiAsset = new UObject();
+        }
         UObject? levelUiAsset = null;
 
         // switch on asset type
@@ -214,24 +218,23 @@ public class AssetHandlerData
                 var hasLevels = actualAsset.TryGetValue<UBlueprintGeneratedClass[]>(out var bGg, "Levels");
                 if (!hasLevels)
                 {
-                    AppLog.Warning($"[Weapon] No 'Levels' property found for: {firstTag}");
-                    return;
+                    Warn($"[Weapon] No 'Levels' property found for: {firstTag}");
+                    return null;
                 }
                 if (bGg is not { Length: > 0 })
                 {
-                    AppLog.Warning($"[Weapon] 'Levels' property was empty for: {firstTag}");
-                    return;
+                    Warn($"[Weapon] 'Levels' property was empty for: {firstTag}");
+                    return null;
                 }
                 var weaponDefaultObject = bGg[0]?.ClassDefaultObject?.Load();
                 if (weaponDefaultObject is null)
                 {
-                    AppLog.Warning($"[Weapon] Levels[0].ClassDefaultObject.Load() returned null for: {firstTag}");
-                    return;
+                    Warn($"[Weapon] Levels[0].ClassDefaultObject.Load() returned null for: {firstTag}");
+                    return null;
                 }
 
                 actualAsset = weaponDefaultObject;
                 levelUiAsset = ResolveUiData(weaponDefaultObject); // some skins only have an icon on their first level
-                loadable = "None";
                 break;
             }
             case EAssetType.GunBuddy:
@@ -244,7 +247,7 @@ public class AssetHandlerData
                 }
                 else
                 {
-                    return;
+                    return null;
                 }
 
                 loadable = "CharmAttachment";
@@ -254,33 +257,42 @@ public class AssetHandlerData
 
         if (loadable != "None")
         {
-            if (actualAsset.TryGetValue(out UBlueprintGeneratedClass? blueprintObject, loadable))
-            {
-                var blueprintDefaultObject = blueprintObject?.ClassDefaultObject?.Load();
-                if (blueprintDefaultObject != null)
-                    actualAsset = blueprintDefaultObject;
-                else
-                    return;
-            }
-            else
-            {
-                return;
-            }
+            if (!actualAsset.TryGetValue(out UBlueprintGeneratedClass? blueprintObject, loadable)) return null;
+            var blueprintDefaultObject = blueprintObject?.ClassDefaultObject?.Load();
+            if (blueprintDefaultObject == null) return null;
+            actualAsset = blueprintDefaultObject;
         }
 
-        var previewImage = IconGetter(uiAsset) ?? (levelUiAsset is null ? null : IconGetter(levelUiAsset));
+        return new ResolvedAsset(actualAsset, uiAsset, levelUiAsset, mainA);
+    }
+
+    private async Task DoLoad(FAssetData data, bool random = false)
+    {
+        await PauseState.WaitIfPaused();
+        var firstTag = data.ObjectPath;
+
+        if (firstTag.Contains("NPE") || firstTag.Contains("Random")) return;
+
+        var resolved = Resolve(firstTag, log: true);
+        if (resolved is null) return;
+
+        var previewImage = IconGetter(resolved.UiAsset) ??
+                           (resolved.LevelUiAsset is null ? null : IconGetter(resolved.LevelUiAsset));
         if (previewImage is null)
         {
             AppLog.Warning($"[{AssetType}] No DisplayIcon found, skipping: {firstTag}");
             return;
         }
 
-        var dedupeKey = uiAsset.Name;
+        var dedupeKey = resolved.UiAsset.Name;
         if (!string.IsNullOrEmpty(dedupeKey) && !_seenDisplayIds.TryAdd(dedupeKey, 0))
             return; // already added this one under a different asset path, skip the duplicate
 
+        var packagePath = resolved.MainAsset.Owner?.Name ?? string.Empty;
+        var uiAsset = resolved.UiAsset;
         await Application.Current.Dispatcher.InvokeAsync(
-            () => TargetCollection.Add(new AssetSelectorItem(actualAsset, uiAsset, mainA, previewImage, random)),
+            () => TargetCollection.Add(new AssetSelectorItem(packagePath, uiAsset, previewImage, random,
+                () => Resolve(firstTag, log: false))),
             DispatcherPriority.Background);
     }
 }

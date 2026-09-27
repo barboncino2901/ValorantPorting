@@ -185,6 +185,7 @@ public partial class MainViewModel : ObservableObject
         loadTimez.Stop();
         AppLog.Information(
             $"Finished exporting {data.Name} to BLENDER in {Math.Round(loadTimez.Elapsed.TotalSeconds, 3)}s");
+        _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After exporting {data.Name}"));
     }
 
     partial void OnSelectedAnimationFilterChanged(AnimationFilterOption? value) => RefreshAnimationFilter();
@@ -238,7 +239,7 @@ public partial class MainViewModel : ObservableObject
     // Agents: agent|<folder>|<name> (the add-on appends TP/FP/CS per model). Weapons: weapon|Equippables/Guns/<category>/<gun>/|<name>.
     private static string? BuildAnimationFilterKey(EAssetType type, IExportableAsset asset)
     {
-        var package = asset.MainAsset?.Owner?.Name ?? string.Empty;
+        var package = asset.PackagePath;
         if (package.StartsWith("/Game/")) package = package["/Game/".Length..];
         var folder = package.Contains('/') ? package[..package.LastIndexOf('/')] : package;
         var name = asset.DisplayName.Replace('|', '/');
@@ -362,6 +363,7 @@ public partial class MainViewModel : ObservableObject
 
             BlenderService.SendAnimation(item.Name, psaPath);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
+            _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));
         }
         finally
         {

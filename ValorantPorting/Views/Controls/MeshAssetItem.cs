@@ -26,6 +26,7 @@ public class MeshAssetItem : IExportableAsset
     public EAssetType Type { get; set; }
     public Visibility PreviewImageVisibility { get; set; }
     public UObject Asset { get; set; }
+    public string PackagePath => Asset?.Owner?.Name ?? string.Empty;
     public bool IsRandom { get; set; }
     public UObject UIAsset { get; set; }
     public UObject MainAsset { get; set; }
