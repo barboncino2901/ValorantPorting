@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using CUE4Parse_Conversion;
 using CUE4Parse_Conversion.Options;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Engine;
+using Newtonsoft.Json.Linq;
 using ValorantPorting.AppUtils;
 using ValorantPorting.Views.Controls;
 
@@ -25,7 +27,7 @@ public static class MapExport
         exportMaterials: true,
         exportMorphTargets: false);
 
-    public static async Task<string?> ExportUsd(MapItem map)
+    public static async Task<(string Scene, string? Materials)?> ExportUsd(MapItem map)
     {
         UWorld world;
         try
@@ -62,13 +64,48 @@ public static class MapExport
         foreach (var failure in failed.Take(5))
             AppLog.Warning($"  failed: {failure.ObjectPath}: {failure.Error?.Message}");
 
+        // the main scene is the .usda named after the map (sub-levels have their own names)
         var worldFile = results
-            .Where(r => r.Success && r.ObjectPath.StartsWith(map.MapUrl, StringComparison.OrdinalIgnoreCase))
+            .Where(r => r.Success)
             .SelectMany(r => r.DiskFilePaths ?? [])
             .FirstOrDefault(p => p.EndsWith(".usda", StringComparison.OrdinalIgnoreCase) &&
                                  Path.GetFileNameWithoutExtension(p).Equals(map.Codename, StringComparison.OrdinalIgnoreCase));
-        if (worldFile is null) AppLog.Error($"Map {map.Name}: the main scene file was not written.");
-        return worldFile;
+        if (worldFile is null)
+        {
+            AppLog.Error($"Map {map.Name}: the main scene file was not written.");
+            return null;
+        }
+
+        return (worldFile, WriteMaterialSummary(results, worldFile));
+    }
+
+    // Colors/scalars of every exported material (from CUE4Parse's per-material .json), so the Blender add-on can
+    // apply Valorant-specific material fixes the generic USD materials don't cover (e.g. "AO color" on foliage).
+    private static string? WriteMaterialSummary(IReadOnlyList<ExportResult> results, string worldFile)
+    {
+        var summary = new JObject();
+        foreach (var file in results.Where(r => r.Success).SelectMany(r => r.DiskFilePaths ?? [])
+                     .Where(p => p.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                var material = JObject.Parse(File.ReadAllText(file));
+                summary[Path.GetFileNameWithoutExtension(file)] = new JObject
+                {
+                    ["Colors"] = material["Colors"],
+                    ["Scalars"] = material["Scalars"],
+                    ["BlendMode"] = material["BlendMode"]
+                };
+            }
+            catch (Exception)
+            {
+                // not a material file or unreadable: skip
+            }
+        }
+
+        var path = Path.ChangeExtension(worldFile, ".materials.json");
+        File.WriteAllText(path, summary.ToString(Newtonsoft.Json.Formatting.None));
+        return path;
     }
 
     // Valorant maps are split into streamed sub-levels (art, geometry, lighting, gameplay...). For this first

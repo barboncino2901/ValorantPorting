@@ -15,7 +15,7 @@ from .valorant_psk_psa_b5 import pskimport, psaimport
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 4, 0),
+    "version": (1, 4, 1),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -434,6 +434,47 @@ def import_animation(data):
               error_callback=on_error)
 
 
+def fix_valorant_materials(materials, summary):
+    """Valorant-specific fixes on top of Blender's USD material import:
+    - MRA textures pack Metallic (R), Roughness (G), AO (B); the USD export wires them as G/B.
+    - Stylized foliage fills the transparent part of its diffuse texture with the material's "AO color"."""
+    mra_fixed = ao_fixed = 0
+    for material in materials:
+        if not material.use_nodes:
+            continue
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
+        principled = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if principled is None:
+            continue
+
+        for separate in [n for n in nodes if n.type == 'SEPARATE_COLOR']:
+            source = separate.inputs['Color'].links[0].from_node if separate.inputs['Color'].is_linked else None
+            if source is None or source.type != 'TEX_IMAGE' or source.image is None or '_MRA' not in source.image.name.upper():
+                continue
+            for link in [l for l in links if l.from_node == separate]:
+                links.remove(link)
+            links.new(separate.outputs['Red'], principled.inputs['Metallic'])
+            links.new(separate.outputs['Green'], principled.inputs['Roughness'])
+            mra_fixed += 1
+
+        info = summary.get(re.sub(r"\.\d{3}$", "", material.name), {})
+        ao = (info.get("Colors") or {}).get("AO color")
+        base_link = principled.inputs['Base Color'].links[0] if principled.inputs['Base Color'].is_linked else None
+        if ao and base_link is not None and not principled.inputs['Alpha'].is_linked:
+            diffuse = next((n for n in nodes if n.type == 'TEX_IMAGE' and n.image and n.image.channels == 4 and
+                            '_DF' in n.image.name.upper()), None)
+            if diffuse is not None:
+                mix = nodes.new('ShaderNodeMix')
+                mix.data_type = 'RGBA'
+                mix.inputs['A'].default_value = (ao["R"], ao["G"], ao["B"], 1.0)
+                links.new(diffuse.outputs['Alpha'], mix.inputs['Factor'])
+                links.new(base_link.from_socket, mix.inputs['B'])
+                links.new(mix.outputs['Result'], principled.inputs['Base Color'])
+                ao_fixed += 1
+    Log.information(f"Material fixes: {mra_fixed} MRA, {ao_fixed} foliage AO color")
+
+
 def import_map(data):
     name = data.get("Name")
     path = data.get("MapPath")
@@ -441,12 +482,20 @@ def import_map(data):
     options = dict(filepath=path, import_usd_preview=True, support_scene_instancing=True, import_visible_only=True,
                    create_collection=True, import_lights=False, import_cameras=False, set_frame_range=False,
                    read_mesh_colors=True, apply_unit_conversion_scale=True)
+    materials_before = set(bpy.data.materials)
     window_manager = bpy.context.window_manager
     if window_manager.windows:
         with bpy.context.temp_override(window=window_manager.windows[0]):
             bpy.ops.wm.usd_import(**options)
     else:
         bpy.ops.wm.usd_import(**options)
+
+    summary = {}
+    materials_path = data.get("MaterialsPath")
+    if materials_path and os.path.exists(materials_path):
+        with open(materials_path, encoding="utf-8") as file:
+            summary = json.load(file)
+    fix_valorant_materials([m for m in bpy.data.materials if m not in materials_before], summary)
     Log.information(f"Imported map {name}")
 
 

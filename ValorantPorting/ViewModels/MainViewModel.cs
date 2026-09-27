@@ -336,10 +336,10 @@ public partial class MainViewModel : ObservableObject
         mapExportRunning = true;
         try
         {
-            var usdPath = await Task.Run(() => MapExport.ExportUsd(map));
-            if (usdPath is null) return;
+            var exported = await Task.Run(() => MapExport.ExportUsd(map));
+            if (exported is not { } files) return;
 
-            BlenderService.SendMap(map.Name, usdPath);
+            BlenderService.SendMap(map.Name, files.Scene, files.Materials);
             AppLog.Information($"Sent map {map.Name} to BLENDER. Blender may freeze for a while during the import.");
         }
         finally
