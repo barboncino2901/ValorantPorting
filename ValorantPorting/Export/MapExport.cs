@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CUE4Parse_Conversion;
 using CUE4Parse_Conversion.Dto;
 using CUE4Parse_Conversion.Options;
+using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Engine;
 using Newtonsoft.Json.Linq;
@@ -25,6 +26,7 @@ public static class MapExport
         meshQuality: EMeshQuality.Highest,
         texturePlatform: ETexturePlatform.DesktopMobile,
         textureFormat: ETextureFormat.Png,
+        materialDepth: EMaterialDepth.AllLayersNoRef, // include settings/textures inherited from parent materials
         exportMaterials: true,
         exportMorphTargets: false);
 
@@ -80,21 +82,33 @@ public static class MapExport
         return (worldFile, WriteMaterialSummary(results, worldFile));
     }
 
-    // Colors/scalars of every exported material (from CUE4Parse's per-material .json), so the Blender add-on can
-    // apply Valorant-specific material fixes the generic USD materials don't cover (e.g. "AO color" on foliage).
+    // Everything the Blender add-on needs to rebuild Valorant's shaders, per exported material: its parent chain
+    // (the last entry is Riot's master shader, e.g. BaseEnv_Blend_MAT_V4), static switches, colors, scalars and
+    // texture parameters (as paths relative to the Assets folder).
     private static string? WriteMaterialSummary(IReadOnlyList<ExportResult> results, string worldFile)
     {
         var summary = new JObject();
-        foreach (var file in results.Where(r => r.Success).SelectMany(r => r.DiskFilePaths ?? [])
-                     .Where(p => p.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+        foreach (var result in results.Where(r => r.Success))
         {
+            var file = result.DiskFilePaths?.FirstOrDefault(p => p.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
+            if (file is null) continue;
             try
             {
                 var material = JObject.Parse(File.ReadAllText(file));
+                var textures = new JObject();
+                foreach (var texture in (material["Textures"] as JObject)?.Properties() ?? [])
+                {
+                    var texturePath = texture.Value["ObjectPath"]?.ToString();
+                    if (!string.IsNullOrEmpty(texturePath)) textures[texture.Name] = TextureFile(texturePath);
+                }
+
                 summary[Path.GetFileNameWithoutExtension(file)] = new JObject
                 {
+                    ["Parents"] = new JArray(ParentChain(result.ObjectPath)),
+                    ["Switches"] = material["Switches"],
                     ["Colors"] = material["Colors"],
                     ["Scalars"] = material["Scalars"],
+                    ["Textures"] = textures,
                     ["BlendMode"] = material["BlendMode"]
                 };
             }
@@ -107,6 +121,36 @@ public static class MapExport
         var path = Path.ChangeExtension(worldFile, ".materials.json");
         File.WriteAllText(path, summary.ToString(Newtonsoft.Json.Formatting.None));
         return path;
+    }
+
+    // "/Game/environment/.../Brick_DF.0" -> "ShooterGame/Content/environment/.../Brick_DF.png" (where the export writes it)
+    private static string TextureFile(string objectPath)
+    {
+        var package = objectPath.Contains('.') ? objectPath[..objectPath.LastIndexOf('.')] : objectPath;
+        if (package.StartsWith("/Game/")) package = "ShooterGame/Content/" + package["/Game/".Length..];
+        return package.TrimStart('/') + ".png";
+    }
+
+    // Material instance -> parent -> ... -> master material names.
+    private static List<string> ParentChain(string objectPath)
+    {
+        var chain = new List<string>();
+        try
+        {
+            var current = AppVM.CUE4ParseVM.Provider.LoadPackageObject<UMaterialInterface>(objectPath);
+            while (current is UMaterialInstance { Parent: { } parent } && chain.Count < 16 &&
+                   parent.TryLoad(out var loaded) && loaded is UMaterialInterface next)
+            {
+                chain.Add(next.Name);
+                current = next;
+            }
+        }
+        catch (Exception)
+        {
+            // unresolvable parent: keep what we have
+        }
+
+        return chain;
     }
 
     // Sub-levels that aren't part of the finished, visible map: designer blockouts ("greybox"), outdated/hidden

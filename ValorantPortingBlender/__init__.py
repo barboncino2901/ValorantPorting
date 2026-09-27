@@ -11,11 +11,12 @@ import os
 import bpy.props
 from mathutils import Matrix
 from .valorant_psk_psa_b5 import pskimport, psaimport
+from .valorant_shaders import rebuild_materials
 
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 4, 2),
+    "version": (1, 5, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -492,7 +493,7 @@ def remove_helper_objects(objects):
     Log.information(f"Removed {removed} editor helper objects (blockout grids, light shafts)")
 
 
-def import_map(data):
+def import_map(data, assets_root=""):
     name = data.get("Name")
     path = data.get("MapPath")
     Log.information(f"Importing map {name} from {path}")
@@ -514,7 +515,10 @@ def import_map(data):
         with open(materials_path, encoding="utf-8") as file:
             summary = json.load(file)
     remove_helper_objects([o for o in bpy.data.objects if o not in objects_before])
-    fix_valorant_materials([m for m in bpy.data.materials if m not in materials_before], summary)
+    new_materials = [m for m in bpy.data.materials if m not in materials_before]
+    base, blend, kept = rebuild_materials(new_materials, summary, assets_root)
+    Log.information(f"Valorant shaders: {base} base, {blend} two-layer blend, {kept} kept as imported")
+    fix_valorant_materials(new_materials, summary)  # fallback fixes for materials that weren't rebuilt
     Log.information(f"Imported map {name}")
 
 
@@ -523,7 +527,7 @@ def import_response(response):
         import_animation(response.get("Data"))
         return
     if (response.get("Data") or {}).get("Type") == "Map":
-        import_map(response.get("Data"))
+        import_map(response.get("Data"), response.get("AssetsRoot") or "")
         return
 
     import_shaders("VALORANT_Weapon.blend")
