@@ -15,6 +15,7 @@ using ValorantPorting.AppUtils;
 using ValorantPorting.Export;
 using ValorantPorting.Export.Blender;
 using ValorantPorting.Services;
+using ValorantPorting.Services.Endpoints;
 using ValorantPorting.Views;
 using ValorantPorting.Views.Controls;
 using StyleSelector = ValorantPorting.Views.Controls.StyleSelector;
@@ -73,6 +74,7 @@ public partial class MainViewModel : ObservableObject
             var loadTime = new Stopwatch();
             loadTime.Start();
 
+            ValorantNames.StartLoading();
             AppVM.CUE4ParseVM =
                 new CUE4ParseViewModel(AppSettings.Current.ArchivePath, AppSettings.Current.InstallType);
             await AppVM.CUE4ParseVM.Initialize();
@@ -232,7 +234,8 @@ public partial class MainViewModel : ObservableObject
 
         var agent = Outfits.FirstOrDefault(o => BuildAnimationFilterKey(EAssetType.Character, o) is { } k &&
             k.Split('|')[1].Equals(parts[1], StringComparison.OrdinalIgnoreCase));
-        return agent is null ? key : $"agent|{parts[1]}|{agent.DisplayName.Replace('|', '/')}|{parts[3]}";
+        if (agent is not null) return $"agent|{parts[1]}|{agent.DisplayName.Replace('|', '/')}|{parts[3]}";
+        return ValorantNames.Agents.TryGetValue(parts[2], out var named) ? $"agent|{parts[1]}|{named.Name}|{parts[3]}" : key;
     }
 
     // Key describing the agent or gun being sent to Blender; the add-on stores it on the imported armatures.
@@ -301,6 +304,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (animationsLoaded || AppVM.CUE4ParseVM is null) return;
         animationsLoaded = true;
+        ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
 
         var registry = AppVM.CUE4ParseVM.AssetDataBuffers.Where(a => a is not null).ToList();
         var items = registry
@@ -335,7 +339,7 @@ public partial class MainViewModel : ObservableObject
 
         items = items
             .GroupBy(a => a.ObjectPath).Select(g => g.First())
-            .OrderBy(a => a.Folder, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(a => a.Title, StringComparer.OrdinalIgnoreCase)
             .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

@@ -1,4 +1,6 @@
 using System;
+using ValorantPorting.Export;
+using ValorantPorting.Services.Endpoints;
 
 namespace ValorantPorting.Views.Controls;
 
@@ -16,8 +18,14 @@ public class AnimationItem
         if (folder.StartsWith("/Game/")) folder = folder["/Game/".Length..];
         else if (folder.StartsWith("ShooterGame/Content/")) folder = folder["ShooterGame/Content/".Length..];
         Folder = folder;
+
+        (Title, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
+        Details = View.Length > 0 ? $"{View}  ·  {Name}" : Name;
     }
 
+    public string Title { get; }     // e.g. "Jett · Tailwind (E): Dash East"
+    public string View { get; }      // e.g. "3rd person"
+    public string Details { get; }   // second line in the list: view + original file name
     public string Name { get; }
     public string Folder { get; }
     public string ObjectPath { get; }
@@ -28,6 +36,8 @@ public class AnimationItem
         foreach (var word in filter.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         {
             if (!Name.Contains(word, StringComparison.OrdinalIgnoreCase) &&
+                !Title.Contains(word, StringComparison.OrdinalIgnoreCase) &&
+                !View.Contains(word, StringComparison.OrdinalIgnoreCase) &&
                 !Folder.Contains(word, StringComparison.OrdinalIgnoreCase))
                 return false;
         }

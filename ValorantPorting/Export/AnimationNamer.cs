@@ -1,0 +1,123 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace ValorantPorting.Export;
+
+// Turns Valorant animation file names into readable titles, e.g.
+//   TP_Wushu_S0_E_Dash_East        -> "Jett · Tailwind (E): Dash East"                  (3rd person)
+//   TP_Core_AK_S0_Equip_UB         -> "Vandal: Equip (upper body)"                      (3rd person, shared)
+//   GN_Core_HMG_Cyberknight_Equip_Lv3_Montage -> "Odin (<skin line>): Equip, level 3"   (gun)
+public static class AnimationNamer
+{
+    public record Agent(string Name, IReadOnlyDictionary<string, string> Abilities);
+
+    private static readonly Dictionary<string, string> Views = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["TP"] = "3rd person", ["FP"] = "1st person", ["CS"] = "Character select", ["GN"] = "Gun",
+        ["GNTP"] = "Gun (3rd person)", ["EQ"] = "Melee", ["AB"] = "Ability prop (1st person)",
+        ["ABTP"] = "Ability prop (3rd person)", ["ABCS"] = "Ability prop (character select)"
+    };
+
+    private static readonly Dictionary<string, string> Directions = new(StringComparer.Ordinal)
+    {
+        ["N"] = "forward", ["S"] = "backward", ["E"] = "right", ["W"] = "left",
+        ["NE"] = "forward-right", ["NW"] = "forward-left", ["SE"] = "backward-right", ["SW"] = "backward-left"
+    };
+
+    private static readonly Dictionary<string, string> Words = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ADS"] = "aiming", ["Aimsoffset"] = "aim offset", ["Unequip"] = "unequip", ["Lp"] = "loop",
+        ["Loop"] = "loop", ["Cosmetic"] = "cosmetic", ["Add"] = "additive"
+    };
+
+    private static readonly Regex WordWithDirection = new("^(.*[a-z])(NE|NW|SE|SW|N|S|E|W)$", RegexOptions.Compiled);
+    private static readonly Regex CamelCase = new("(?<=[a-z])(?=[A-Z0-9])|(?<=[0-9])(?=[A-Za-z])|(?<=[A-Z])(?=[A-Z][a-z])", RegexOptions.Compiled);
+
+    public static (string Title, string View) Describe(string name,
+        IReadOnlyDictionary<string, Agent> agents,
+        IReadOnlyDictionary<string, string> guns,
+        IReadOnlyDictionary<string, string> skins)
+    {
+        var tokens = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 0) return (name, string.Empty);
+
+        var start = 0;
+        var view = string.Empty;
+        if (Views.TryGetValue(tokens[0], out var viewName))
+        {
+            view = viewName;
+            start = 1;
+        }
+
+        string? agentName = null, gunName = null, skinName = null, ability = null, bodyPart = null;
+        Agent? agent = null;
+        var shared = false;
+        var previousWasSkin = false;
+        var words = new List<string>();
+
+        for (var i = start; i < tokens.Length; i++)
+        {
+            var token = tokens[i];
+            var afterSkin = previousWasSkin;
+            previousWasSkin = false;
+
+            if (token.Equals("Core", StringComparison.OrdinalIgnoreCase)) { shared = true; continue; }
+            // filler words first: some of them ("Montage") are also skin codenames
+            if (token.Equals("Montage", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(token, "^SEQ[0-9]+$")) continue;
+            if (token == "UB") { bodyPart = "upper body"; continue; }
+            if (token == "LB") { bodyPart = "lower body"; continue; }
+            if (agentName is null && agents.TryGetValue(token, out var foundAgent)) { agent = foundAgent; agentName = foundAgent.Name; continue; }
+            if (gunName is null && guns.TryGetValue(token, out var foundGun)) { gunName = foundGun; continue; }
+            if (Regex.IsMatch(token, "^S[0-9]$")) { previousWasSkin = true; continue; } // S0 = default skin
+            // skin lines only apply to weapons, melee and finishers, never to an agent's own animations
+            if (agent is null && skinName is null && skins.TryGetValue(token, out var foundSkin)) { skinName = foundSkin; previousWasSkin = true; continue; }
+
+            // Ability slot right after the skin token: Q, E, C (stored as "4" in file names) or X
+            if (agent is not null && ability is null && afterSkin && token is "Q" or "E" or "C" or "X" or "4")
+            {
+                var key = token == "4" ? "C" : token;
+                ability = agent.Abilities.TryGetValue(key, out var abilityName) ? $"{FixCaps(abilityName)} ({key})" : $"Ability {key}";
+                continue;
+            }
+
+            var level = Regex.Match(token, "^Lv([0-9])$");
+            if (level.Success) { words.Add($"level {level.Groups[1].Value}"); continue; }
+
+            words.Add(Humanize(token));
+        }
+
+        var subject = agentName ?? gunName;
+        if (agentName is not null && gunName is not null) words.Insert(0, $"with {gunName}");
+        if (skinName is not null) subject = subject is null ? skinName : $"{subject} ({skinName})";
+        if (ability is not null) subject = subject is null ? ability : $"{subject} · {ability}";
+
+        var action = string.Join(" ", words.Where(w => w.Length > 0));
+        if (action.Length > 0) action = char.ToUpperInvariant(action[0]) + action[1..];
+        if (bodyPart is not null) action = action.Length > 0 ? $"{action} ({bodyPart})" : bodyPart;
+
+        var title = subject is null ? action : action.Length > 0 ? $"{subject}: {action}" : subject;
+        if (string.IsNullOrWhiteSpace(title)) title = name;
+        if (shared && view.Length > 0) view += ", shared";
+        return (title, view);
+    }
+
+    // Some ability names come in ALL CAPS ("GATECRASH") -> "Gatecrash"
+    private static string FixCaps(string text) =>
+        text.Any(char.IsLower) ? text : System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(text.ToLowerInvariant());
+
+    private static string Humanize(string token)
+    {
+        if (Words.TryGetValue(token, out var word)) return word;
+        if (Directions.TryGetValue(token, out var direction)) return direction;
+
+        // RunNE -> "Run forward-right", AimE -> "Aim right"
+        var withDirection = WordWithDirection.Match(token);
+        if (withDirection.Success && withDirection.Groups[1].Value.Length >= 3)
+            return $"{Humanize(withDirection.Groups[1].Value)} {Directions[withDirection.Groups[2].Value]}";
+
+        // CycloneBoost -> "Cyclone Boost", DashUp45 -> "Dash Up 45"
+        return CamelCase.Replace(token, " ");
+    }
+}

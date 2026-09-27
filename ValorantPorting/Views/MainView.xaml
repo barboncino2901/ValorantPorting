@@ -128,9 +128,9 @@
                                      MouseDoubleClick="OnAnimationDoubleClick">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Margin="2">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding Folder}" FontSize="11" Opacity="0.6" />
+                                        <StackPanel Margin="2" ToolTip="{Binding Folder}">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
