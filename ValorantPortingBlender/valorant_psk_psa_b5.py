@@ -1362,7 +1362,11 @@ def _fcurve_new(action, owner, data_path, index):
     return action.fcurve_ensure_for_datablock(owner, data_path, index=index)
 
 
-ANIMATION_PLACED_BONES = re.compile(r"weapon|handtarget|^ik_", re.IGNORECASE)
+# Bones that take the animation's own position (not the model's) under "keep proportions":
+# - weapon/IK bones rest at the origin and only the animation places them (the gun in the hand);
+# - collarbones and arms keep the animation's lengths, so both hands meet the gun where Riot animated them
+#   (with the model's own arm lengths the support hand is several cm off and goes through the gun).
+ANIMATION_PLACED_BONES = re.compile(r"weapon|handtarget|^ik_|^[LR]_(Clavicle|Shoulder|Elbow|Hand)$", re.IGNORECASE)
 
 
 def psaimport(filepath,
@@ -1774,8 +1778,7 @@ def psaimport(filepath,
         if bKeepProportions:
             eps = 0.0005 if bScaleDown else 0.05
             for j in range(Totalbones):
-                # Weapon/IK bones rest at the origin and only the animation places them (e.g. the weapon in
-                # the hand), so they always take the animation's position, like in Unreal.
+                # see ANIMATION_PLACED_BONES
                 if j not in BoneNotFoundList and PsaBonesToProcess[j] is not None and \
                         ANIMATION_PLACED_BONES.search(PsaBonesToProcess[j].pose_bone.name):
                     continue
