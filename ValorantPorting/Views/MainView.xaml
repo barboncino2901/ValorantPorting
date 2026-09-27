@@ -120,10 +120,12 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <CheckBox Grid.Row="0" Margin="{adonisUi:Space 1}" IsChecked="{Binding AnimationFilterEnabled, Mode=TwoWay}"
-                                      Content="{Binding AnimationFilterLabel}" Visibility="{Binding AnimationFilterVisibility}"
-                                      Click="OnAnimationFilterToggled"
-                                      ToolTip="Filters the list to animations that fit the last agent or weapon you sent to Blender. Untick to show everything." />
+                            <DockPanel Grid.Row="0" Margin="{adonisUi:Space 1}">
+                                <TextBlock DockPanel.Dock="Left" Text="Show animations for:" VerticalAlignment="Center" Margin="0 0 8 0" />
+                                <ComboBox ItemsSource="{Binding AnimationFilters}" SelectedItem="{Binding SelectedAnimationFilter, Mode=TwoWay}"
+                                          DisplayMemberPath="Label"
+                                          ToolTip="Follow Blender selection: filters to the Valorant model selected in Blender (3rd person, 1st person or gun). Pick an entry to lock the filter, or All animations." />
+                            </DockPanel>
                             <ListBox Grid.Row="1" x:Name="AnimationList" ItemsSource="{Binding Animations}"
                                      SelectedItem="{Binding SelectedAnimation, Mode=TwoWay}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"

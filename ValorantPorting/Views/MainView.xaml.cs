@@ -24,6 +24,7 @@ public partial class MainView
         DataContext = AppVM.MainVM;
 
         AppLog.Logger = LoggerRtb;
+        AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -99,7 +100,6 @@ public partial class MainView
         };
     }
 
-    private void OnAnimationFilterToggled(object sender, RoutedEventArgs e) => ApplySearchFilter(AnimationList, SearchText);
 
     private void OnAnimationDoubleClick(object sender, MouseButtonEventArgs e)
     {

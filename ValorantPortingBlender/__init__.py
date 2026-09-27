@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import threading
+import re
 import bpy
 import os
 import bpy.props
@@ -13,7 +14,7 @@ from .valorant_psk_psa_b5 import pskimport, psaimport
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 2, 2),
+    "version": (1, 3, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -341,6 +342,50 @@ def any(target, expr):
     return len(filtered) > 0
 
 
+SELECTION_PORT = 24284  # the app listens here for what is selected in Blender
+
+
+def animation_filter_tag(base_key, armature):
+    """Tag stored on imported armatures so the app can filter animations for them.
+    Agents: agent|<folder>|<name>|TP/FP/CS (3rd person, 1st person, character select). Weapons: weapon|<folder>|<name>."""
+    if not base_key:
+        return None
+    if base_key.startswith("agent|"):
+        name = armature.name.upper()
+        variant = "FP" if name.startswith("FP_") else "CS" if name.startswith("CS_") else "TP"
+        return f"{base_key}|{variant}"
+    return base_key
+
+
+def guess_filter_tag(armature):
+    """For agents imported before tagging existed: TP_Wushu_S0_Skelmesh... -> Jett's (Wushu) 3rd-person body."""
+    match = re.match(r"^(TP|FP|CS)_([A-Za-z0-9]+)_", armature.name)
+    if match:
+        return f"agent|Characters/{match.group(2)}/|{match.group(2)}|{match.group(1)}"
+    return None
+
+
+selection_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+selection_state = {"tag": None, "ticks": 0}
+
+
+def watch_selection():
+    """Tells the app which Valorant armature is selected (on change, and every ~2s in case the app restarted)."""
+    try:
+        armature = find_selected_armature()
+        tag = None
+        if armature is not None:
+            tag = armature.get("vp_filter") or guess_filter_tag(armature)
+        selection_state["ticks"] += 1
+        if tag and (tag != selection_state["tag"] or selection_state["ticks"] >= 7):
+            selection_socket.sendto(("VP_SELECT|" + tag).encode("utf-8"), ("localhost", SELECTION_PORT))
+            selection_state["ticks"] = 0
+        selection_state["tag"] = tag
+    except Exception:
+        pass
+    return 0.3
+
+
 def find_selected_armature():
     obj = bpy.context.active_object
     if obj is None:
@@ -429,6 +474,9 @@ def import_response(response):
                 continue
             has_armature = imported_part.type == "ARMATURE"
             if has_armature:
+                tag = animation_filter_tag(import_settings.get("AnimationFilterKey"), imported_part)
+                if tag:
+                    imported_part["vp_filter"] = tag
                 mesh = mesh_from_armature(imported_part)
             else:
                 mesh = imported_part
@@ -489,7 +537,10 @@ def register():
         return 0.01
 
     bpy.app.timers.register(handler)
+    bpy.app.timers.register(watch_selection, persistent=True)
 
 
 def unregister():
     server.stop()
+    if bpy.app.timers.is_registered(watch_selection):
+        bpy.app.timers.unregister(watch_selection)

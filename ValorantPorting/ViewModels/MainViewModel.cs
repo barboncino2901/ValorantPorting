@@ -47,13 +47,19 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private AnimationItem? selectedAnimation;
     private bool animationsLoaded;
 
-    // Animations tab filter: follows the last agent/weapon sent to Blender.
-    [ObservableProperty] private bool animationFilterEnabled = true;
-    [ObservableProperty] private string animationFilterLabel = "";
-    [ObservableProperty] private Visibility animationFilterVisibility = Visibility.Collapsed;
-    private string? animationContextFolder;
-    private string[] animationContextPrefixes = [];
-    private bool animationContextIsAgent;
+    // Animations tab filter ("Show animations for" dropdown). "Follow Blender selection" uses whatever Valorant
+    // armature is selected in Blender (reported by the add-on); other entries lock the filter to one model.
+    public ObservableCollection<AnimationFilterOption> AnimationFilters { get; } = new()
+    {
+        new AnimationFilterOption("Follow Blender selection", null, isFollow: true),
+        new AnimationFilterOption("All animations", null)
+    };
+
+    [ObservableProperty] private AnimationFilterOption? selectedAnimationFilter;
+    private string? followedFilterKey;
+    private (string Folder, string[] Prefixes, bool SharedAgentAnimations)? activeAnimationFilter;
+
+    public event Action? AnimationFilterChanged;
 
     public ImageSource StyleImage => currentAsset?.FullSource;
     public Visibility StyleVisibility => currentAsset is null ? Visibility.Collapsed : Visibility.Visible;
@@ -76,6 +82,12 @@ public partial class MainViewModel : ObservableObject
             IsReady = true;
 
             AppVM.AssetHandlerVM = new AssetHandlerViewModel();
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                SelectedAnimationFilter = AnimationFilters[0];
+                BlenderSelectionListener.Start(OnBlenderSelection);
+            });
+
             await AppVM.AssetHandlerVM.Initialize();
         });
     }
@@ -161,33 +173,81 @@ public partial class MainViewModel : ObservableObject
         }
 
         data.Name = currentAsset.DisplayName;
-        SetAnimationContext(CurrentAssetType, currentAsset);
+        var filterKey = BuildAnimationFilterKey(CurrentAssetType, currentAsset);
         var reorient = CurrentAssetType != EAssetType.Weapon;
         BlenderService.Send(data, new BlenderExportSettings
         {
-            ReorientBones = reorient
+            ReorientBones = reorient,
+            AnimationFilterKey = filterKey
         });
+        RegisterSentAsset(filterKey);
         loadTimez.Stop();
         AppLog.Information(
             $"Finished exporting {data.Name} to BLENDER in {Math.Round(loadTimez.Elapsed.TotalSeconds, 3)}s");
     }
 
-    // Remembers what was last sent to Blender so the Animations tab only lists animations that fit it:
-    // agents get their own + shared body animations (TP_/FP_/CS_), weapons get their gun's animations (GN_/EQ_).
-    public void SetAnimationContext(EAssetType type, IExportableAsset asset)
+    partial void OnSelectedAnimationFilterChanged(AnimationFilterOption? value) => RefreshAnimationFilter();
+
+    private void RefreshAnimationFilter()
+    {
+        var option = SelectedAnimationFilter ?? AnimationFilters[0];
+        var key = option.IsFollow ? followedFilterKey : option.Key;
+        activeAnimationFilter = AnimationFilterOption.Parse(key);
+        AnimationFilters[0].Label = followedFilterKey is null
+            ? "Follow Blender selection (select a Valorant armature)"
+            : $"Follow Blender selection: {AnimationFilterOption.Describe(followedFilterKey)}";
+        AnimationFilterChanged?.Invoke();
+    }
+
+    private void AddAnimationFilter(string key)
+    {
+        if (AnimationFilters.Any(o => o.Key == key)) return;
+        AnimationFilters.Add(new AnimationFilterOption(AnimationFilterOption.Describe(key), key));
+    }
+
+    // Called with the tag of the armature selected in Blender.
+    public void OnBlenderSelection(string key)
+    {
+        if (AnimationFilterOption.Parse(key) is null) return;
+        key = NormalizeFilterKey(key);
+        AddAnimationFilter(key);
+        if (key == followedFilterKey) return;
+        followedFilterKey = key;
+        RefreshAnimationFilter();
+    }
+
+    // Models imported before tagging are identified by name only (e.g. codename "Wushu"): reuse an existing entry
+    // for the same model, or look the agent's display name up in the Agents tab.
+    private string NormalizeFilterKey(string key)
+    {
+        var parts = key.Split('|');
+        if (parts.Length < 4 || parts[0] != "agent") return key;
+
+        var existing = AnimationFilters.FirstOrDefault(o => o.Key is { } k &&
+            k.Split('|') is { Length: >= 4 } p && p[0] == "agent" &&
+            p[1].Equals(parts[1], StringComparison.OrdinalIgnoreCase) && p[3] == parts[3]);
+        if (existing?.Key is not null) return existing.Key;
+
+        var agent = Outfits.FirstOrDefault(o => BuildAnimationFilterKey(EAssetType.Character, o) is { } k &&
+            k.Split('|')[1].Equals(parts[1], StringComparison.OrdinalIgnoreCase));
+        return agent is null ? key : $"agent|{parts[1]}|{agent.DisplayName.Replace('|', '/')}|{parts[3]}";
+    }
+
+    // Key describing the agent or gun being sent to Blender; the add-on stores it on the imported armatures.
+    // Agents: agent|<folder>|<name> (the add-on appends TP/FP/CS per model). Weapons: weapon|Equippables/Guns/<category>/<gun>/|<name>.
+    private static string? BuildAnimationFilterKey(EAssetType type, IExportableAsset asset)
     {
         var package = asset.MainAsset?.Owner?.Name ?? string.Empty;
         if (package.StartsWith("/Game/")) package = package["/Game/".Length..];
         var folder = package.Contains('/') ? package[..package.LastIndexOf('/')] : package;
+        var name = asset.DisplayName.Replace('|', '/');
 
         switch (type)
         {
             case EAssetType.Character:
-                animationContextFolder = folder + "/";
-                animationContextPrefixes = ["TP_", "FP_", "CS_"];
-                animationContextIsAgent = true;
-                break;
+                return $"agent|{folder}/|{name}";
             case EAssetType.Weapon:
+            {
                 // Animations for a gun and all its skins live under Equippables/Guns/<category>/<gun>/
                 // (skins are usually in a subfolder of that, but not always, e.g. the standard Bandit).
                 var segments = folder.Split('/');
@@ -195,29 +255,40 @@ public partial class MainViewModel : ObservableObject
                 var gunFolder = isMelee
                     ? string.Join('/', segments.Take(2))
                     : string.Join('/', segments.Take(Math.Min(4, segments.Length)));
-                animationContextFolder = gunFolder + "/";
-                animationContextPrefixes = isMelee ? ["EQ_", "GN_"] : ["GN_"];
-                animationContextIsAgent = false;
-                break;
+                return $"weapon|{gunFolder}/|{name}";
+            }
             default:
-                animationContextFolder = null;
-                break;
+                return null;
+        }
+    }
+
+    private void RegisterSentAsset(string? baseKey)
+    {
+        if (baseKey is null) return;
+        if (baseKey.StartsWith("agent|"))
+        {
+            foreach (var variant in new[] { "TP", "FP", "CS" }) AddAnimationFilter($"{baseKey}|{variant}");
+            followedFilterKey = $"{baseKey}|TP";
+        }
+        else
+        {
+            AddAnimationFilter(baseKey);
+            followedFilterKey = baseKey;
         }
 
-        AnimationFilterLabel = animationContextFolder is null ? string.Empty : $"Only animations for: {asset.DisplayName}";
-        AnimationFilterVisibility = animationContextFolder is null ? Visibility.Collapsed : Visibility.Visible;
+        RefreshAnimationFilter();
     }
 
     public bool MatchesAnimationContext(AnimationItem item)
     {
-        if (!AnimationFilterEnabled || animationContextFolder is null) return true;
-        if (!animationContextPrefixes.Any(p => item.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase))) return false;
+        if (activeAnimationFilter is not { } filter) return true;
+        if (!filter.Prefixes.Any(p => item.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase))) return false;
 
         var folder = item.Folder + "/";
-        if (folder.StartsWith(animationContextFolder, StringComparison.OrdinalIgnoreCase)) return true;
+        if (folder.StartsWith(filter.Folder, StringComparison.OrdinalIgnoreCase)) return true;
 
         // Shared agent animations (e.g. TP_Core_AK_* in weapon folders), but not other agents' own animations.
-        return animationContextIsAgent &&
+        return filter.SharedAgentAnimations &&
                item.Name.Contains("_Core_", StringComparison.OrdinalIgnoreCase) &&
                (!folder.StartsWith("Characters/", StringComparison.OrdinalIgnoreCase) ||
                 folder.StartsWith("Characters/_", StringComparison.OrdinalIgnoreCase));
