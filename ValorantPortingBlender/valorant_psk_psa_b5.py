@@ -1501,6 +1501,7 @@ def psaimport(filepath,
     # key = lowered name
     # value = orignal name
     skeleton_bones_lowered = {}
+    psa_bone_names_lowered = []
 
     for blender_bone_name in armature_obj.data.bones.keys():
       skeleton_bones_lowered[blender_bone_name.lower()] = blender_bone_name
@@ -1515,6 +1516,7 @@ def psaimport(filepath,
         # bonename = util_bytes_to_str(indata[0]).upper()
 
         in_name_lowered = in_name.lower()
+        psa_bone_names_lowered.append(in_name_lowered)
         if in_name_lowered in skeleton_bones_lowered:
             orig_name = skeleton_bones_lowered[in_name_lowered]
 
@@ -1549,6 +1551,22 @@ def psaimport(filepath,
     if len(psa_bones) == 0:
         error_callback('No bone was match!\nSkip import!')
         return False
+
+    if bKeepProportions:
+        # Valorant: 3rd-person bodies have a "Splitter" bone, 1st-person arms don't; props (e.g. Jett's knives)
+        # share almost no bones with agents. Applying across skeletons mangles the model, so refuse.
+        armature_is_3p = "splitter" in skeleton_bones_lowered
+        animation_is_3p = "splitter" in psa_bone_names_lowered
+        too_few_matches = len(psa_bones) < 0.5 * len(psa_bone_names_lowered)
+        if too_few_matches or armature_is_3p != animation_is_3p:
+            if too_few_matches:
+                reason = "it is for a different skeleton (e.g. a weapon or ability prop)"
+            elif animation_is_3p:
+                reason = "it is a 3rd-person body animation and this is a 1st-person model"
+            else:
+                reason = "it is a 1st-person (arms) animation and this is a 3rd-person model"
+            error_callback(f"Animation not applied: {reason}.")
+            return False
 
     # does anyone care?
     for blender_bone_name in armature_obj.data.bones.keys():
@@ -1758,21 +1776,32 @@ def psaimport(filepath,
                        for f in range(NumRawFrames)):
                     static_loc.add(j)
 
-        # Face bones (children of "Head") that this action never moves keep the model's own pose,
-        # rotation included: Valorant drives faces with separate face animations, and body animations
-        # just hold them at the base skeleton's pose (e.g. half-closed eyelids on other agents).
-        static_face = set()
+        # Face bones (children of "Head") are applied relative to the action's first frame, on top of the
+        # model's own face: Valorant body animations hold the face at the base skeleton's pose (e.g. half-closed
+        # eyelids on other agents) and faces are driven by separate face animations. Real facial motion
+        # (blinks, expressions) still comes through as a change from that first frame.
+        face_rest_quat = {}
+        face_rest_loc = {}
         if bKeepProportions:
-            for j in static_loc:
+            for j in range(Totalbones):
                 psa_bone = PsaBonesToProcess[j]
                 if j in BoneNotFoundList or psa_bone is None:
                     continue
                 if not any(p.name.lower() == "head" for p in psa_bone.pose_bone.parent_recursive):
                     continue
-                q0 = Raw_Key_List[raw_key_index + j][1]
-                if all(abs(Raw_Key_List[raw_key_index + f * Totalbones + j][1].dot(q0)) > 0.99999
-                       for f in range(NumRawFrames)):
-                    static_face.add(j)
+                p0_pos, p0_quat = Raw_Key_List[raw_key_index + j]
+                q0 = psa_bone.post_quat.copy()
+                q0.rotate(psa_bone.orig_quat)
+                q = psa_bone.post_quat.copy()
+                q.rotate(p0_quat)
+                q0.rotate(q.conjugated())
+                face_rest_quat[j] = q0.inverted()
+                if j in static_loc:
+                    face_rest_loc[j] = Vector((0.0, 0.0, 0.0))
+                else:
+                    l0 = p0_pos - psa_bone.orig_loc
+                    l0.rotate(psa_bone.post_quat.conjugated())
+                    face_rest_loc[j] = l0
 
         for i in range(0,min(maxframes, NumRawFrames)):
             # raw_key_index+= Totalbones * 5 #55
@@ -1810,8 +1839,8 @@ def psaimport(filepath,
 
                 quat.rotate( q.conjugated() )
 
-                if j in static_face:
-                    quat = Quaternion((1.0, 0.0, 0.0, 0.0))  # rest pose of the model
+                if j in face_rest_quat:
+                    quat = face_rest_quat[j] @ quat  # relative to the first frame
 
                 # @
                 # loc = psa_bone.post_quat.conjugated() * p_pos -  psa_bone.post_quat.conjugated() * psa_bone.orig_loc
@@ -1824,6 +1853,8 @@ def psaimport(filepath,
                     # but "pose bone" location is in "local space(bone)"
                     # so we need to transform from parent(edit_bone) to local space (pose_bone)
                     loc.rotate( psa_bone.post_quat.conjugated() )
+                    if j in face_rest_loc:
+                        loc = loc - face_rest_loc[j]  # relative to the first frame
 
                 # if not bRotationOnly:
                     # loc = (p_pos - psa_bone.orig_loc)

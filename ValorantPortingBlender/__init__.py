@@ -13,7 +13,7 @@ from .valorant_psk_psa_b5 import pskimport, psaimport
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 2, 1),
+    "version": (1, 2, 2),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -375,7 +375,12 @@ def import_animation(data):
 
     Log.information(f"Applying animation {name} to {armature.name}")
     # bKeepProportions keeps the agent's own face/body proportions (Valorant animations share one base skeleton)
-    psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True)
+    def on_error(message):
+        Log.error(message)
+        show_message(message, icon='ERROR')
+
+    psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
+              error_callback=on_error)
 
 
 def import_response(response):

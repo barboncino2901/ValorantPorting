@@ -14,6 +14,7 @@ public class AnimationItem
         var lastSlash = folder.LastIndexOf('/');
         if (lastSlash > 0) folder = folder[..lastSlash];
         if (folder.StartsWith("/Game/")) folder = folder["/Game/".Length..];
+        else if (folder.StartsWith("ShooterGame/Content/")) folder = folder["ShooterGame/Content/".Length..];
         Folder = folder;
     }
 

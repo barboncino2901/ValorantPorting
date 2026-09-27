@@ -25,7 +25,14 @@ public static class AnimationExport
         }
         catch (Exception ex)
         {
-            AppLog.Error($"Could not load animation {item.Name}: {ex.Message}");
+            AppLog.Error($"{item.Name} is not an animation sequence or could not be loaded ({ex.Message}).");
+            return null;
+        }
+
+        if (animation is UAnimSequence { AdditiveAnimType: not EAdditiveAnimationType.AAT_None })
+        {
+            AppLog.Warning($"{item.Name} is an additive animation (e.g. an aim pose). It is meant to be layered on top of " +
+                           "another animation and will look wrong on its own, so it was not sent.");
             return null;
         }
 

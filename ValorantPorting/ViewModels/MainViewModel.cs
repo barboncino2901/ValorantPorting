@@ -169,16 +169,45 @@ public partial class MainViewModel : ObservableObject
         if (animationsLoaded || AppVM.CUE4ParseVM is null) return;
         animationsLoaded = true;
 
-        var items = AppVM.CUE4ParseVM.AssetDataBuffers
-            .Where(a => a is not null && a.AssetClass.Text == "AnimSequence")
+        var registry = AppVM.CUE4ParseVM.AssetDataBuffers.Where(a => a is not null).ToList();
+        var items = registry
+            .Where(a => a.AssetClass.Text == "AnimSequence")
             .Select(a => new AnimationItem(a.PackageName.Text, a.AssetName.Text))
+            .ToList();
+
+        if (items.Count == 0)
+        {
+            // Valorant's shipped asset registry leaves animations out, so fall back to the file list:
+            // every package inside a folder whose path mentions "anim".
+            var topClasses = registry.GroupBy(a => a.AssetClass.Text).OrderByDescending(g => g.Count()).Take(15)
+                .Select(g => $"{g.Key}={g.Count()}");
+            AppLog.Information($"[Diag] Asset registry classes: {string.Join(", ", topClasses)}");
+
+            items = AppVM.CUE4ParseVM.Provider.Files.Keys
+                .Where(p => p.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) &&
+                            p.Contains("/anim", StringComparison.OrdinalIgnoreCase))
+                .Select(p =>
+                {
+                    var package = p[..^".uasset".Length];
+                    var name = package[(package.LastIndexOf('/') + 1)..];
+                    return new AnimationItem(package, name);
+                })
+                .ToList();
+
+            var prefixes = items.GroupBy(i => i.Name.Split('_')[0]).OrderByDescending(g => g.Count()).Take(20)
+                .Select(g => $"{g.Key}={g.Count()}");
+            AppLog.Information($"[Diag] Files in anim folders: {items.Count}. Name prefixes: {string.Join(", ", prefixes)}");
+            AppLog.Information($"[Diag] Samples: {string.Join(" | ", items.Where((_, i) => i % Math.Max(1, items.Count / 12) == 0).Take(12).Select(i => i.Folder + "/" + i.Name))}");
+        }
+
+        items = items
             .GroupBy(a => a.ObjectPath).Select(g => g.First())
             .OrderBy(a => a.Folder, StringComparer.OrdinalIgnoreCase)
             .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         Animations = new ObservableCollection<AnimationItem>(items);
-        AppLog.Information($"Animation list loaded: {items.Count} animations.");
+        AppLog.Information($"Animation list loaded: {items.Count} entries.");
     }
 
     [RelayCommand]
