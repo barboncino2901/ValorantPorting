@@ -109,6 +109,43 @@
                             </ListBox.ItemsPanel>
                         </ListBox>
                     </TabItem>
+                    <TabItem Style="{StaticResource TabItemEqualSize}">
+                        <TabItem.Header>
+                            <controls:TextWithIcon Label="Animations"
+                                                   ImageSource="/ValorantPorting;component/Resources/Dance.png" />
+                        </TabItem.Header>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ListBox Grid.Row="0" x:Name="AnimationList" ItemsSource="{Binding Animations}"
+                                     SelectedItem="{Binding SelectedAnimation, Mode=TwoWay}"
+                                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                     MouseDoubleClick="OnAnimationDoubleClick">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Folder}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <DockPanel Grid.Row="1" Margin="{adonisUi:Space 1}">
+                                <Button DockPanel.Dock="Right" Command="{Binding ExportAnimationBlenderCommand}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="/ValorantPorting;component/Resources/Blender.png"
+                                               VerticalAlignment="Center" Width="16" Height="16"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                        <TextBlock Text="Apply to selected armature in Blender" VerticalAlignment="Center" Margin="5 0 0 0" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock VerticalAlignment="Center" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="Select the agent/gun armature in Blender, pick an animation (search e.g. &quot;wushu dash&quot;, &quot;AK reload&quot;), then apply or double-click." />
+                            </DockPanel>
+                        </Grid>
+                    </TabItem>
                 </TabControl>
             </GroupBox>
 

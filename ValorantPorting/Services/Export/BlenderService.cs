@@ -25,7 +25,21 @@ public class BlenderService : SocketServiceBase
             AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/")
         };
 
-        var message = JsonConvert.SerializeObject(export);
+        SendMessage(JsonConvert.SerializeObject(export));
+    }
+
+    // Asks the Blender add-on to apply a .psa to the currently selected armature.
+    public static void SendAnimation(string name, string psaPath)
+    {
+        SendMessage(JsonConvert.SerializeObject(new
+        {
+            AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
+            Data = new { Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/") }
+        }));
+    }
+
+    private static void SendMessage(string message)
+    {
         var messageBytes = Encoding.ASCII.GetBytes(message);
         SendSpliced(Client, messageBytes, Globals.BUFFER_SIZE);
         Client.Send(Encoding.ASCII.GetBytes("MessageFinished"));

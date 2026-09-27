@@ -44,6 +44,19 @@ public partial class MainView
 
         var assetType = (EAssetType)tabControl.SelectedIndex;
         var handlers = AppVM.AssetHandlerVM.Handlers;
+
+        if (assetType == EAssetType.Animation)
+        {
+            foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
+            AppVM.MainVM.CurrentAsset = null;
+            AppVM.MainVM.Styles.Clear();
+            AppVM.MainVM.LoadAnimations();
+            ApplySearchFilter(AnimationList, SearchText);
+            DiscordService.Update(assetType);
+            AppVM.MainVM.CurrentAssetType = assetType;
+            return;
+        }
+
         foreach (var (handlerType, handlerData) in handlers)
             if (handlerType == assetType)
                 handlerData.PauseState.Unpause();
@@ -63,15 +76,34 @@ public partial class MainView
         var selected = (AssetSelectorItem)listBox.SelectedItem;
     }
 
+    private string SearchText = string.Empty;
+
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
     {
-        var searchBox = (TextBox)sender;
+        SearchText = ((TextBox)sender).Text;
         foreach (var tab in AssetControls.Items.OfType<TabItem>())
         {
-            var listBox = (ListBox)tab.Content;
-            listBox.Items.Filter = o => ((AssetSelectorItem)o).Match(searchBox.Text);
-            listBox.Items.Refresh();
+            var listBox = tab.Content as ListBox ?? AnimationList;
+            ApplySearchFilter(listBox, SearchText);
         }
+    }
+
+    private static void ApplySearchFilter(ListBox listBox, string text)
+    {
+        listBox.Items.Filter = string.IsNullOrWhiteSpace(text)
+            ? null
+            : o => o switch
+            {
+                AssetSelectorItem asset => asset.Match(text),
+                AnimationItem animation => animation.Match(text),
+                _ => true
+            };
+    }
+
+    private void OnAnimationDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (AppVM.MainVM.SelectedAnimation is not null)
+            AppVM.MainVM.ExportAnimationBlenderCommand.Execute(null);
     }
 
     private async void OnAssetSelectionChanged(object sender, SelectionChangedEventArgs e)

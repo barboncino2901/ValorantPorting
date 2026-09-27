@@ -8,14 +8,14 @@ import bpy
 import os
 import bpy.props
 from mathutils import Matrix
-from .io_import_scene_unreal_psa_psk_400 import pskimport
+from .valorant_psk_psa_b5 import pskimport, psaimport
 
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (4, 0, 0),
-    "description": "Blender Server for Valorant Porting",
+    "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
 }
 
@@ -341,7 +341,48 @@ def any(target, expr):
     return len(filtered) > 0
 
 
+def find_selected_armature():
+    obj = bpy.context.active_object
+    if obj is None:
+        return None
+    if obj.type == 'ARMATURE':
+        return obj
+    if obj.parent is not None and obj.parent.type == 'ARMATURE':
+        return obj.parent
+    for modifier in getattr(obj, "modifiers", []):
+        if modifier.type == 'ARMATURE' and modifier.object is not None:
+            return modifier.object
+    return None
+
+
+def show_message(message, title="Valorant Porting", icon='INFO'):
+    def draw(self, context):
+        self.layout.label(text=message)
+    try:
+        bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
+    except Exception:
+        pass
+
+
+def import_animation(data):
+    name = data.get("Name")
+    path = data.get("AnimationPath")
+    armature = find_selected_armature()
+    if armature is None:
+        Log.error(f"No armature selected for animation {name}")
+        show_message("Select the agent or gun armature first, then apply the animation again.", icon='ERROR')
+        return
+
+    Log.information(f"Applying animation {name} to {armature.name}")
+    # bKeepProportions keeps the agent's own face/body proportions (Valorant animations share one base skeleton)
+    psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True)
+
+
 def import_response(response):
+    if (response.get("Data") or {}).get("Type") == "Animation":
+        import_animation(response.get("Data"))
+        return
+
     import_shaders("VALORANT_Weapon.blend")
     import_shaders("VALORANT_Agent.blend")
 

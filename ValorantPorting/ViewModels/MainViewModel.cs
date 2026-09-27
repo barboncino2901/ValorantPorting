@@ -43,6 +43,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<StyleSelector> styles = new();
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> weapons = new();
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> gunbuddies = new();
+    [ObservableProperty] private ObservableCollection<AnimationItem> animations = new();
+    [ObservableProperty] private AnimationItem? selectedAnimation;
+    private bool animationsLoaded;
 
     public ImageSource StyleImage => currentAsset?.FullSource;
     public Visibility StyleVisibility => currentAsset is null ? Visibility.Collapsed : Visibility.Visible;
@@ -158,6 +161,41 @@ public partial class MainViewModel : ObservableObject
         loadTimez.Stop();
         AppLog.Information(
             $"Finished exporting {data.Name} to BLENDER in {Math.Round(loadTimez.Elapsed.TotalSeconds, 3)}s");
+    }
+
+    // Lists every animation sequence in the game from the asset registry (once).
+    public void LoadAnimations()
+    {
+        if (animationsLoaded || AppVM.CUE4ParseVM is null) return;
+        animationsLoaded = true;
+
+        var items = AppVM.CUE4ParseVM.AssetDataBuffers
+            .Where(a => a is not null && a.AssetClass.Text == "AnimSequence")
+            .Select(a => new AnimationItem(a.PackageName.Text, a.AssetName.Text))
+            .GroupBy(a => a.ObjectPath).Select(g => g.First())
+            .OrderBy(a => a.Folder, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Animations = new ObservableCollection<AnimationItem>(items);
+        AppLog.Information($"Animation list loaded: {items.Count} animations.");
+    }
+
+    [RelayCommand]
+    public async Task ExportAnimationBlender()
+    {
+        if (SelectedAnimation is not { } item)
+        {
+            AppLog.Warning("Select an animation first.");
+            return;
+        }
+
+        var timer = Stopwatch.StartNew();
+        var psaPath = await Task.Run(() => AnimationExport.ExportPsa(item));
+        if (psaPath is null) return;
+
+        BlenderService.SendAnimation(item.Name, psaPath);
+        AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
     }
 
     [RelayCommand]

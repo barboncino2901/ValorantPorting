@@ -17,7 +17,7 @@
 # ##### END GPL LICENSE BLOCK #####
 
 bl_info = {
-    "name": "Import Unreal Skeleton Mesh (.psk)/Animation Set (.psa) (280)",
+    "name": "Valorant PSK/PSA (Blender 5 fix)",
     "author": "Darknet, flufy3d, camg188, befzz",
     "version": (2, 8, 2),
     "blender": (4, 0, 0),
@@ -1352,6 +1352,16 @@ def blen_get_armature_from_selection():
   return armature_obj
 
 
+def _fcurve_new(action, owner, data_path, index):
+    """Blender < 4.4 style when available, otherwise the slotted-action API (Blender 5+)."""
+    if hasattr(action, "fcurves"):
+        return action.fcurves.new(data_path, index=index)
+    ad = owner.animation_data or owner.animation_data_create()
+    if ad.action != action:
+        ad.action = action  # Blender 5 requires the action to be assigned first
+    return action.fcurve_ensure_for_datablock(owner, data_path, index=index)
+
+
 def psaimport(filepath,
         context = None,
         oArmature = None,
@@ -1362,6 +1372,7 @@ def psaimport(filepath,
         bUpdateTimelineRange = False,
         bRotationOnly = False,
         bScaleDown = True,
+        bKeepProportions = True,
         fcurve_interpolation = 'LINEAR',
         # error_callback = __pass
         error_callback = print
@@ -1693,23 +1704,23 @@ def psaimport(filepath,
             pose_bone = psa_bone.pose_bone
 
             data_path = pose_bone.path_from_id("rotation_quaternion")
-            psa_bone.fcurve_quat_w = action.fcurves.new(data_path, index = 0)
-            psa_bone.fcurve_quat_x = action.fcurves.new(data_path, index = 1)
-            psa_bone.fcurve_quat_y = action.fcurves.new(data_path, index = 2)
-            psa_bone.fcurve_quat_z = action.fcurves.new(data_path, index = 3)
+            psa_bone.fcurve_quat_w = _fcurve_new(action, armature_obj, data_path, 0)
+            psa_bone.fcurve_quat_x = _fcurve_new(action, armature_obj, data_path, 1)
+            psa_bone.fcurve_quat_y = _fcurve_new(action, armature_obj, data_path, 2)
+            psa_bone.fcurve_quat_z = _fcurve_new(action, armature_obj, data_path, 3)
 
 
             if not bRotationOnly:
                 data_path = pose_bone.path_from_id("location")
-                psa_bone.fcurve_loc_x = action.fcurves.new(data_path, index = 0)
-                psa_bone.fcurve_loc_y = action.fcurves.new(data_path, index = 1)
-                psa_bone.fcurve_loc_z = action.fcurves.new(data_path, index = 2)
+                psa_bone.fcurve_loc_x = _fcurve_new(action, armature_obj, data_path, 0)
+                psa_bone.fcurve_loc_y = _fcurve_new(action, armature_obj, data_path, 1)
+                psa_bone.fcurve_loc_z = _fcurve_new(action, armature_obj, data_path, 2)
 
             if Raw_ScaleKey_List:
                 data_path = pose_bone.path_from_id("scale")
-                psa_bone.fcurve_scale_x = action.fcurves.new(data_path, index = 0)
-                psa_bone.fcurve_scale_y = action.fcurves.new(data_path, index = 1)
-                psa_bone.fcurve_scale_z = action.fcurves.new(data_path, index = 2)
+                psa_bone.fcurve_scale_x = _fcurve_new(action, armature_obj, data_path, 0)
+                psa_bone.fcurve_scale_y = _fcurve_new(action, armature_obj, data_path, 1)
+                psa_bone.fcurve_scale_z = _fcurve_new(action, armature_obj, data_path, 2)
 
 
                 psa_bone.fcurve_scale_x.keyframe_points.add(keyframes)
@@ -1734,6 +1745,18 @@ def psaimport(filepath,
                 psa_bone.fcurve_loc_x.keyframe_points.add(keyframes)
                 psa_bone.fcurve_loc_y.keyframe_points.add(keyframes)
                 psa_bone.fcurve_loc_z.keyframe_points.add(keyframes)
+
+        # Valorant animations are authored on one shared base skeleton. Bones whose location never
+        # changes in this action (face, fingers, most of the body) keep the model's own rest position,
+        # otherwise the base skeleton's proportions distort the agent (e.g. caved-in eyes).
+        static_loc = set()
+        if bKeepProportions:
+            eps = 0.0005 if bScaleDown else 0.05
+            for j in range(Totalbones):
+                p0 = Raw_Key_List[raw_key_index + j][0]
+                if all((Raw_Key_List[raw_key_index + f * Totalbones + j][0] - p0).length < eps
+                       for f in range(NumRawFrames)):
+                    static_loc.add(j)
 
         for i in range(0,min(maxframes, NumRawFrames)):
             # raw_key_index+= Totalbones * 5 #55
@@ -1774,7 +1797,9 @@ def psaimport(filepath,
                 # @
                 # loc = psa_bone.post_quat.conjugated() * p_pos -  psa_bone.post_quat.conjugated() * psa_bone.orig_loc
 
-                if not bRotationOnly:
+                if not bRotationOnly and j in static_loc:
+                    loc = Vector((0.0, 0.0, 0.0))
+                elif not bRotationOnly:
                     loc = (p_pos - psa_bone.orig_loc)
                     # "edit bone" location is in "parent space"
                     # but "pose bone" location is in "local space(bone)"
@@ -1886,6 +1911,9 @@ def psaimport(filepath,
     if not bActionsToTrack:
         if not scene.is_nla_tweakmode:
             armature_obj.animation_data.action = first_action
+            ad = armature_obj.animation_data
+            if hasattr(ad, "action_slot") and ad.action_slot is None and len(first_action.slots) > 0:
+                ad.action_slot = first_action.slots[0]
 
     if bUpdateTimelineRange:
 
@@ -2023,7 +2051,7 @@ class ImportProps():
             )
 
     def draw_psk(self, context):
-        props = bpy.context.scene.pskpsa_import
+        props = bpy.context.scene.valo_pskpsa_import
         layout = self.layout
         layout.prop(props, 'import_mode', expand = True)
         layout.prop(props, 'bReorientBones')
@@ -2046,7 +2074,7 @@ class ImportProps():
         layout.prop(props, 'fBonesize')
 
     def draw_psa(self, context):
-        props = context.scene.pskpsa_import
+        props = context.scene.valo_pskpsa_import
         layout = self.layout
         layout.prop(props,'bActionsToTrack')
         layout.prop(props,'bFilenameAsPrefix')
@@ -2112,7 +2140,7 @@ class PSKPSA_OT_hide_unused_bones(bpy.types.Operator):
 
 class IMPORT_OT_psk(bpy.types.Operator, ImportProps):
 
-    bl_idname = "import_scene.psk"
+    bl_idname = "import_scene.valo_psk"
     bl_label = "Import PSK"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
@@ -2130,7 +2158,7 @@ class IMPORT_OT_psk(bpy.types.Operator, ImportProps):
 
     def draw(self, context):
         self.draw_psk(context)
-        # self.layout.prop(context.scene.pskpsa_import, 'bDontInvertRoot')
+        # self.layout.prop(context.scene.valo_pskpsa_import, 'bDontInvertRoot')
     # draw = ImportProps.draw_psk
 
     def execute(self, context):
@@ -2173,7 +2201,7 @@ class IMPORT_OT_psk(bpy.types.Operator, ImportProps):
             no_errors = pskimport( **keywords )
 
         else:
-            props = bpy.context.scene.pskpsa_import
+            props = bpy.context.scene.valo_pskpsa_import
             if props.import_mode == 'Mesh':
                 bImportmesh = True
                 bImportbone = False
@@ -2216,7 +2244,7 @@ class IMPORT_OT_psk(bpy.types.Operator, ImportProps):
 
 class IMPORT_OT_psa(bpy.types.Operator, ImportProps):
     '''Load a skeleton animation from .psa\n * Selected armature will be used.'''
-    bl_idname = "import_scene.psa"
+    bl_idname = "import_scene.valo_psa"
     bl_label = "Import PSA"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
@@ -2234,10 +2262,10 @@ class IMPORT_OT_psa(bpy.types.Operator, ImportProps):
 
     def draw(self, context):
         self.draw_psa(context)
-        self.layout.prop(context.scene.pskpsa_import, 'bDontInvertRoot')
+        self.layout.prop(context.scene.valo_pskpsa_import, 'bDontInvertRoot')
 
     def execute(self, context):
-        props = context.scene.pskpsa_import
+        props = context.scene.valo_pskpsa_import
 
         if not self.directory:
             # possibly excuting from script, 
@@ -2284,10 +2312,10 @@ class IMPORT_OT_psa(bpy.types.Operator, ImportProps):
 
 class PSKPSA_PT_import_panel(bpy.types.Panel, ImportProps):
     bl_label = "PSK/PSA Import"
-    bl_idname = "VIEW3D_PT_udk_import_280"
+    bl_idname = "VIEW3D_PT_valo_psk_psa"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "PSK / PSA"
+    bl_category = "Valo PSK/PSA"
 
     # @classmethod
     # def poll(cls, context):
@@ -2297,7 +2325,7 @@ class PSKPSA_PT_import_panel(bpy.types.Panel, ImportProps):
         # return context.scene.get('pskpsa_import') is not None
 
     def draw(self, context):
-        props = context.scene.pskpsa_import
+        props = context.scene.valo_pskpsa_import
         if props is None:
             self.layout.label(text = "??")
             return
@@ -2322,8 +2350,8 @@ class PSKPSA_PT_import_panel(bpy.types.Panel, ImportProps):
 
 
 def menu_import_draw(self, context):
-    self.layout.operator(IMPORT_OT_psk.bl_idname, text = "Skeleton Mesh (.psk)")
-    self.layout.operator(IMPORT_OT_psa.bl_idname, text = "Skeleton Anim (.psa)")
+    self.layout.operator(IMPORT_OT_psk.bl_idname, text = "Valorant PSK (.psk) [Blender 5]")
+    self.layout.operator(IMPORT_OT_psa.bl_idname, text = "Valorant PSA (.psa) [Blender 5]")
 
 classes = (
         IMPORT_OT_psk,
@@ -2342,7 +2370,7 @@ def register():
 
     bpy.types.TOPBAR_MT_file_import.append(menu_import_draw)
 
-    bpy.types.Scene.pskpsa_import = PointerProperty(type = PskImportOptions)
+    bpy.types.Scene.valo_pskpsa_import = PointerProperty(type = PskImportOptions)
 
 def unregister():
     from bpy.utils import unregister_class
@@ -2351,7 +2379,7 @@ def unregister():
 
     bpy.types.TOPBAR_MT_file_import.remove(menu_import_draw)
 
-    del bpy.types.Scene.pskpsa_import
+    del bpy.types.Scene.valo_pskpsa_import
 
 if __name__ == "__main__":
     register()
