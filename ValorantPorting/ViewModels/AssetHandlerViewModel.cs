@@ -9,6 +9,7 @@ using CUE4Parse.UE4.AssetRegistry.Objects;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Engine;
+using CUE4Parse.UE4.Objects.UObject;
 using ValorantPorting.AppUtils;
 using ValorantPorting.Views.Controls;
 
@@ -21,11 +22,7 @@ public class AssetHandlerViewModel
         AssetType = EAssetType.GunBuddy,
         TargetCollection = AppVM.MainVM.Gunbuddies,
         ClassNames = new List<string> { "EquippableCharmDataAsset" },
-        IconGetter = UI_Asset =>
-        {
-            UI_Asset.TryGetValue(out UTexture2D? previewImage, "DisplayIcon");
-            return previewImage;
-        }
+        IconGetter = GetDisplayIcon
     };
 
     private readonly AssetHandlerData _characterHandler = new()
@@ -33,11 +30,7 @@ public class AssetHandlerViewModel
         AssetType = EAssetType.Character,
         TargetCollection = AppVM.MainVM.Outfits,
         ClassNames = new List<string> { "CharacterDataAsset" },
-        IconGetter = UI_Asset =>
-        {
-            UI_Asset.TryGetValue(out UTexture2D? previewImage, "DisplayIcon");
-            return previewImage;
-        }
+        IconGetter = GetDisplayIcon
     };
 
     private readonly AssetHandlerData _weaponHandler = new()
@@ -45,12 +38,19 @@ public class AssetHandlerViewModel
         AssetType = EAssetType.Weapon,
         TargetCollection = AppVM.MainVM.Weapons,
         ClassNames = new List<string> { "EquippableSkinDataAsset" },
-        IconGetter = UI_Asset =>
-        {
-            UI_Asset.TryGetValue(out UTexture2D? previewImage, "DisplayIcon");
-            return previewImage;
-        }
+        IconGetter = GetDisplayIcon
     };
+
+    // Newer items (e.g. Outlaw, Bandit, Warden) store DisplayIcon as a soft reference instead of a hard one.
+    private static UTexture2D? GetDisplayIcon(UObject uiAsset)
+    {
+        if (uiAsset.TryGetValue(out UTexture2D? previewImage, "DisplayIcon"))
+            return previewImage;
+        if (uiAsset.TryGetValue(out FSoftObjectPath softIcon, "DisplayIcon") &&
+            softIcon.TryLoad(AppVM.CUE4ParseVM.Provider, out UTexture2D? softImage))
+            return softImage;
+        return null;
+    }
 
     public readonly Dictionary<EAssetType, AssetHandlerData> Handlers;
 
@@ -178,12 +178,19 @@ public class AssetHandlerData
         actualAsset = classDefaultObject;
         var mainA = actualAsset;
 
-        if (actualAsset.TryGetValue(out UBlueprintGeneratedClass? uiObject, "UIData"))
+        UBlueprintGeneratedClass? uiObject = null;
+        if (!actualAsset.TryGetValue(out uiObject, "UIData") &&
+            actualAsset.TryGetValue(out FSoftObjectPath softUiData, "UIData"))
         {
-            var uiDefaultObject = uiObject?.ClassDefaultObject?.Load();
-            if (uiDefaultObject != null)
-                uiAsset = uiDefaultObject;
+            // Newer items reference their UIData class softly.
+            softUiData.TryLoad(AppVM.CUE4ParseVM.Provider, out uiObject);
         }
+
+        var uiDefaultObject = uiObject?.ClassDefaultObject?.Load();
+        if (uiDefaultObject != null)
+            uiAsset = uiDefaultObject;
+        else
+            AppLog.Warning($"[{AssetType}] Could not resolve UIData for: {firstTag}");
 
         // switch on asset type
         var loadable = "None";
@@ -251,7 +258,11 @@ public class AssetHandlerData
         }
 
         var previewImage = IconGetter(uiAsset);
-        if (previewImage is null) return;
+        if (previewImage is null)
+        {
+            AppLog.Warning($"[{AssetType}] No DisplayIcon found, skipping: {firstTag}");
+            return;
+        }
 
         var dedupeKey = uiAsset.Name;
         if (!string.IsNullOrEmpty(dedupeKey) && !_seenDisplayIds.TryAdd(dedupeKey, 0))
