@@ -149,6 +149,41 @@
                             </DockPanel>
                         </Grid>
                     </TabItem>
+                    <TabItem Style="{StaticResource TabItemEqualSize}">
+                        <TabItem.Header>
+                            <controls:TextWithIcon Label="Maps"
+                                                   ImageSource="/ValorantPorting;component/Resources/Props.png" />
+                        </TabItem.Header>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ListBox Grid.Row="0" x:Name="MapList" ItemsSource="{Binding Maps}"
+                                     SelectedItem="{Binding SelectedMap, Mode=TwoWay}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <DockPanel Grid.Row="1" Margin="{adonisUi:Space 1}">
+                                <Button DockPanel.Dock="Right" Command="{Binding ExportMapBlenderCommand}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="/ValorantPorting;component/Resources/Blender.png"
+                                               VerticalAlignment="Center" Width="16" Height="16"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                        <TextBlock Text="Export map to Blender" VerticalAlignment="Center" Margin="5 0 0 0" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock VerticalAlignment="Center" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="Experimental. The first export of a map can take several minutes and a few GB of disk space; Blender freezes while it imports." />
+                            </DockPanel>
+                        </Grid>
+                    </TabItem>
                 </TabControl>
             </GroupBox>
 

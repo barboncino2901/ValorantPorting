@@ -38,6 +38,16 @@ public class BlenderService : SocketServiceBase
         }));
     }
 
+    // Asks the Blender add-on to import a map exported as USD.
+    public static void SendMap(string name, string usdPath)
+    {
+        SendMessage(JsonConvert.SerializeObject(new
+        {
+            AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
+            Data = new { Name = name, Type = "Map", MapPath = usdPath.Replace("\\", "/") }
+        }));
+    }
+
     private static void SendMessage(string message)
     {
         var messageBytes = Encoding.ASCII.GetBytes(message);

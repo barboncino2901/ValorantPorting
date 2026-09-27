@@ -15,7 +15,7 @@ from .valorant_psk_psa_b5 import pskimport, psaimport
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 3, 1),
+    "version": (1, 4, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -434,9 +434,28 @@ def import_animation(data):
               error_callback=on_error)
 
 
+def import_map(data):
+    name = data.get("Name")
+    path = data.get("MapPath")
+    Log.information(f"Importing map {name} from {path}")
+    options = dict(filepath=path, import_usd_preview=True, support_scene_instancing=True, import_visible_only=True,
+                   create_collection=True, import_lights=False, import_cameras=False, set_frame_range=False,
+                   read_mesh_colors=True, apply_unit_conversion_scale=True)
+    window_manager = bpy.context.window_manager
+    if window_manager.windows:
+        with bpy.context.temp_override(window=window_manager.windows[0]):
+            bpy.ops.wm.usd_import(**options)
+    else:
+        bpy.ops.wm.usd_import(**options)
+    Log.information(f"Imported map {name}")
+
+
 def import_response(response):
     if (response.get("Data") or {}).get("Type") == "Animation":
         import_animation(response.get("Data"))
+        return
+    if (response.get("Data") or {}).get("Type") == "Map":
+        import_map(response.get("Data"))
         return
 
     import_shaders("VALORANT_Weapon.blend")

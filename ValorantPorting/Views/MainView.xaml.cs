@@ -46,6 +46,18 @@ public partial class MainView
         var assetType = (EAssetType)tabControl.SelectedIndex;
         var handlers = AppVM.AssetHandlerVM.Handlers;
 
+        if (assetType == EAssetType.Map)
+        {
+            foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
+            AppVM.MainVM.CurrentAsset = null;
+            AppVM.MainVM.Styles.Clear();
+            AppVM.MainVM.LoadMaps();
+            ApplySearchFilter(MapList, SearchText);
+            DiscordService.Update(assetType);
+            AppVM.MainVM.CurrentAssetType = assetType;
+            return;
+        }
+
         if (assetType == EAssetType.Animation)
         {
             foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
@@ -84,7 +96,8 @@ public partial class MainView
         SearchText = ((TextBox)sender).Text;
         foreach (var tab in AssetControls.Items.OfType<TabItem>())
         {
-            var listBox = tab.Content as ListBox ?? AnimationList;
+            var listBox = tab.Content as ListBox ??
+                          (ReferenceEquals(tab.Content, MapList.Parent) ? MapList : AnimationList);
             ApplySearchFilter(listBox, SearchText);
         }
     }
@@ -96,6 +109,7 @@ public partial class MainView
         {
             AssetSelectorItem asset => !hasText || asset.Match(text),
             AnimationItem animation => (!hasText || animation.Match(text)) && AppVM.MainVM.MatchesAnimationContext(animation),
+            MapItem map => !hasText || map.Match(text),
             _ => true
         };
     }

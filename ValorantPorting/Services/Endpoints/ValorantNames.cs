@@ -18,6 +18,11 @@ public static class ValorantNames
 {
     private const string AgentsUrl = "https://valorant-api.com/v1/agents?isPlayableCharacter=true";
     private const string WeaponsUrl = "https://valorant-api.com/v1/weapons";
+    private const string MapsUrl = "https://valorant-api.com/v1/maps";
+
+    public record MapInfo(string Name, string MapUrl, string? Description);
+
+    public static IReadOnlyList<MapInfo> Maps { get; private set; } = [];
 
     public static IReadOnlyDictionary<string, AnimationNamer.Agent> Agents { get; private set; } = new Dictionary<string, AnimationNamer.Agent>();
     public static IReadOnlyDictionary<string, string> Guns { get; private set; } = new Dictionary<string, string>();
@@ -40,7 +45,8 @@ public static class ValorantNames
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
                 var agents = JObject.Parse(await http.GetStringAsync(AgentsUrl));
                 var weapons = JObject.Parse(await http.GetStringAsync(WeaponsUrl));
-                data = new JObject { ["agents"] = agents["data"], ["weapons"] = weapons["data"] };
+                var maps = JObject.Parse(await http.GetStringAsync(MapsUrl));
+                data = new JObject { ["agents"] = agents["data"], ["weapons"] = weapons["data"], ["maps"] = maps["data"] };
                 await File.WriteAllTextAsync(cacheFile, data.ToString(Newtonsoft.Json.Formatting.None));
             }
             catch (Exception ex)
@@ -107,9 +113,19 @@ public static class ValorantNames
             }
         }
 
+        var mapList = new List<MapInfo>();
+        foreach (var map in data["maps"]?.Children<JObject>() ?? [])
+        {
+            var name = map.Value<string>("displayName");
+            var url = map.Value<string>("mapUrl");
+            if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(url))
+                mapList.Add(new MapInfo(name, url, map.Value<string>("tacticalDescription")));
+        }
+
         Agents = agents;
         Guns = guns;
         Skins = skins;
+        Maps = mapList;
     }
 
     // ".../Rifles/AK/AKPrimaryAsset" -> "AK"

@@ -46,6 +46,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> gunbuddies = new();
     [ObservableProperty] private ObservableCollection<AnimationItem> animations = new();
     [ObservableProperty] private AnimationItem? selectedAnimation;
+    [ObservableProperty] private ObservableCollection<MapItem> maps = new();
+    [ObservableProperty] private MapItem? selectedMap;
+    private bool mapsLoaded;
+    private bool mapExportRunning;
     private bool animationsLoaded;
 
     // Animations tab filter ("Show animations for" dropdown). "Follow Blender selection" uses whatever Valorant
@@ -297,6 +301,52 @@ public partial class MainViewModel : ObservableObject
                item.Name.Contains("_Core_", StringComparison.OrdinalIgnoreCase) &&
                (!folder.StartsWith("Characters/", StringComparison.OrdinalIgnoreCase) ||
                 folder.StartsWith("Characters/_", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Lists the maps (names from valorant-api.com) that exist in the local game files.
+    public void LoadMaps()
+    {
+        if (mapsLoaded || AppVM.CUE4ParseVM is null) return;
+        mapsLoaded = true;
+        ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
+
+        var files = AppVM.CUE4ParseVM.Provider.Files;
+        var items = ValorantNames.Maps
+            .Where(m => files.ContainsKey("ShooterGame/Content/" + m.MapUrl["/Game/".Length..] + ".umap"))
+            .GroupBy(m => m.MapUrl).Select(g => g.First())
+            .Select(m => new MapItem(m.Name, m.MapUrl, m.Description))
+            .OrderBy(m => m.Details.StartsWith("Other") ? 1 : 0)
+            .ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Maps = new ObservableCollection<MapItem>(items);
+        AppLog.Information($"Map list loaded: {items.Count} maps.");
+    }
+
+    [RelayCommand]
+    public async Task ExportMapBlender()
+    {
+        if (SelectedMap is not { } map)
+        {
+            AppLog.Warning("Select a map first.");
+            return;
+        }
+
+        if (mapExportRunning) return;
+        mapExportRunning = true;
+        try
+        {
+            var usdPath = await Task.Run(() => MapExport.ExportUsd(map));
+            if (usdPath is null) return;
+
+            BlenderService.SendMap(map.Name, usdPath);
+            AppLog.Information($"Sent map {map.Name} to BLENDER. Blender may freeze for a while during the import.");
+        }
+        finally
+        {
+            mapExportRunning = false;
+            _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading("After map export"));
+        }
     }
 
     // Lists every animation sequence in the game from the asset registry (once).
