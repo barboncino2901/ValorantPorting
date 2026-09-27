@@ -136,6 +136,8 @@ public class AssetHandlerData
         {
             await DoLoad(data);
         });
+
+        MemoryHelper.ReleaseAfterLoading($"{AssetType} tab loaded");
     }
 
     // UIData may be a hard or (on newer items) a soft class reference.

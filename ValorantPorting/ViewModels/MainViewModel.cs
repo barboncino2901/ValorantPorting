@@ -79,6 +79,7 @@ public partial class MainViewModel : ObservableObject
             loadTime.Stop();
 
             AppLog.Information($"Finished loading game files in {Math.Round(loadTime.Elapsed.TotalSeconds, 3)}s");
+            MemoryHelper.ReleaseAfterLoading("Game files loaded");
             IsReady = true;
 
             AppVM.AssetHandlerVM = new AssetHandlerViewModel();
@@ -339,6 +340,7 @@ public partial class MainViewModel : ObservableObject
 
         Animations = new ObservableCollection<AnimationItem>(items);
         AppLog.Information($"Animation list loaded: {items.Count} entries.");
+        MemoryHelper.ReleaseAfterLoading("Animation list loaded");
     }
 
     [RelayCommand]
