@@ -154,9 +154,9 @@ public static class MapExport
     }
 
     // Sub-levels that aren't part of the finished, visible map: designer blockouts ("greybox"), outdated/hidden
-    // content, collision volumes, particle effects, navigation, audio and profiling.
+    // content, collision volumes, minimap callout volumes, particle effects, navigation, audio and profiling.
     private static readonly string[] SkippedSubLevels =
-        ["Greybox", "Outdated", "_hide", "Reference", "BV", "KillVolume", "Navmesh", "Audio", "Profiling", "VFX", "AuxiliaryZones"];
+        ["Greybox", "Outdated", "_hide", "Reference", "BV", "KillVolume", "Navmesh", "Audio", "Profiling", "VFX", "AuxiliaryZones", "Callout"];
 
     // Valorant maps are split into streamed sub-levels; export the visual ones (art, lighting, gameplay objects like
     // doors) and drop the rest before anything is written.

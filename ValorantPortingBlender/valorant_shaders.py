@@ -457,11 +457,50 @@ def add_default_vertex_colors(objects):
     return added
 
 
+def find_material_info(summary, material_name):
+    """Summary entry for a Blender material: ignores Blender's ".001" copies, the USD export's "_1" renames of
+    duplicate names, and letter case (asset names like "ColorPalette_M0_OraNGE" vs. the material "..._Orange")."""
+    lowered = summary.get("__lowered__")
+    if lowered is None:
+        lowered = summary["__lowered__"] = {k.lower(): v for k, v in summary.items() if k != "__lowered__"}
+    name = re.sub(r"\.\d{3}$", "", material_name).lower()
+    return lowered.get(name) or lowered.get(re.sub(r"_\d+$", "", name))
+
+
+def merge_duplicate_materials(materials, objects):
+    """The USD import creates one copy of a material per mesh that references it ("X", "X.001", ...). Point the
+    imported meshes at one copy so every material is rebuilt once. Returns the materials that remain."""
+    groups = {}
+    for material in materials:
+        groups.setdefault(re.sub(r"\.\d{3}$", "", material.name), []).append(material)
+    replace = {}
+    kept = []
+    for name, copies in groups.items():
+        keep = next((m for m in copies if m.name == name), copies[0])
+        kept.append(keep)
+        replace.update({copy: keep for copy in copies if copy is not keep})
+    if not replace:
+        return kept
+
+    for mesh in {o.data for o in objects if o.type == 'MESH' and o.data is not None}:
+        for index, material in enumerate(mesh.materials):
+            if material in replace:
+                mesh.materials[index] = replace[material]
+    for obj in objects:
+        for slot in obj.material_slots:
+            if slot.link == 'OBJECT' and slot.material in replace:
+                slot.material = replace[slot.material]
+    unused = [m for m in replace if m.users == 0]
+    bpy.data.batch_remove(unused)
+    kept.extend(m for m in replace if m not in unused)  # still used elsewhere: leave it as it is
+    return kept
+
+
 def rebuild_materials(materials, summary, assets_root):
     """Rebuild every material that has summary data; returns (base, blend, kept) counts."""
     base = blend = kept = 0
     for material in materials:
-        info = summary.get(re.sub(r"\.\d{3}$", "", material.name))
+        info = find_material_info(summary, material.name)
         if not info or not material.use_nodes or not info.get("Textures"):
             kept += 1
             continue

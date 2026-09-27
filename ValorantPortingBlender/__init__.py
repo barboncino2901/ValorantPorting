@@ -12,12 +12,12 @@ import bpy.props
 from mathutils import Matrix, Vector
 import math
 from .valorant_psk_psa_b5 import pskimport, psaimport
-from .valorant_shaders import rebuild_materials, add_default_vertex_colors
+from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merge_duplicate_materials, find_material_info
 
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 5, 1),
+    "version": (1, 5, 2),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -460,7 +460,7 @@ def fix_valorant_materials(materials, summary):
             links.new(separate.outputs['Green'], principled.inputs['Roughness'])
             mra_fixed += 1
 
-        info = summary.get(re.sub(r"\.\d{3}$", "", material.name), {})
+        info = find_material_info(summary, material.name) or {}
         ao = (info.get("Colors") or {}).get("AO color")
         base_link = principled.inputs['Base Color'].links[0] if principled.inputs['Base Color'].is_linked else None
         if ao and base_link is not None and not principled.inputs['Alpha'].is_linked:
@@ -478,7 +478,7 @@ def fix_valorant_materials(materials, summary):
 
 
 # Materials that only exist in the editor or as effects: developer grids/blockouts, light-shaft cards and smoke/glow effect meshes.
-HELPER_MATERIALS = re.compile(r"^(M_SuperGrid|WorldGridMaterial|M_Flat_|MI_LS_|M_LightShaft|LightShaft|OmenFunLand|MI_Smoke|MI_SpriteGlow)", re.IGNORECASE)
+HELPER_MATERIALS = re.compile(r"^(M_SuperGrid|WorldGridMaterial|M_Flat_|MI_LS_|M_LightShaft|LightShaft|OmenFunLand|MI_Smoke|MI_SpriteGlow|Callout_Volume)", re.IGNORECASE)
 
 
 def remove_helper_objects(objects):
@@ -569,7 +569,8 @@ def import_map(data, assets_root=""):
         with open(materials_path, encoding="utf-8") as file:
             summary = json.load(file)
     remove_helper_objects([o for o in bpy.data.objects if o not in objects_before])
-    new_materials = [m for m in bpy.data.materials if m not in materials_before]
+    new_objects = [o for o in bpy.data.objects if o not in objects_before]
+    new_materials = merge_duplicate_materials([m for m in bpy.data.materials if m not in materials_before], new_objects)
     base, blend, kept = rebuild_materials(new_materials, summary, assets_root)
     Log.information(f"Valorant shaders: {base} base, {blend} two-layer blend, {kept} kept as imported")
     fix_valorant_materials(new_materials, summary)  # fallback fixes for materials that weren't rebuilt
