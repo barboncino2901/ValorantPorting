@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CUE4Parse_Conversion;
+using CUE4Parse_Conversion.Dto;
 using CUE4Parse_Conversion.Options;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Engine;
@@ -40,7 +41,7 @@ public static class MapExport
             return null;
         }
 
-        var session = new ExportSession(IncludeAllSubLevels)
+        var session = new ExportSession(SelectSubLevels)
         {
             MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2)
         };
@@ -108,14 +109,22 @@ public static class MapExport
         return path;
     }
 
-    // Valorant maps are split into streamed sub-levels (art, geometry, lighting, gameplay...). For this first
-    // version include all of them, and log their names so we can learn which ones are worth importing.
-    private static void IncludeAllSubLevels(StreamingLevelFilterArgs args, CancellationToken ct)
+    // Sub-levels that aren't part of the finished, visible map: designer blockouts ("greybox"), outdated/hidden
+    // content, collision volumes, particle effects, navigation, audio and profiling.
+    private static readonly string[] SkippedSubLevels =
+        ["Greybox", "Outdated", "_hide", "Reference", "BV", "KillVolume", "Navmesh", "Audio", "Profiling", "VFX", "AuxiliaryZones"];
+
+    // Valorant maps are split into streamed sub-levels; export the visual ones (art, lighting, gameplay objects like
+    // doors) and drop the rest before anything is written.
+    private static void SelectSubLevels(StreamingLevelFilterArgs args, CancellationToken ct)
     {
-        if (args.StreamingLevels.Count == 0) return;
-        AppLog.Information($"{args.WorldName}: {args.StreamingLevels.Count} sub-levels: " +
-                           string.Join(", ", args.StreamingLevels.Select(l => l.World.Name + (l.IsPersistent ? "" : "*"))) +
-                           "  (* = streamed in the game)");
-        foreach (var level in args.StreamingLevels) level.IsPersistent = true;
+        if (args.StreamingLevels is not List<StreamingLevel> levels || levels.Count == 0) return;
+
+        var skipped = levels.Where(l => SkippedSubLevels.Any(s => l.World.Name.Contains(s, StringComparison.OrdinalIgnoreCase))).ToList();
+        levels.RemoveAll(skipped.Contains);
+        foreach (var level in levels) level.IsPersistent = true;
+
+        AppLog.Information($"{args.WorldName}: exporting {levels.Count} sub-levels, skipped {skipped.Count} " +
+                           $"({string.Join(", ", skipped.Select(l => l.World.Name))})");
     }
 }

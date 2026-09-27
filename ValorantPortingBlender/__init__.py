@@ -15,7 +15,7 @@ from .valorant_psk_psa_b5 import pskimport, psaimport
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 4, 1),
+    "version": (1, 4, 2),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -475,6 +475,23 @@ def fix_valorant_materials(materials, summary):
     Log.information(f"Material fixes: {mra_fixed} MRA, {ao_fixed} foliage AO color")
 
 
+# Materials that only exist in the editor or as effects: developer grids/blockouts, light-shaft cards and smoke/glow effect meshes.
+HELPER_MATERIALS = re.compile(r"^(M_SuperGrid|WorldGridMaterial|M_Flat_|MI_LS_|M_LightShaft|LightShaft|OmenFunLand|MI_Smoke|MI_SpriteGlow)", re.IGNORECASE)
+
+
+def remove_helper_objects(objects):
+    """Deletes imported objects whose materials are all editor helpers (they show up as white/grid shapes)."""
+    removed = 0
+    for obj in list(objects):
+        if obj.type != 'MESH':
+            continue
+        materials = [slot.material for slot in obj.material_slots if slot.material]
+        if materials and all(HELPER_MATERIALS.match(re.sub(r"\.\d{3}$", "", m.name)) for m in materials):
+            bpy.data.objects.remove(obj, do_unlink=True)
+            removed += 1
+    Log.information(f"Removed {removed} editor helper objects (blockout grids, light shafts)")
+
+
 def import_map(data):
     name = data.get("Name")
     path = data.get("MapPath")
@@ -483,6 +500,7 @@ def import_map(data):
                    create_collection=True, import_lights=False, import_cameras=False, set_frame_range=False,
                    read_mesh_colors=True, apply_unit_conversion_scale=True)
     materials_before = set(bpy.data.materials)
+    objects_before = set(bpy.data.objects)
     window_manager = bpy.context.window_manager
     if window_manager.windows:
         with bpy.context.temp_override(window=window_manager.windows[0]):
@@ -495,6 +513,7 @@ def import_map(data):
     if materials_path and os.path.exists(materials_path):
         with open(materials_path, encoding="utf-8") as file:
             summary = json.load(file)
+    remove_helper_objects([o for o in bpy.data.objects if o not in objects_before])
     fix_valorant_materials([m for m in bpy.data.materials if m not in materials_before], summary)
     Log.information(f"Imported map {name}")
 
