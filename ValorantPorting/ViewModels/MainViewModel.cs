@@ -66,6 +66,17 @@ public partial class MainViewModel : ObservableObject
 
     public event Action? AnimationFilterChanged;
 
+    // "Show:" dropdown next to the search box: everything, only favorites, or recently sent items (newest first).
+    public KeyValuePair<ELibraryFilter, string>[] LibraryFilters { get; } =
+    [
+        new(ELibraryFilter.All, "Show: All"),
+        new(ELibraryFilter.Favorites, "★ Favorites"),
+        new(ELibraryFilter.Recent, "🕘 Recent")
+    ];
+    [ObservableProperty] private ELibraryFilter libraryFilter = ELibraryFilter.All;
+    public event Action? LibraryFilterChanged;
+    partial void OnLibraryFilterChanged(ELibraryFilter value) => LibraryFilterChanged?.Invoke();
+
     public ImageSource StyleImage => currentAsset?.FullSource;
     public Visibility StyleVisibility => currentAsset is null ? Visibility.Collapsed : Visibility.Visible;
 
@@ -188,6 +199,7 @@ public partial class MainViewModel : ObservableObject
             AnimationFilterKey = filterKey
         });
         RegisterSentAsset(filterKey);
+        if (currentAsset is ILibraryItem sentItem) UserLibrary.AddRecent(sentItem.LibraryId);
         loadTimez.Stop();
         AppLog.Information(
             $"Finished exporting {data.Name} to BLENDER in {Math.Round(loadTimez.Elapsed.TotalSeconds, 3)}s");
@@ -340,6 +352,7 @@ public partial class MainViewModel : ObservableObject
             if (exported is not { } files) return;
 
             BlenderService.SendMap(map.Name, files.Scene, files.Materials);
+            UserLibrary.AddRecent(map.LibraryId);
             AppLog.Information($"Sent map {map.Name} to BLENDER. Blender may freeze for a while during the import.");
         }
         finally
@@ -407,6 +420,7 @@ public partial class MainViewModel : ObservableObject
             if (psaPath is null) return;
 
             BlenderService.SendAnimation(item.Name, psaPath);
+            UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));
         }

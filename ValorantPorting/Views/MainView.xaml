@@ -10,6 +10,16 @@
     <Window.InputBindings>
         <KeyBinding Key="R" Modifiers="Control" Command="{Binding MenuCommand}" CommandParameter="File_Restart" />
     </Window.InputBindings>
+    <adonisCtrls:AdonisWindow.Resources>
+        <BooleanToVisibilityConverter x:Key="FavoriteVisibility" />
+        <!-- right-click menu on every item (tiles, animations, maps) -->
+        <ContextMenu x:Key="LibraryItemMenu" x:Shared="False" Opened="OnLibraryMenuOpened">
+            <MenuItem Header="Add to favorites" Click="OnToggleFavoriteClick" />
+        </ContextMenu>
+        <Style x:Key="LibraryItemContainer" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="ContextMenu" Value="{StaticResource LibraryItemMenu}" />
+        </Style>
+    </adonisCtrls:AdonisWindow.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -57,8 +67,13 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <TextBox Grid.Row="0" Grid.Column="0" Margin="{adonisUi:Space 1}"
-                     adonisExt:WatermarkExtension.Watermark="Search..." TextChanged="OnSearchTextChanged" />
+            <DockPanel Grid.Row="0" Grid.Column="0" Margin="{adonisUi:Space 1}">
+                <ComboBox DockPanel.Dock="Right" Width="130" Margin="6 0 0 0"
+                          ItemsSource="{Binding LibraryFilters}" DisplayMemberPath="Value" SelectedValuePath="Key"
+                          SelectedValue="{Binding LibraryFilter, Mode=TwoWay}"
+                          ToolTip="Show everything, only your favorites (right-click an item to add it), or what you recently sent to Blender (newest first)." />
+                <TextBox adonisExt:WatermarkExtension.Watermark="Search..." TextChanged="OnSearchTextChanged" />
+            </DockPanel>
             <GroupBox Grid.Row="1" Grid.Column="0" Padding="{adonisUi:Space 0}" adonisExt:LayerExtension.Layer="2"
                       Background="Transparent">
                 <TabControl Name="AssetControls" SelectionChanged="OnAssetTabSelectionChanged"
@@ -68,7 +83,7 @@
                             <controls:TextWithIcon Label="Agents"
                                                    ImageSource="/ValorantPorting;component/Resources/Outfit.png" />
                         </TabItem.Header>
-                        <ListBox ItemsSource="{Binding Outfits}" SelectionChanged="OnAssetSelectionChanged">
+                        <ListBox ItemsSource="{Binding Outfits}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <controls:UniformGridPanel IsItemsHost="True" Rows="5" Columns="10"
@@ -82,7 +97,7 @@
                             <controls:TextWithIcon Label="Weapon Skins"
                                                    ImageSource="/ValorantPorting;component/Resources/Weapon.png" />
                         </TabItem.Header>
-                        <ListBox ItemsSource="{Binding Weapons}" SelectionChanged="OnAssetSelectionChanged">
+                        <ListBox ItemsSource="{Binding Weapons}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <controls:UniformGridPanel IsItemsHost="True" Rows="5" Columns="6"
@@ -96,7 +111,7 @@
                             <controls:TextWithIcon Label="Gun Buddies"
                                                    ImageSource="/ValorantPorting;component/Resources/Mesh.png" />
                         </TabItem.Header>
-                        <ListBox ItemsSource="{Binding Gunbuddies}" SelectionChanged="OnAssetSelectionChanged">
+                        <ListBox ItemsSource="{Binding Gunbuddies}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <controls:UniformGridPanel IsItemsHost="True" Rows="5" Columns="10"
@@ -125,11 +140,15 @@
                             <ListBox Grid.Row="1" x:Name="AnimationList" ItemsSource="{Binding Animations}"
                                      SelectedItem="{Binding SelectedAnimation, Mode=TwoWay}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                                     MouseDoubleClick="OnAnimationDoubleClick">
+                                     MouseDoubleClick="OnAnimationDoubleClick" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Margin="2" ToolTip="{Binding Folder}">
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
+                                                           Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                            </StackPanel>
                                             <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
                                         </StackPanel>
                                     </DataTemplate>
@@ -160,11 +179,15 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <ListBox Grid.Row="0" x:Name="MapList" ItemsSource="{Binding Maps}"
-                                     SelectedItem="{Binding SelectedMap, Mode=TwoWay}">
+                                     SelectedItem="{Binding SelectedMap, Mode=TwoWay}" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Margin="2">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
+                                                           Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            </StackPanel>
                                             <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
                                         </StackPanel>
                                     </DataTemplate>

@@ -4,6 +4,9 @@
              xmlns:local="clr-namespace:ValorantPorting.Views.Controls"
              xmlns:adonisUi="clr-namespace:AdonisUI;assembly=AdonisUI"
              DataContext="{Binding RelativeSource={RelativeSource Self}}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="FavoriteVisibility" />
+    </UserControl.Resources>
     <StackPanel HorizontalAlignment="Center" Width="64">
         <StackPanel.ToolTip>
             <ToolTip Padding="0" BorderThickness="1"
@@ -16,7 +19,17 @@
                 </StackPanel>
             </ToolTip>
         </StackPanel.ToolTip>
-        <Image x:Name="DisplayImage" Width="64" Height="64" RenderOptions.BitmapScalingMode="HighQuality" />
+        <Grid Width="64" Height="64">
+            <Image x:Name="DisplayImage" Width="64" Height="64" RenderOptions.BitmapScalingMode="HighQuality" />
+            <!-- favorite badge -->
+            <TextBlock Text="★" FontSize="14" Foreground="Gold" HorizontalAlignment="Right" VerticalAlignment="Top"
+                       Margin="0 -2 1 0" IsHitTestVisible="False"
+                       Visibility="{Binding IsFavorite, RelativeSource={RelativeSource AncestorType=local:AssetSelectorItem}, Converter={StaticResource FavoriteVisibility}}">
+                <TextBlock.Effect>
+                    <DropShadowEffect ShadowDepth="0" BlurRadius="3" Opacity="0.9" />
+                </TextBlock.Effect>
+            </TextBlock>
+        </Grid>
         <TextBlock Text="{Binding DisplayName, RelativeSource={RelativeSource AncestorType=local:AssetSelectorItem}}"
                    VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="WordEllipsis" />
     </StackPanel>

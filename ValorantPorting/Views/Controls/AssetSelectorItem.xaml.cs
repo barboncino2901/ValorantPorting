@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Windows;
+using ValorantPorting.AppUtils;
 using System.Text.RegularExpressions;
 using System.Windows.Media.Imaging;
 using CUE4Parse_Conversion.Textures;
@@ -10,7 +12,7 @@ using ValorantPorting.ViewModels;
 
 namespace ValorantPorting.Views.Controls;
 
-public partial class AssetSelectorItem : IExportableAsset
+public partial class AssetSelectorItem : IExportableAsset, ILibraryItem
 {
     private const int MARGIN = 2;
     private const int THUMBNAIL_SIZE = 128; // tiles are 64px, the details panel 88px; 128 stays sharp on high-DPI screens
@@ -32,6 +34,7 @@ public partial class AssetSelectorItem : IExportableAsset
 
         TooltipName = $"{DisplayName} ({ID})";
         IsRandom = isRandomSelector;
+        IsFavorite = UserLibrary.IsFavorite(LibraryId);
 
         using var iconBitmap = previewTexture.Decode()?.ToSkBitmap();
         if (iconBitmap is null) return;
@@ -68,6 +71,18 @@ public partial class AssetSelectorItem : IExportableAsset
     public void ReleaseGameData() => resolved = null;
 
     public string PackagePath { get; }
+
+    public static readonly DependencyProperty IsFavoriteProperty =
+        DependencyProperty.Register(nameof(IsFavorite), typeof(bool), typeof(AssetSelectorItem));
+
+    public bool IsFavorite
+    {
+        get => (bool) GetValue(IsFavoriteProperty);
+        set => SetValue(IsFavoriteProperty, value);
+    }
+
+    public string LibraryId => "asset:" + PackagePath;
+    public int RecentRank => UserLibrary.RecentRank(LibraryId);
     public UObject UIAsset { get => Resolved?.UiAsset ?? new UObject(); set { } }
     public UObject MainAsset { get => Resolved?.MainAsset ?? new UObject(); set { } }
     public BitmapImage FullSource { get; set; }

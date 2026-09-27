@@ -1,11 +1,13 @@
 using System;
+using CommunityToolkit.Mvvm.ComponentModel;
+using ValorantPorting.AppUtils;
 using ValorantPorting.Export;
 using ValorantPorting.Services.Endpoints;
 
 namespace ValorantPorting.Views.Controls;
 
 // One animation in the Animations tab (Valorant animations have no icons, so this is a text entry).
-public class AnimationItem
+public partial class AnimationItem : ObservableObject, ILibraryItem
 {
     public AnimationItem(string packageName, string assetName)
     {
@@ -21,7 +23,12 @@ public class AnimationItem
 
         (Title, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
         Details = View.Length > 0 ? $"{View}  ·  {Name}" : Name;
+        IsFavorite = UserLibrary.IsFavorite(LibraryId);
     }
+
+    [ObservableProperty] private bool isFavorite;
+    public string LibraryId => "anim:" + ObjectPath;
+    public int RecentRank => UserLibrary.RecentRank(LibraryId);
 
     public string Title { get; }     // e.g. "Jett · Tailwind (E): Dash East"
     public string View { get; }      // e.g. "3rd person"

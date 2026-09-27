@@ -1,9 +1,11 @@
 using System;
+using CommunityToolkit.Mvvm.ComponentModel;
+using ValorantPorting.AppUtils;
 
 namespace ValorantPorting.Views.Controls;
 
 // One map in the Maps tab, e.g. Ascent -> /Game/Maps/Ascent/Ascent.
-public class MapItem
+public partial class MapItem : ObservableObject, ILibraryItem
 {
     public MapItem(string name, string mapUrl, string? description)
     {
@@ -13,7 +15,12 @@ public class MapItem
         ObjectPath = $"{mapUrl}.{assetName}";
         Codename = assetName;
         Details = $"{(string.IsNullOrEmpty(description) ? "Other mode" : description)}  ·  {mapUrl}";
+        IsFavorite = UserLibrary.IsFavorite(LibraryId);
     }
+
+    [ObservableProperty] private bool isFavorite;
+    public string LibraryId => "map:" + ObjectPath;
+    public int RecentRank => UserLibrary.RecentRank(LibraryId);
 
     public string Name { get; }       // "Ascent"
     public string MapUrl { get; }     // "/Game/Maps/Ascent/Ascent"

@@ -25,6 +25,12 @@ public partial class MainView
 
         AppLog.Logger = LoggerRtb;
         AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
+        AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
+        // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
+        UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>
+        {
+            if (AppVM.MainVM.LibraryFilter != ELibraryFilter.All) RefreshListFilters();
+        });
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -94,6 +100,11 @@ public partial class MainView
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
     {
         SearchText = ((TextBox)sender).Text;
+        RefreshListFilters();
+    }
+
+    private void RefreshListFilters()
+    {
         foreach (var tab in AssetControls.Items.OfType<TabItem>())
         {
             var listBox = tab.Content as ListBox ??
@@ -105,13 +116,57 @@ public partial class MainView
     private static void ApplySearchFilter(ListBox listBox, string text)
     {
         var hasText = !string.IsNullOrWhiteSpace(text);
-        listBox.Items.Filter = o => o switch
+        var library = AppVM.MainVM.LibraryFilter;
+        listBox.Items.Filter = o =>
         {
-            AssetSelectorItem asset => !hasText || asset.Match(text),
-            AnimationItem animation => (!hasText || animation.Match(text)) && AppVM.MainVM.MatchesAnimationContext(animation),
-            MapItem map => !hasText || map.Match(text),
-            _ => true
+            if (o is ILibraryItem item && !UserLibrary.Matches(item.LibraryId, library)) return false;
+            return o switch
+            {
+                AssetSelectorItem asset => !hasText || asset.Match(text),
+                // favorites/recent show across all models, so the "Show animations for" filter doesn't hide them
+                AnimationItem animation => (!hasText || animation.Match(text)) &&
+                                           (library != ELibraryFilter.All || AppVM.MainVM.MatchesAnimationContext(animation)),
+                MapItem map => !hasText || map.Match(text),
+                _ => true
+            };
         };
+
+        // Recent: newest first; otherwise the list's normal order
+        var sort = listBox.Items.SortDescriptions;
+        var wantRecent = library == ELibraryFilter.Recent;
+        if (wantRecent)
+        {
+            using (listBox.Items.DeferRefresh())
+            {
+                sort.Clear();
+                sort.Add(new System.ComponentModel.SortDescription(nameof(ILibraryItem.RecentRank), System.ComponentModel.ListSortDirection.Ascending));
+            }
+        }
+        else if (sort.Count > 0)
+        {
+            sort.Clear();
+        }
+    }
+
+    // Right-click menu on tiles, animations and maps: add/remove favorite.
+    private static ILibraryItem? LibraryItemOf(ContextMenu? menu) =>
+        menu?.PlacementTarget is ListBoxItem container
+            ? container.Content as ILibraryItem ?? container.DataContext as ILibraryItem
+            : null;
+
+    private void OnLibraryMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu || menu.Items[0] is not MenuItem entry) return;
+        var item = LibraryItemOf(menu);
+        entry.IsEnabled = item is not null;
+        entry.Header = item?.IsFavorite == true ? "Remove from favorites" : "Add to favorites";
+    }
+
+    private void OnToggleFavoriteClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Parent: ContextMenu menu }) return;
+        if (LibraryItemOf(menu) is not { } item) return;
+        item.IsFavorite = UserLibrary.ToggleFavorite(item.LibraryId);
     }
 
 
