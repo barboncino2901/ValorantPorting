@@ -135,6 +135,18 @@ public class AssetHandlerData
         });
     }
 
+    // UIData may be a hard or (on newer items) a soft class reference.
+    private static UObject? ResolveUiData(UObject asset)
+    {
+        if (!asset.TryGetValue(out UBlueprintGeneratedClass? uiObject, "UIData") &&
+            asset.TryGetValue(out FSoftObjectPath softUiData, "UIData"))
+        {
+            softUiData.TryLoad(AppVM.CUE4ParseVM.Provider, out uiObject);
+        }
+
+        return uiObject?.ClassDefaultObject?.Load();
+    }
+
     private async Task DoLoad(FAssetData data, bool random = false)
     {
         await PauseState.WaitIfPaused();
@@ -178,19 +190,12 @@ public class AssetHandlerData
         actualAsset = classDefaultObject;
         var mainA = actualAsset;
 
-        UBlueprintGeneratedClass? uiObject = null;
-        if (!actualAsset.TryGetValue(out uiObject, "UIData") &&
-            actualAsset.TryGetValue(out FSoftObjectPath softUiData, "UIData"))
-        {
-            // Newer items reference their UIData class softly.
-            softUiData.TryLoad(AppVM.CUE4ParseVM.Provider, out uiObject);
-        }
-
-        var uiDefaultObject = uiObject?.ClassDefaultObject?.Load();
+        var uiDefaultObject = ResolveUiData(actualAsset);
         if (uiDefaultObject != null)
             uiAsset = uiDefaultObject;
         else
             AppLog.Warning($"[{AssetType}] Could not resolve UIData for: {firstTag}");
+        UObject? levelUiAsset = null;
 
         // switch on asset type
         var loadable = "None";
@@ -220,6 +225,7 @@ public class AssetHandlerData
                 }
 
                 actualAsset = weaponDefaultObject;
+                levelUiAsset = ResolveUiData(weaponDefaultObject); // some skins only have an icon on their first level
                 loadable = "None";
                 break;
             }
@@ -257,7 +263,7 @@ public class AssetHandlerData
             }
         }
 
-        var previewImage = IconGetter(uiAsset);
+        var previewImage = IconGetter(uiAsset) ?? (levelUiAsset is null ? null : IconGetter(levelUiAsset));
         if (previewImage is null)
         {
             AppLog.Warning($"[{AssetType}] No DisplayIcon found, skipping: {firstTag}");

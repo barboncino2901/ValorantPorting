@@ -59,9 +59,8 @@ public static class ExportHelpers
                 if (ext is not ("psk" or "pskx")) continue;
                 if (Path.GetFileNameWithoutExtension(file) != obj.Name) continue; // only the main (LOD0) file
 
-                var target = GetExportPath(obj, ext, "_LOD0");
-                if (File.Exists(target)) File.Delete(target);
-                File.Move(file, target);
+                var target = Path.Combine(Path.GetDirectoryName(file)!, obj.Name + "_LOD0." + ext);
+                File.Move(file, target, overwrite: true);
             }
         }
     }
@@ -783,6 +782,7 @@ public static class ExportHelpers
         var path = obj.Owner.Name;
         path = path.SubstringBeforeLast('.');
         if (path.StartsWith("/")) path = path[1..];
+        if (path.StartsWith("Game/")) path = "ShooterGame/Content/" + path["Game/".Length..]; // matches CUE4Parse's on-disk layout
 
         var finalPath = Path.Combine(App.AssetsFolder.FullName, path) + $"{extra}.{ext.ToLower()}";
         return finalPath;

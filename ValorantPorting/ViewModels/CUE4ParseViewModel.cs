@@ -82,6 +82,12 @@ public class CUE4ParseViewModel : ObservableObject
         {
             AppLog.Warning($"Oodle DLL could not be found or downloaded to \"{oodlePath}\". Compressed assets will fail to load.");
         }
+        var detexPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, CUE4Parse_Conversion.Textures.BC.DetexHelper.DLL_NAME);
+        if (CUE4Parse_Conversion.Textures.BC.DetexHelper.LoadDll(detexPath)) // unpacked from CUE4Parse's embedded resources
+            CUE4Parse_Conversion.Textures.BC.DetexHelper.Initialize(detexPath);
+        else
+            AppLog.Warning("Detex could not be loaded; some textures may fail to decode.");
+
         await InitializeProvider();
         await InitializeKeys();
 
