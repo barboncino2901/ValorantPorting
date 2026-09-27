@@ -8,21 +8,21 @@ on:
           required: true
           default: '1.0.X.X'
 
+permissions:
+  contents: write # create the release
+
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
       - name: GIT Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          submodules: 'true'
-
-      - name: Fetch Submodules Recursively
-        run: git submodule update --init --recursive
+          submodules: 'recursive'
 
       - name: .NET Setup
-        uses: actions/setup-dotnet@v2
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
@@ -31,32 +31,25 @@ jobs:
 
       - name: .NET Publish
         run: dotnet publish ValorantPorting -c Release --no-self-contained -r win-x64 -f net10.0-windows -o "./ValorantPorting/bin/Publish/" -p:PublishReadyToRun=false -p:PublishSingleFile=true -p:DebugType=None -p:GenerateDocumentationFile=false -p:DebugSymbols=false -p:AssemblyVersion=${{ github.event.inputs.appVersion }} -p:FileVersion=${{ github.event.inputs.appVersion }}
-   
+
       - name: CUE4Parse-Natives (animation decompression)
         run: |
           cmake -S CUE4Parse/CUE4Parse-Natives -B natives-build -A x64
           cmake --build natives-build --config Release
           Copy-Item natives-build/Release/CUE4Parse-Natives.dll ./ValorantPorting/bin/Publish/
 
-      - name: Blender ZIP File
-        uses: papeloto/action-zip@v1
-        with:
-          files: ./ValorantPortingBlender/
-          dest: ValorantPortingBlender.zip
-
-      - name: Blender Octane ZIP File
-        uses: papeloto/action-zip@v1
-        with:
-          files: ./ValorantPortingBlenderOctane/
-          dest: ValorantPortingBlenderOctane.zip
+      - name: Blender add-on ZIP files
+        # the add-on folder itself goes into the zip, which is what Blender's "Install from Disk" expects
+        run: |
+          Compress-Archive -Path ValorantPortingBlender -DestinationPath ValorantPortingBlender.zip
+          Compress-Archive -Path ValorantPortingBlenderOctane -DestinationPath ValorantPortingBlenderOctane.zip
 
       - name: GIT Release
-        uses: marvinpinto/action-automatic-releases@latest
+        uses: softprops/action-gh-release@v2
         with:
-          title: "ValorantPorting v${{ github.event.inputs.appVersion }}"
-          automatic_release_tag: ${{ github.event.inputs.appVersion }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          prerelease: false
+          name: "ValorantPorting v${{ github.event.inputs.appVersion }}"
+          tag_name: ${{ github.event.inputs.appVersion }}
+          target_commitish: ${{ github.sha }}
           files: |
             ./ValorantPorting/bin/Publish/ValorantPorting.exe
             ./ValorantPorting/bin/Publish/CUE4Parse-Natives.dll
