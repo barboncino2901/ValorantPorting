@@ -1758,6 +1758,22 @@ def psaimport(filepath,
                        for f in range(NumRawFrames)):
                     static_loc.add(j)
 
+        # Face bones (children of "Head") that this action never moves keep the model's own pose,
+        # rotation included: Valorant drives faces with separate face animations, and body animations
+        # just hold them at the base skeleton's pose (e.g. half-closed eyelids on other agents).
+        static_face = set()
+        if bKeepProportions:
+            for j in static_loc:
+                psa_bone = PsaBonesToProcess[j]
+                if j in BoneNotFoundList or psa_bone is None:
+                    continue
+                if not any(p.name.lower() == "head" for p in psa_bone.pose_bone.parent_recursive):
+                    continue
+                q0 = Raw_Key_List[raw_key_index + j][1]
+                if all(abs(Raw_Key_List[raw_key_index + f * Totalbones + j][1].dot(q0)) > 0.99999
+                       for f in range(NumRawFrames)):
+                    static_face.add(j)
+
         for i in range(0,min(maxframes, NumRawFrames)):
             # raw_key_index+= Totalbones * 5 #55
             for j in range(Totalbones):
@@ -1793,6 +1809,9 @@ def psaimport(filepath,
                     q.rotate( p_quat )
 
                 quat.rotate( q.conjugated() )
+
+                if j in static_face:
+                    quat = Quaternion((1.0, 0.0, 0.0, 0.0))  # rest pose of the model
 
                 # @
                 # loc = psa_bone.post_quat.conjugated() * p_pos -  psa_bone.post_quat.conjugated() * psa_bone.orig_loc
