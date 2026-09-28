@@ -59,7 +59,9 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
     // The Abilities tab's entries: one per model, duplicates dropped (a static copy of an animated model, the 3rd
     // person / character select copies of the same prop) and parts of one model merged ("Trap" + "Trap Eye" +
     // "Trap Rotator" -> "Trap", whose parts fit together as they are).
-    public static List<AbilityItem> Tidy(IEnumerable<AbilityItem> items)
+    // looksEmpty: whether a model only has placeholder/invisible materials (Jett's Blade Storm skeletal model is an
+    // invisible holder; its static copy is the knife you see), so the other copy is kept instead
+    public static List<AbilityItem> Tidy(IEnumerable<AbilityItem> items, Func<AbilityItem, bool>? looksEmpty = null)
     {
         var result = new List<AbilityItem>();
         foreach (var folder in items.GroupBy(i => i.Folder, StringComparer.OrdinalIgnoreCase))
@@ -67,7 +69,8 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
             var unique = folder
                 .Where(i => !i.Part.StartsWith("Hidden ", StringComparison.OrdinalIgnoreCase)) // invisible helper meshes
                 .GroupBy(i => i.SamePropKey, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.OrderBy(i => i.IsStatic ? 1 : 0).ThenBy(i => PrefixPreference.GetValueOrDefault(i.Prefix, 5))
+                .Select(g => g.OrderBy(i => g.Count() > 1 && looksEmpty?.Invoke(i) == true ? 1 : 0)
+                    .ThenBy(i => i.IsStatic ? 1 : 0).ThenBy(i => PrefixPreference.GetValueOrDefault(i.Prefix, 5))
                     .ThenBy(i => i.Part.StartsWith("TP", StringComparison.Ordinal) ? 1 : 0).First())
                 .OrderBy(i => i.Part.Length)
                 .ToList();
@@ -116,7 +119,7 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
     }
 
     private static readonly Dictionary<string, string> SlotKeys = new(StringComparer.OrdinalIgnoreCase)
-        { ["Ability1"] = "Q", ["Ability2"] = "E", ["Grenade"] = "C", ["Ultimate"] = "X" };
+        { ["Ability1"] = "Q", ["Ability2"] = "E", ["Grenade"] = "C", ["GrenadeAbility"] = "C", ["Ultimate"] = "X" };
 
     // The ability's name and current key from the "UIData_…" asset in its folder: DisplayName "Paint Shells" with the
     // localization key "Ability2_DisplayName" (Ability1 = Q, Ability2 = E, Grenade = C, Ultimate = X).
@@ -178,6 +181,8 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
     public string Directory { get; }    // the model file's folder
     public bool IsStatic { get; }       // a static (not animated) mesh
     public List<string> ModelPaths { get; } = []; // this model's parts (object paths), sent together
+    // for a model of several parts: each part's in-game offset/rotation/size (from the object holding them)
+    public Dictionary<string, Export.AbilityResolver.Placement>? Placements { get; set; }
     public string? IconUrl { get; }
     public string Title { get; }
     public string Details { get; private set; } = "";

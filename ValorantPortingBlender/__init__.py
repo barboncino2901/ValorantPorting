@@ -166,7 +166,7 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
     if existing := find_built_material(material_name, material_path):
         target_slot.material = existing
         return
-    if kind := effect_kind(material_data):
+    if kind := effect_kind(material_data, mat_type):
         build_effect_material(target_slot, material_data, kind)
         return
     target_material = target_slot.material
@@ -315,11 +315,31 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
 EFFECT_SHELL = re.compile(r"vfx|liquid|appear|dissolve|reveal|hologram|distort|refract|shellmesh", re.IGNORECASE)
 
 
-def effect_kind(material_data):
+# Ability effect materials with no textures or colour settings (their look is built in the effect's node graph, which
+# can't be exported): an approximate in-game colour instead of plain white. (base colour, glow strength)
+EFFECT_TINTS = {
+    "dome_inner_foe": ((0.02, 0.008, 0.035), 0.3),       # Fade's Haunt orb: dark ink
+    "ab_smonk_s0_q_butterfly_m": ((0.85, 0.3, 0.75), 1.0),  # Clove's butterflies: pink
+    "cable_x_cocoon": ((0.75, 0.85, 1.0), 0.2),          # Deadlock's cocoon strands: pale nanowire
+}
+
+
+def effect_tint(material_data):
+    names = f'{material_data.get("BaseMaterial") or ""} {material_data.get("MaterialName") or ""}'.lower()
+    return next((tint for key, tint in EFFECT_TINTS.items() if key in names), None)
+
+
+def effect_kind(material_data, mat_type=None):
     blend = (material_data.get("BlendMode") or "").lower()
     names = f'{material_data.get("BaseMaterial") or ""} {material_data.get("ParentName") or ""} {material_data.get("MaterialName") or ""}'
     if blend == "additive":
         return "glow"
+    if mat_type == "Ability" and not material_data.get("Textures"):
+        # a glow strip (Chamber's gun lines): only an emissive colour, no textures
+        if [v for v in material_data.get("Vectors") or [] if re.search(r"emissive colou?r", v.get("Name") or "", re.I)]:
+            return "glow"
+        if effect_tint(material_data):
+            return "tint"
     if blend.startswith("translucent") or blend in ("modulate", "alphacomposite", "alphaholdout"):
         return "hidden" if EFFECT_SHELL.search(names) else "glass"
     return None
@@ -375,7 +395,17 @@ def build_effect_material(target_slot, material_data, kind):
             links.new(tint.outputs[0], multiply.inputs[7])
             color = multiply.outputs[2]
 
-    if kind == "glow":
+    if kind == "tint":
+        (red, green, blue), glow = effect_tint(material_data)
+        material.surface_render_method = 'DITHERED'
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.location = (100, 0)
+        bsdf.inputs["Base Color"].default_value = (red, green, blue, 1)
+        bsdf.inputs["Roughness"].default_value = 0.4
+        bsdf.inputs["Emission Color"].default_value = (red, green, blue, 1)
+        bsdf.inputs["Emission Strength"].default_value = glow
+        links.new(bsdf.outputs[0], output.inputs["Surface"])
+    elif kind == "glow":
         emission = nodes.new("ShaderNodeEmission")
         emission.location = (0, 0)
         strength = scalars.get("Emissive Intensity") or scalars.get("Emissive_Intensity") or 2.0
@@ -396,6 +426,17 @@ def build_effect_material(target_slot, material_data, kind):
             links.new(color, bsdf.inputs["Base Color"])
         links.new(bsdf.outputs[0], output.inputs["Surface"])
     material["vp_built"] = True
+
+
+def place_part(obj, placement):
+    """A part's in-game offset (cm), rotation and size inside a model of several parts (Chamber's trap: body and
+    rotator 3x, the eye 8.7 cm up). Unreal's Y axis is mirrored in Blender."""
+    location, rotation, scale = placement.get("Location") or {}, placement.get("Rotation") or {}, placement.get("Scale") or {}
+    obj.location = (location.get("X", 0) * 0.01, -location.get("Y", 0) * 0.01, location.get("Z", 0) * 0.01)
+    obj.rotation_mode = 'XYZ'
+    obj.rotation_euler = (math.radians(rotation.get("Roll", 0)), math.radians(-rotation.get("Pitch", 0)),
+                          math.radians(-rotation.get("Yaw", 0)))
+    obj.scale = (scale.get("X", 1), scale.get("Y", 1), scale.get("Z", 1))
 
 
 def remove_disabled_sections(mesh_object, sections):
@@ -1185,6 +1226,9 @@ def import_response(response):
                 mesh = imported_part
             bpy.context.view_layer.objects.active = mesh
 
+            if placement := part.get("Placement"):
+                place_part(imported_part, placement)
+
             imported_parts.append({
                 "MeshName": part.get("MeshName"),
                 "Attachments": attachments,
@@ -1207,6 +1251,15 @@ def import_response(response):
                 index = style_material.get("SlotIndex")
                 if len(mesh.material_slots) > index:
                     import_material(mesh.material_slots.values()[index], style_material, import_type)
+
+            # ability props: a section with no material in the files (Fade's Haunt orb body; the game draws it with
+            # effects) takes the prop's own material instead of plain white
+            if import_type == "Ability" and part.get("Materials"):
+                filled = {m.get("SlotIndex") for m in part.get("Materials")}
+                source = mesh.material_slots.values()[min(filled)] if min(filled) < len(mesh.material_slots) else None
+                for index, slot in enumerate(mesh.material_slots.values()):
+                    if index not in filled and source is not None and source.material is not None:
+                        slot.material = source.material
 
     import_part(import_data.get("Parts"))
 

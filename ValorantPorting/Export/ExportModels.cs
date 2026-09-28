@@ -13,6 +13,7 @@ public class ExportPart
     public List<ExportMaterial> OverrideMaterials = new();
     public string? Part;
     public List<ExportMaterial> StyleMaterials = new();
+    public PartPlacement? Placement; // where the part sits in a model of several parts (ability props)
 
     public List<int> DisabledSections = new(); // sections the game never draws (leftovers under cloth/body parts)
 
@@ -57,6 +58,8 @@ public record ExportAttatchment
 }
 
 public record TextureParameter(string Name, string Value);
+
+public record PartPlacement(FVector Location, FRotator Rotation, FVector Scale);
 
 public record ScalarParameter(string Name, float Value);
 

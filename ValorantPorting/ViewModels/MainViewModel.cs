@@ -193,6 +193,7 @@ public partial class MainViewModel : ObservableObject
         ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
 
         var provider = AppVM.CUE4ParseVM.Provider;
+        var resolver = new AbilityResolver(provider); // which ability uses each model; how parts fit together
         var infos = new Dictionary<string, (string Name, string Key)?>(StringComparer.OrdinalIgnoreCase);
         (string Name, string Key)? InfoOf(string file)
         {
@@ -204,9 +205,15 @@ public partial class MainViewModel : ObservableObject
 
         var items = provider.Files.Keys
             .Where(p => AbilityModel.IsMatch(p))
-            .Select(p => new AbilityItem(p[..^".uasset".Length], InfoOf(p)))
+            .Select(p =>
+            {
+                var package = "/Game/" + p["ShooterGame/Content/".Length..^".uasset".Length];
+                return new AbilityItem(p[..^".uasset".Length], resolver.AbilityOf(package) ?? InfoOf(p));
+            })
             .ToList();
-        items = AbilityItem.Tidy(items).OrderBy(a => a.SortKey, StringComparer.OrdinalIgnoreCase).ToList();
+        items = AbilityItem.Tidy(items, item => AbilityResolver.HasOnlyPlaceholderMaterials(provider, item.ObjectPath))
+            .OrderBy(a => a.SortKey, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var item in items.Where(i => i.ModelPaths.Count > 1)) item.Placements = resolver.PlacementOf(item.ModelPaths);
         Abilities = new ObservableCollection<AbilityItem>(items);
         AppLog.Information($"Ability list loaded: {items.Count} models.");
     }
@@ -228,16 +235,17 @@ public partial class MainViewModel : ObservableObject
             var data = new ExportData { Name = item.Title, Type = "Ability" };
             await Task.Run(() =>
             {
-                foreach (var modelPath in item.ModelPaths) // parts of one model come in together, as they fit
-                    switch (AppVM.CUE4ParseVM.Provider.LoadPackageObject(modelPath))
+                foreach (var modelPath in item.ModelPaths) // parts of one model come in together, placed as in game
+                {
+                    var index = AppVM.CUE4ParseVM.Provider.LoadPackageObject(modelPath) switch
                     {
-                        case CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMesh skeletalMesh:
-                            ExportHelpers.Mesh(skeletalMesh, data.Parts);
-                            break;
-                        case CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh staticMesh:
-                            ExportHelpers.SMesh(staticMesh, data.Parts);
-                            break;
-                    }
+                        CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMesh skeletalMesh => ExportHelpers.Mesh(skeletalMesh, data.Parts),
+                        CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh staticMesh => ExportHelpers.SMesh(staticMesh, data.Parts),
+                        _ => -1
+                    };
+                    if (index >= 0 && item.Placements?.GetValueOrDefault(modelPath) is { } placement)
+                        data.Parts[index].Placement = new PartPlacement(placement.Location, placement.Rotation, placement.Scale);
+                }
             });
             await Task.WhenAll(ExportHelpers.Tasks);
             ExportHelpers.Tasks.Clear();
