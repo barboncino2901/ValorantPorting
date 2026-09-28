@@ -158,6 +158,9 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
     if (existing := bpy.data.materials.get(material_name)) and existing.get("vp_built") is True:
         target_slot.material = existing
         return
+    if kind := effect_kind(material_data):
+        build_effect_material(target_slot, material_data, kind)
+        return
     target_material = target_slot.material
     if target_material.name.casefold() != material_name.casefold():
         target_material = target_material.copy()
@@ -289,6 +292,108 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
 
     # mark this material as fully built so future lookups can safely reuse it
     target_material["vp_built"] = True
+
+
+# Effect-only materials (Unreal translucent/additive): liquids and dissolve shells that only show during
+# animations, glowing lines, lens glass. Drawn as solid surfaces they hide or smear the gun.
+EFFECT_SHELL = re.compile(r"vfx|liquid|appear|dissolve|reveal|hologram|distort|refract", re.IGNORECASE)
+
+
+def effect_kind(material_data):
+    blend = (material_data.get("BlendMode") or "").lower()
+    names = f'{material_data.get("BaseMaterial") or ""} {material_data.get("ParentName") or ""} {material_data.get("MaterialName") or ""}'
+    if blend == "additive":
+        return "glow"
+    if blend.startswith("translucent") or blend in ("modulate", "alphacomposite", "alphaholdout"):
+        return "hidden" if EFFECT_SHELL.search(names) else "glass"
+    return None
+
+
+def build_effect_material(target_slot, material_data, kind):
+    if kind == "hidden":
+        target_slot.material = _hidden_material()
+        return
+
+    name = material_data.get("MaterialName")
+    material = target_slot.material  # the importer's placeholder of the same name, else a new one
+    if material is None or material.name.casefold() != name.casefold():
+        material = bpy.data.materials.new(name)
+    target_slot.material = material
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (400, 0)
+    material.surface_render_method = 'BLENDED'
+    material.use_backface_culling = False
+
+    textures = {t.get("Name"): t.get("Value") for t in material_data.get("Textures") or []}
+    vectors = {v.get("Name"): v.get("Value") for v in material_data.get("Vectors") or []}
+    scalars = {v.get("Name"): v.get("Value") for v in material_data.get("Scalars") or []}
+    texture_path = next((textures[n] for n in textures if re.search(r"albedo|diffuse|emissive|color|base", n, re.I)),
+                        next(iter(textures.values()), None))
+    color_value = next((vectors[n] for n in vectors if re.search(r"emissive|color|tint", n, re.I)), None)
+
+    color = None
+    if texture_path and (image := import_texture(texture_path)):
+        image.alpha_mode = 'CHANNEL_PACKED'
+        texture = nodes.new("ShaderNodeTexImage")
+        texture.image = image
+        texture.location = (-500, 0)
+        color = texture.outputs[0]
+    if color_value:
+        tint = nodes.new("ShaderNodeRGB")
+        tint.location = (-500, -250)
+        tint.outputs[0].default_value = (color_value["R"], color_value["G"], color_value["B"], 1)
+        if color is None:
+            color = tint.outputs[0]
+        else:
+            multiply = nodes.new("ShaderNodeMix")
+            multiply.data_type = 'RGBA'
+            multiply.blend_type = 'MULTIPLY'
+            multiply.inputs[0].default_value = 1
+            multiply.location = (-250, 0)
+            links.new(color, multiply.inputs[6])
+            links.new(tint.outputs[0], multiply.inputs[7])
+            color = multiply.outputs[2]
+
+    if kind == "glow":
+        emission = nodes.new("ShaderNodeEmission")
+        emission.location = (0, 0)
+        strength = scalars.get("Emissive Intensity") or scalars.get("Emissive_Intensity") or 2.0
+        emission.inputs["Strength"].default_value = max(1.0, min(float(strength), 10.0))
+        if color is not None:
+            links.new(color, emission.inputs["Color"])
+        add = nodes.new("ShaderNodeAddShader")
+        add.location = (200, 0)
+        links.new(nodes.new("ShaderNodeBsdfTransparent").outputs[0], add.inputs[0])
+        links.new(emission.outputs[0], add.inputs[1])
+        links.new(add.outputs[0], output.inputs["Surface"])
+    else:  # glass
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.location = (100, 0)
+        bsdf.inputs["Roughness"].default_value = 0.05
+        bsdf.inputs["Alpha"].default_value = 0.25
+        if color is not None:
+            links.new(color, bsdf.inputs["Base Color"])
+        links.new(bsdf.outputs[0], output.inputs["Surface"])
+    material["vp_built"] = True
+
+
+def remove_disabled_sections(mesh_object, sections):
+    """Deletes the faces of mesh sections the game never draws (Unreal "disabled" sections, e.g. the body part a cloth
+    piece replaces); drawn, they cover the real surface with stray texture. The .psk has one material slot per section."""
+    if not sections or mesh_object is None or mesh_object.type != 'MESH':
+        return
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(mesh_object.data)
+    doomed = [f for f in bm.faces if f.material_index in set(sections)]
+    if doomed:
+        bmesh.ops.delete(bm, geom=doomed, context='FACES')
+        bm.to_mesh(mesh_object.data)
+        mesh_object.data.update()
+    bm.free()
 
 
 def import_shaders(shaderName):
@@ -789,6 +894,8 @@ def import_response(response):
                 "Parent": imported_part,
                 "Mesh": mesh
             })
+
+            remove_disabled_sections(mesh, part.get("DisabledSections") or [])
 
             for material in part.get("Materials"):
                 index = material.get("SlotIndex")

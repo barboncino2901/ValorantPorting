@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CUE4Parse_Conversion;
+using CUE4Parse_Conversion.Dto;
 using CUE4Parse_Conversion.Exporters;
 using CUE4Parse_Conversion.Meshes;
 using CUE4Parse_Conversion.Options;
@@ -117,9 +118,9 @@ public static class ExportHelpers
         {
             if (component.TryGetValue(out USkeletalMesh skelMesh, "SkeletalMesh"))
             {
-                Mesh(skelMesh, exportParts);
-                if (skelMesh.TryGetValue(out UMaterialInstanceConstant[] materialOverrides, "MaterialOverrides"))
-                    OverrideMaterials(materialOverrides, exportParts.Last().OverrideMaterials);
+                var index = Mesh(skelMesh, exportParts);
+                if (index >= 0 && skelMesh.TryGetValue(out UMaterialInstanceConstant[] materialOverrides, "MaterialOverrides"))
+                    OverrideMaterials(materialOverrides, exportParts[index]);
             }
         }
     }
@@ -129,51 +130,34 @@ public static class ExportHelpers
     {
         var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
         var levelTuple = GetHighestLevel();
-        //gun mesh
-        if (levelTuple.Item1 != null)
-        {
-            Mesh(levelTuple.Item1, exportParts);
-            if (levelTuple.Item2 != null) OverrideMaterials(levelTuple.Item2, exportParts.Last().OverrideMaterials);
-        }
-        else //if not in asset, use base gun mesh
-        {
-            Mesh(GetBaseWeapon(), exportParts);
-            if (levelTuple.Item2 != null) OverrideMaterials(levelTuple.Item2, exportParts.Last().OverrideMaterials);
-        }
-        //handle style materials for gun mesh
         var handledStyleGun = style != null ? HandleStyle(style) : null;
+
+        //gun mesh (if not in the skin's levels, the base gun mesh)
+        var gunIndex = Mesh(levelTuple.Item1 ?? GetBaseWeapon(), exportParts);
+        if (gunIndex < 0) return;
+        var gun = exportParts[gunIndex];
+        OverrideMaterials(levelTuple.Item2, gun);
+        // the chroma's 1P list matches the 1P gun's material slots; older chromas only have the 3P list
         if (handledStyleGun != null)
-            //get 3P overwrites for 1P gun because riot games ;-;
-            OverrideMaterials(handledStyleGun.GetOrDefault("3p Material Overrides", Array.Empty<UMaterialInstanceConstant>()), exportParts.Last().StyleMaterials);
-        //mag mesh
-        if (levelTuple.Item4 != null)
-        {
-            SMesh(levelTuple.Item4, exportParts);
-            if (levelTuple.Item2 != null) OverrideMaterials(levelTuple.Item2, exportParts.Last().OverrideMaterials);
-        }
-        else
-        {
-            SMesh(GetMagMesh(), exportParts);
-            if (levelTuple.Item2 != null) OverrideMaterials(levelTuple.Item2, exportParts.Last().OverrideMaterials);
-        }
+            OverrideMaterials(FirstMaterialList(handledStyleGun, "MaterialOverrides", "1p MaterialOverrides", "1p Material Overrides", "3p Material Overrides"), gun, style: true);
 
-        //handle style materials for mag mesh
-        var handledStyleMag = style != null ? HandleStyle(style) : null;
-        if (handledStyleMag != null)
+        //mag mesh, with the level's magazine materials
+        var magIndex = SMesh(levelTuple.Item4 ?? GetMagMesh(), exportParts);
+        if (magIndex >= 0)
         {
-            var magOverrides = handledStyleMag.GetOrDefault("3pMagazineMaterial Overrides", Array.Empty<UMaterialInstanceConstant>());
-            if (magOverrides.Length == 0)
-                magOverrides = handledStyleMag.GetOrDefault("1pMagazine MaterialOverrides", Array.Empty<UMaterialInstanceConstant>());
-            if (magOverrides.Length == 0 && handledStyleGun != null)
-                magOverrides = handledStyleGun.GetOrDefault("3p Material Overrides", Array.Empty<UMaterialInstanceConstant>());
-            OverrideMaterials(magOverrides, exportParts.Last().StyleMaterials);
-        }
+            var mag = exportParts[magIndex];
+            OverrideMaterials(levelTuple.Item3.Length > 0 ? levelTuple.Item3 : levelTuple.Item2, mag);
+            if (handledStyleGun != null)
+            {
+                var magOverrides = FirstMaterialList(handledStyleGun, "1pMagazine MaterialOverrides", "3pMagazineMaterial Overrides");
+                if (magOverrides.Length == 0)
+                    magOverrides = FirstMaterialList(handledStyleGun, "MaterialOverrides", "3p Material Overrides");
+                OverrideMaterials(magOverrides, mag, style: true);
+            }
 
-        //attach mag to gun body
-        var attachMag = new ExportAttatchment();
-        attachMag.BoneName = "Magazine_Main";
-        attachMag.AttatchmentName = exportParts.Last().MeshName;
-        exportParts.First().Attatchments.Add(attachMag);
+            //attach mag to gun body
+            gun.Attatchments.Add(new ExportAttatchment { BoneName = "Magazine_Main", AttatchmentName = mag.MeshName });
+        }
 
         //attachment (scope & silencer)
         var usedSockets = new HashSet<string>();
@@ -205,43 +189,69 @@ public static class ExportHelpers
 
         void AddAttachment(string socket, USkeletalMesh mesh, UMaterialInstanceConstant[]? materials)
         {
-            usedSockets.Add(socket);
-            Mesh(mesh, exportParts);
-            var scope_tach = new ExportAttatchment();
-            scope_tach.BoneName = socket;
-            scope_tach.AttatchmentName = exportParts.Last().MeshName;
-            exportParts.First().Attatchments.Add(scope_tach);
-            if (materials != null) OverrideMaterials(materials, exportParts.Last().OverrideMaterials);
+            var index = Mesh(mesh, exportParts);
+            if (index < 0) return;
+            var part = exportParts[index];
+            gun.Attatchments.Add(new ExportAttatchment { BoneName = socket, AttatchmentName = part.MeshName });
+            OverrideMaterials(materials, part);
+            if (style == null) return;
 
-            //handle attachment style mats
-            if (style != null)
+            // the chroma's version of this attachment (scope or silencer), else materials named like the attachment's own
+            // in the chroma's lists (some chromas list the attachment's materials together with the gun's)
+            var (chromaMaterials, thirdPerson) = GetStyleAttachmentMaterials(style, socket);
+            if (chromaMaterials != null && !thirdPerson)
+                OverrideMaterials(chromaMaterials, part, style: true);
+            else if (chromaMaterials != null)
+                OverrideMaterialsByName(chromaMaterials, part);
+            else if (handledStyleGun != null)
+                OverrideMaterialsByName(ChromaMaterialLists.SelectMany(name => handledStyleGun.GetOrDefault(name, Array.Empty<UMaterialInstanceConstant>())), part);
+        }
+    }
+
+    private static readonly string[] ChromaMaterialLists = ["MaterialOverrides", "1p MaterialOverrides", "1p Material Overrides", "3p Material Overrides"];
+
+    // Property names of an attachment's 1P mesh, 1P materials and 3P materials, by the gun socket it goes on
+    // (the 3P list belongs to the 3P model; its slots don't always line up with the 1P model's)
+    private static readonly Dictionary<string, (string Mesh, string[] Materials, string ThirdPersonMaterials)> AttachmentProperties = new()
+    {
+        ["Reflex"] = ("1pReflexMesh", ["MaterialOverrides", "1p MaterialOverrides"], "3pMaterialOverrides"),
+        ["Barrel"] = ("1p Mesh", ["1p MaterialOverrides", "1p Material Overrides"], "3p MaterialOverrides")
+    };
+
+    private static UMaterialInstanceConstant[] FirstMaterialList(UObject? source, params string[] names)
+    {
+        if (source == null) return [];
+        foreach (var name in names)
+            if (GetInherited<UMaterialInstanceConstant[]>(source, name) is { Length: > 0 } list) return list;
+        return [];
+    }
+
+    // The chroma's replacement for the attachment on this socket: its AttachmentOverrides entry whose attachment carries
+    // a mesh for that socket (a scope has a reflex mesh, a silencer a barrel mesh).
+    private static (UMaterialInstanceConstant[]? Materials, bool ThirdPerson) GetStyleAttachmentMaterials(UObject style, string socket)
+    {
+        if (style is not UBlueprintGeneratedClass styleClass || !AttachmentProperties.TryGetValue(socket, out var properties)) return (null, false);
+        var styleDefaults = styleClass.ClassDefaultObject.Load();
+        if (styleDefaults == null) return (null, false);
+
+        var sources = new List<UObject>();
+        if (styleDefaults.TryGetValue(out UBlueprintGeneratedClass chroma, "EquippableSkinChroma") && chroma.ClassDefaultObject.Load() is { } chromaDefaults)
+            sources.Add(chromaDefaults);
+        sources.Add(styleDefaults);
+
+        foreach (var source in sources)
+        {
+            if (!source.TryGetValue(out UScriptMap overrides, "AttachmentOverrides")) continue;
+            foreach (var entry in overrides.Properties)
             {
-                bool foundAttachmentMats = false;
-
-                //scope, muzzle
-                string[] matNames = { "3p MaterialOverrides", "1p MaterialOverrides" };
-                foreach (var matName in matNames)
-                {
-                    var styleAttachmentMats = GetStyleAttatchmentMats(style, matName, socket);
-                    if (styleAttachmentMats != null)
-                    {
-                        OverrideMaterials(styleAttachmentMats, exportParts.Last().StyleMaterials);
-                        foundAttachmentMats = true;
-                    }
-                }
-
-                LogSilencerDiagnostic($"[call site] socket={socket}, mesh={exportParts.Last().MeshName}, foundAttachmentMats={foundAttachmentMats}, handledStyleGun null={handledStyleGun == null}");
-
-                // Fallback: some skins store all chroma materials (gun + attachments) in the main chroma CDO
-                if (!foundAttachmentMats && handledStyleGun != null)
-                {
-                    var fallbackMats = handledStyleGun.GetOrDefault("3p Material Overrides", Array.Empty<UMaterialInstanceConstant>());
-                    LogSilencerDiagnostic($"[call site] fallback check for socket={socket}, fallbackMats.Length={fallbackMats.Length}");
-                    if (fallbackMats.Length > 0)
-                        OverrideMaterials(fallbackMats, exportParts.Last().StyleMaterials);
-                }
+                if (entry.Value?.GenericValue is not FSoftObjectPath path || !path.TryLoad(out UBlueprintGeneratedClass attachmentClass)) continue;
+                var attachment = attachmentClass.ClassDefaultObject.Load();
+                if (attachment == null || GetInherited<USkeletalMesh>(attachment, properties.Mesh) is null) continue;
+                if (FirstMaterialList(attachment, properties.Materials) is { Length: > 0 } firstPerson) return (firstPerson, false);
+                if (FirstMaterialList(attachment, properties.ThirdPersonMaterials) is { Length: > 0 } thirdPerson) return (thirdPerson, true);
             }
         }
+        return (null, false);
     }
 
     // Attachments a gun always carries (its primary asset's "ForcedAttachments", e.g. the Warden's ACOG scope),
@@ -278,12 +288,11 @@ public static class ExportHelpers
                 var attachment = attachmentClass.ClassDefaultObject.Load();
                 if (attachment is null) continue;
 
-                // same property/socket pairs as skin attachment overrides: scopes, then silencers
-                foreach (var (meshName, materialsName, socket) in new[]
-                         { ("1pReflexMesh", "MaterialOverrides", "Reflex"), ("1p Mesh", "3p MaterialOverrides", "Barrel") })
+                // scopes, then silencers
+                foreach (var (socket, properties) in AttachmentProperties)
                 {
-                    if (GetInherited<USkeletalMesh>(attachment, meshName) is not { } mesh) continue;
-                    found.Add((socket, mesh, GetInherited<UMaterialInstanceConstant[]>(attachment, materialsName)));
+                    if (GetInherited<USkeletalMesh>(attachment, properties.Mesh) is not { } mesh) continue;
+                    found.Add((socket, mesh, FirstMaterialList(attachment, properties.Materials)));
                     break;
                 }
             }
@@ -525,145 +534,28 @@ public static class ExportHelpers
             var valueLoaded = (UBlueprintGeneratedClass)scriptMapValue.Load();
             var classDefaultObject = valueLoaded.ClassDefaultObject.Load();
 
-            string[] scope = { "1pReflexMesh", "MaterialOverrides", "Reflex" };
-            string[] silencer = { "1p Mesh", "3p MaterialOverrides", "Barrel" };
-            var currentAttatchList = new List<List<string>>();
-            currentAttatchList.Add(new List<string>(scope));
-            currentAttatchList.Add(new List<string>(silencer));
-            // 
-            for (var i = 0; i < currentAttatchList.Count; i++)
+            var i = 0;
+            foreach (var (socket, properties) in AttachmentProperties)
             {
-                var currentAttach = currentAttatchList[i];
-                var localMesh = GetInherited<USkeletalMesh>(classDefaultObject, currentAttach[0]);
-                var localmat = GetInherited<UMaterialInstanceConstant[]>(classDefaultObject, currentAttach[1]);
-                if (localMesh == null) continue;
-                fullSockets[i] = currentAttach[2];
-                meshes[i] = localMesh;
-                fullOverrideMaterials[i] = localmat;
-                paramNames[i] = currentAttach[1];
+                var localMesh = GetInherited<USkeletalMesh>(classDefaultObject, properties.Mesh);
+                if (localMesh != null)
+                {
+                    fullSockets[i] = socket;
+                    meshes[i] = localMesh;
+                    fullOverrideMaterials[i] = FirstMaterialList(classDefaultObject, properties.Materials);
+                    paramNames[i] = properties.Materials[0];
+                }
+                i++;
             }
         }
 
         return Tuple.Create(fullSockets, meshes, fullOverrideMaterials, paramNames);
     }
 
-    // Debug dumps from the silencer/bone-check fixes (logs\*_diagnostics.log). Off, so the files don't grow on every
-    // gun export; set to true when debugging those fixes.
+    // Debug dump from the bone-check fix (logs/bonecheck_diagnostics.log). Off, so the file doesn't grow on every
+    // gun export; set to true when debugging it.
     private const bool WriteDiagnosticLogs = false;
 
-    private static void LogSilencerDiagnostic(string line)
-    {
-        if (!WriteDiagnosticLogs) return;
-        try
-        {
-            var logDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
-            System.IO.Directory.CreateDirectory(logDir);
-            var logPath = System.IO.Path.Combine(logDir, "silencer_diagnostics.log");
-            System.IO.File.AppendAllText(logPath, line + "\n");
-        }
-        catch { }
-    }
-
-    public static UMaterialInstanceConstant[] GetStyleAttatchmentMats(UObject style, string paramName, string socketName)
-    {
-        var bpGnCast = style as UBlueprintGeneratedClass;
-        var styleClassDefaultObject = bpGnCast.ClassDefaultObject.Load();
-        
-        // Try the drilled chroma CDO first (matches HandleStyle()'s proven-correct precedence
-        // for the gun body itself); raw style CDO as fallback. The raw CDO can carry valid but
-        // wrong inherited/default attachment data that would otherwise match before the real
-        // chroma-specific data ever gets checked.
-        var sources = new List<UObject>();
-        if (styleClassDefaultObject.TryGetValue(out UBlueprintGeneratedClass chromaBp, "EquippableSkinChroma"))
-        {
-            var chromaCdo = chromaBp.ClassDefaultObject.Load();
-            if (chromaCdo != null)
-                sources.Add(chromaCdo);
-        }
-        sources.Add(styleClassDefaultObject);
-        
-        // Try multiple property name variants (skins use different naming conventions)
-        var paramNamesToTry = new List<string> { paramName };
-        if (paramName == "3p MaterialOverrides")
-        {
-            paramNamesToTry.Add("MaterialOverrides");
-            paramNamesToTry.Add("3p Material Overrides");
-        }
-        else if (paramName == "1p MaterialOverrides")
-        {
-            paramNamesToTry.Add("1p Material Overrides");
-        }
-        
-        LogSilencerDiagnostic($"--- {DateTime.Now:HH:mm:ss} --- GetStyleAttatchmentMats socketName={socketName}, paramName={paramName}, sources={sources.Count}");
-
-        foreach (var source in sources)
-        {
-            if (!source.TryGetValue(out UScriptMap styleAttachmentOverrides, "AttachmentOverrides"))
-            {
-                LogSilencerDiagnostic("  source has no AttachmentOverrides map, skipping.");
-                continue;
-            }
-
-            LogSilencerDiagnostic($"  source has AttachmentOverrides map with {styleAttachmentOverrides.Properties.Count} entries.");
-
-            foreach (var scriptMapVariable in styleAttachmentOverrides.Properties)
-            {
-                var scriptMapValue = (FSoftObjectPath)scriptMapVariable.Value.GenericValue;
-                var valueLoaded = (UBlueprintGeneratedClass)scriptMapValue.Load();
-                var classDefaultObject = valueLoaded.ClassDefaultObject.Load();
-
-                try
-                {
-                    var propNames = new List<string>();
-                    foreach (var prop in classDefaultObject.Properties)
-                    {
-                        try
-                        {
-                            var nameObj = prop.Name;
-                            var textProp = nameObj.GetType().GetProperty("Text");
-                            propNames.Add(textProp != null ? textProp.GetValue(nameObj)?.ToString() : nameObj.ToString());
-                        }
-                        catch { propNames.Add("(unreadable)"); }
-                    }
-                    LogSilencerDiagnostic($"    entry properties: {string.Join(", ", propNames)}");
-                }
-                catch (Exception ex)
-                {
-                    LogSilencerDiagnostic($"    entry property dump failed: {ex.Message}");
-                }
-
-                // Match attachment by socket name
-                string[] scope = { "1pReflexMesh", "MaterialOverrides", "Reflex" };
-                string[] silencer = { "1p Mesh", "3p MaterialOverrides", "Barrel" };
-                var checkList = new List<string[]> { scope, silencer };
-                
-                foreach (var check in checkList)
-                {
-                    classDefaultObject.TryGetValue(out USkeletalMesh mesh, check[0]);
-                    LogSilencerDiagnostic($"      check[{check[2]}]: has '{check[0]}' mesh = {mesh != null}");
-                    // Mesh presence is informational only — a chroma-only override entry can
-                    // carry valid material data with no mesh reference at all (confirmed via
-                    // diagnostic log on Gaia/Ashen), so it must not gate the material lookup.
-                    if (check[2] == socketName)
-                    {
-                        foreach (var tryParamName in paramNamesToTry)
-                        {
-                            classDefaultObject.TryGetValue(out UMaterialInstanceConstant[] materials, tryParamName);
-                            if (materials != null && materials.Length > 0)
-                            {
-                                LogSilencerDiagnostic($"      MATCHED via '{tryParamName}', {materials.Length} materials.");
-                                return materials;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        LogSilencerDiagnostic("  No match found in GetStyleAttatchmentMats, returning null (fallback path may trigger).");
-        return null;
-    }
-    
     public static int Mesh(USkeletalMesh? skeletalMesh, List<ExportPart> exportParts)
     {
         if (skeletalMesh is null) return -1;
@@ -676,33 +568,10 @@ public static class ExportHelpers
         exportPart.MeshName = skeletalMesh.Name + "_LOD0.ao";
         Save(skeletalMesh);
 
-        var sections = convertedMesh.LODs[0].Sections;
-        for (var idx = 0; idx < sections.Length; idx++)
-        {
-            var section = sections[idx];
-            var sectionMaterial = convertedMesh.GetMaterial(section)?.Material;
-            if (sectionMaterial is null) continue;
-
-            if (!sectionMaterial.TryLoad(out var material)) continue;
-
-            var exportMaterial = new ExportMaterial
-            {
-                MaterialName = material.Name,
-                SlotIndex = idx
-            };
-
-            if (material is UMaterialInstanceConstant materialInstance)
-            {
-                var (textures, scalars, vectors) = MaterialParameters(materialInstance);
-                exportMaterial.Textures = textures;
-                exportMaterial.Scalars = scalars;
-                exportMaterial.Vectors = vectors;
-                exportMaterial.ParentName = materialInstance.Parent.Name;
-            }
-
-            exportPart.Materials.Add(exportMaterial);
-        }
-
+        AddSectionMaterials(exportPart, convertedMesh.LODs[0].Sections, section => convertedMesh.GetMaterial(section)?.Material);
+        if (skeletalMesh.LODModels?.FirstOrDefault()?.Sections is { } sourceSections && sourceSections.Length == exportPart.SectionMaterialSlots.Count)
+            for (var i = 0; i < sourceSections.Length; i++)
+                if (sourceSections[i].bDisabled) exportPart.DisabledSections.Add(i);
         exportParts.Add(exportPart);
         return exportParts.Count - 1;
     }
@@ -718,74 +587,130 @@ public static class ExportHelpers
         exportPart.MeshName = staticMesh.Name + "_LOD0.mo";
         Save(staticMesh);
 
-        var sections = convertedMesh.LODs[0].Sections;
-        for (var idx = 0; idx < sections.Length; idx++)
-        {
-            var section = sections[idx];
-            var sectionMaterial = convertedMesh.GetMaterial(section)?.Material;
-            if (sectionMaterial is null) continue;
-
-
-            if (!sectionMaterial.TryLoad(out var material)) continue;
-
-            var exportMaterial = new ExportMaterial
-            {
-                MaterialName = material.Name,
-                SlotIndex = idx
-            };
-
-            if (material is UMaterialInstanceConstant materialInstance)
-            {
-                var (textures, scalars, vectors) = MaterialParameters(materialInstance);
-                exportMaterial.Textures = textures;
-                exportMaterial.Scalars = scalars;
-                exportMaterial.Vectors = vectors;
-                if(materialInstance.Parent != null)
-                    exportMaterial.ParentName = materialInstance.Parent.Name;
-            }
-
-            exportPart.Materials.Add(exportMaterial);
-        }
-
+        AddSectionMaterials(exportPart, convertedMesh.LODs[0].Sections, section => convertedMesh.GetMaterial(section)?.Material);
         exportParts.Add(exportPart);
         return exportParts.Count - 1;
     }
 
-    public static void OverrideMaterials(UMaterialInstanceConstant[] overrides, List<ExportMaterial> exportMaterials)
+    // The .psk has one material per mesh section, in section order; Unreal's override lists are indexed by material slot.
+    private static void AddSectionMaterials(ExportPart exportPart, MeshSectionDto[] sections, Func<MeshSectionDto, FPackageIndex?> materialOf)
     {
-        if (overrides is null) return;
-        for (var i = 0; i < overrides.Length; i++)
+        for (var idx = 0; idx < sections.Length; idx++)
         {
-            var material = overrides[i];
-            if (material is null) continue;
+            var section = sections[idx];
+            exportPart.SectionMaterialSlots.Add(section.MaterialIndex);
+            var sectionMaterial = materialOf(section);
+            if (sectionMaterial is null || !sectionMaterial.TryLoad(out var material)) continue;
 
+            var exportMaterial = new ExportMaterial { MaterialName = material.Name, SlotIndex = idx };
+            if (material is UMaterialInterface materialInterface) DescribeMaterial(materialInterface, exportMaterial);
+            exportPart.Materials.Add(exportMaterial);
+        }
+    }
+
+    // Applies an override list to the mesh sections. Lists are indexed by Unreal material slot, but some chroma lists
+    // follow another order (e.g. the 3P model's), so a section whose current material has a namesake in the list
+    // ("Crystal_MI" -> "Crystal_v1_MI") gets that one; the rest go by slot index.
+    public static void OverrideMaterials(UMaterialInstanceConstant?[]? overrides, ExportPart part, bool style = false)
+    {
+        if (overrides is null || overrides.Length == 0) return;
+        var target = style ? part.StyleMaterials : part.OverrideMaterials;
+        var sectionCount = Math.Max(part.SectionMaterialSlots.Count, overrides.Length);
+        var assigned = new Dictionary<int, UMaterialInstanceConstant>();
+
+        var byStem = new Dictionary<string, UMaterialInstanceConstant>();
+        foreach (var material in overrides)
+            if (material != null) byStem.TryAdd(MaterialStem(material.Name), material);
+        for (var section = 0; section < sectionCount; section++)
+            if (CurrentMaterialName(part, section) is { } current && byStem.TryGetValue(MaterialStem(current), out var namesake))
+                assigned[section] = namesake;
+
+        var matchedByName = assigned.Values.ToHashSet();
+        for (var slot = 0; slot < overrides.Length; slot++)
+        {
+            if (overrides[slot] is not { } material || matchedByName.Contains(material)) continue;
+            var sections = part.SectionMaterialSlots.Count == 0
+                ? [slot]
+                : Enumerable.Range(0, part.SectionMaterialSlots.Count).Where(s => part.SectionMaterialSlots[s] == slot);
+            foreach (var section in sections) assigned.TryAdd(section, material);
+        }
+
+        foreach (var (section, material) in assigned.OrderBy(pair => pair.Key))
+        {
             try
             {
                 var swapPath = material.GetOrDefault<FSoftObjectPath>("MaterialToSwap").AssetPathName.PlainText;
                 var exportMaterial = new ExportMaterial
                 {
                     MaterialName = material.Name,
-                    SlotIndex = i,
+                    SlotIndex = section,
                     MaterialNameToSwap = string.IsNullOrEmpty(swapPath) ? string.Empty : swapPath.SubstringAfterLast(".")
                 };
-
-                if (material is UMaterialInstanceConstant materialInstance)
-                {
-                    var (textures, scalars, vectors) = MaterialParameters(materialInstance);
-                    exportMaterial.Textures = textures;
-                    exportMaterial.Scalars = scalars;
-                    exportMaterial.Vectors = vectors;
-                    if (material.Parent != null)
-                        exportMaterial.ParentName = material.Parent.Name;
-                }
-
-                exportMaterials.Add(exportMaterial);
+                DescribeMaterial(material, exportMaterial);
+                target.Add(exportMaterial);
             }
             catch (Exception ex)
             {
                 AppLog.Warning($"Skipped a material override due to an error: {ex.Message}");
             }
         }
+    }
+
+    // The material a section ends up with so far (chroma over level over the mesh's own)
+    private static string? CurrentMaterialName(ExportPart part, int section) =>
+        (part.StyleMaterials.LastOrDefault(m => m.SlotIndex == section)
+         ?? part.OverrideMaterials.LastOrDefault(m => m.SlotIndex == section)
+         ?? part.Materials.FirstOrDefault(m => m.SlotIndex == section))?.MaterialName;
+
+    // Applies materials to the sections whose own material has the same name apart from a chroma/3P suffix
+    // (e.g. "Scope_MI" <- "Scope_v2_MI"), for lists whose slot order doesn't match the mesh.
+    public static void OverrideMaterialsByName(IEnumerable<UMaterialInstanceConstant?> candidates, ExportPart part)
+    {
+        var byName = new Dictionary<string, UMaterialInstanceConstant>();
+        foreach (var candidate in candidates)
+            if (candidate != null) byName.TryAdd(MaterialStem(candidate.Name), candidate);
+
+        foreach (var material in part.Materials)
+        {
+            if (!byName.TryGetValue(MaterialStem(material.MaterialName), out var replacement)) continue;
+            if (replacement.Name == material.MaterialName) continue;
+            var exportMaterial = new ExportMaterial { MaterialName = replacement.Name, SlotIndex = material.SlotIndex };
+            DescribeMaterial(replacement, exportMaterial);
+            part.StyleMaterials.Add(exportMaterial);
+        }
+    }
+
+    // A material's name without chroma/3P/1P markers and the "_MI" ending: "Scope_Water_v2_3p_MI" -> "scope_water"
+    internal static string MaterialStem(string name) =>
+        System.Text.RegularExpressions.Regex.Replace(name.ToLowerInvariant(), @"_(v\d+|3p|1p|mi|mat|inst)(?=_|$)", "");
+
+    // Parameters plus how the material is drawn (its shader and blend mode), so Blender can skip or fade effect-only
+    // materials (translucent liquids, additive glows) instead of drawing them as solid surfaces.
+    private static void DescribeMaterial(UMaterialInterface material, ExportMaterial exportMaterial)
+    {
+        if (material is UMaterialInstanceConstant materialInstance)
+        {
+            var (textures, scalars, vectors) = MaterialParameters(materialInstance);
+            exportMaterial.Textures = textures;
+            exportMaterial.Scalars = scalars;
+            exportMaterial.Vectors = vectors;
+            if (materialInstance.Parent != null) exportMaterial.ParentName = materialInstance.Parent.Name;
+        }
+
+        string? blendOverride = null;
+        UMaterialInterface current = material;
+        for (var depth = 0; depth < 16 && current is UMaterialInstance instance; depth++)
+        {
+            if (blendOverride == null && instance.TryGetValue(out FStructFallback overrides, "BasePropertyOverrides") &&
+                overrides.GetOrDefault<bool>("bOverride_BlendMode"))
+                blendOverride = overrides.GetOrDefault<FName>("BlendMode").Text;
+            if (instance.Parent == null || !instance.Parent.TryLoad(out var parent) || parent is not UMaterialInterface next) break;
+            current = next;
+        }
+
+        exportMaterial.BaseMaterial = current.Name;
+        var blend = blendOverride ?? (current as UMaterial)?.BlendMode.ToString();
+        if (blend != null) exportMaterial.BlendMode = blend.SubstringAfterLast("BLEND_");
     }
 
     public static (List<TextureParameter>, List<ScalarParameter>, List<VectorParameter>) MaterialParameters(UMaterialInstanceConstant materialInstance)
@@ -829,8 +754,11 @@ public static class ExportHelpers
             ParentMaterialInstanceParameters(parent, textures, scalars, vectors);
     }
 
+    internal static bool WriteFiles = true; // off for dev checks that only look at the export data
+
     public static void Save(UObject obj)
     {
+        if (!WriteFiles) return;
         Tasks.Add(Task.Run(() =>
         {
             try
