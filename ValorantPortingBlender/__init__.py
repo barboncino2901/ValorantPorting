@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 8, 0),
+    "version": (1, 9, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -217,7 +217,10 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
         # create imported inner goup
         imported_shader_node = new_shader_internals.nodes.new(type="ShaderNodeGroup")
         imported_shader_node.name = "1P_Weapon_Mat_Base_V5"
-        if mat_type == "Character":
+        # ability props mix both kinds: the character shader for character-style textures (Albedo + MRAE)
+        # (this module has its own any(), so no generator here)
+        uses_mrae = "MRAE" in [t.get("Name") for t in material_data.get("Textures") or []]
+        if mat_type == "Character" or (mat_type == "Ability" and uses_mrae):
             imported_shader_node.name = "3P_Character_Mat_V5"
         imported_shader_node.node_tree = bpy.data.node_groups.get(imported_shader_node.name)
 
@@ -309,7 +312,7 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
 
 # Effect-only materials (Unreal translucent/additive): liquids and dissolve shells that only show during
 # animations, glowing lines, lens glass. Drawn as solid surfaces they hide or smear the gun.
-EFFECT_SHELL = re.compile(r"vfx|liquid|appear|dissolve|reveal|hologram|distort|refract", re.IGNORECASE)
+EFFECT_SHELL = re.compile(r"vfx|liquid|appear|dissolve|reveal|hologram|distort|refract|shellmesh", re.IGNORECASE)
 
 
 def effect_kind(material_data):

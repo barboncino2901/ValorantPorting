@@ -184,7 +184,7 @@
                                     </StackPanel>
                                 </Button>
                                 <TextBlock VerticalAlignment="Center" Opacity="0.7" TextWrapping="Wrap"
-                                           Text="Ability models (held = 1st person, in the world = 3rd person). Their animations are in the Animations tab: select the model in Blender and the list follows it. Abilities that are only effects (smokes, walls, fire) have no model." />
+                                           Text="Models made of several parts come in assembled. Their animations are in the Animations tab: select the model in Blender and the list follows it. Abilities that are only effects (smokes, walls, fire) have no model." />
                             </DockPanel>
                         </Grid>
                     </TabItem>

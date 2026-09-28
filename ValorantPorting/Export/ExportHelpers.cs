@@ -714,6 +714,7 @@ public static class ExportHelpers
         }
 
         exportMaterial.BaseMaterial = current.Name;
+        if (current is UMaterial baseMaterial) AddBuiltInTextures(baseMaterial, exportMaterial);
         var blend = blendOverride ?? (current as UMaterial)?.BlendMode.ToString();
         if (blend != null) exportMaterial.BlendMode = blend.SubstringAfterLast("BLEND_");
     }
@@ -757,6 +758,28 @@ public static class ExportHelpers
 
         if (materialInstance.Parent != null && materialInstance.Parent.TryLoad(out var parentExport) && parentExport is UMaterialInstanceConstant parent)
             ParentMaterialInstanceParameters(parent, textures, scalars, vectors);
+    }
+
+    // Some materials expose no texture parameters: their textures are built into the base shader (e.g. Fade's Seize
+    // grenade). Use those, by their usual name endings, so the model isn't plain white.
+    private static readonly (string Suffix, string Parameter)[] BuiltInTextureSlots =
+    [
+        ("_DF", "Albedo"), ("_D", "Albedo"), ("_BaseColor", "Albedo"), ("_Albedo", "Albedo"), ("_Diffuse", "Albedo"),
+        ("_NM", "Normal"), ("_N", "Normal"), ("_Normal", "Normal"),
+        ("_MRAE", "MRAE"), ("_MRS", "MRS"), ("_MRA", "MRS"), ("_AEM", "AEM")
+    ];
+
+    private static void AddBuiltInTextures(UMaterial material, ExportMaterial exportMaterial)
+    {
+        if (exportMaterial.Textures.Any(t => t.Name is "Albedo" or "Diffuse" || t.Name.Contains("Base Color"))) return;
+        foreach (var reference in material.ReferencedTextures)
+        {
+            if (reference is null || !reference.TryLoad(out UTexture2D texture)) continue;
+            var slot = BuiltInTextureSlots.FirstOrDefault(s => texture.Name.EndsWith(s.Suffix, StringComparison.OrdinalIgnoreCase)).Parameter;
+            if (slot is null || exportMaterial.Textures.Any(t => t.Name == slot)) continue;
+            exportMaterial.Textures.Add(new TextureParameter(slot, texture.GetPathName()));
+            Save(texture);
+        }
     }
 
     internal static bool WriteFiles = true; // off for dev checks that only look at the export data

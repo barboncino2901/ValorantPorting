@@ -205,8 +205,8 @@ public partial class MainViewModel : ObservableObject
         var items = provider.Files.Keys
             .Where(p => AbilityModel.IsMatch(p))
             .Select(p => new AbilityItem(p[..^".uasset".Length], InfoOf(p)))
-            .OrderBy(a => a.SortKey, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        items = AbilityItem.Tidy(items).OrderBy(a => a.SortKey, StringComparer.OrdinalIgnoreCase).ToList();
         Abilities = new ObservableCollection<AbilityItem>(items);
         AppLog.Information($"Ability list loaded: {items.Count} models.");
     }
@@ -228,15 +228,16 @@ public partial class MainViewModel : ObservableObject
             var data = new ExportData { Name = item.Title, Type = "Ability" };
             await Task.Run(() =>
             {
-                switch (AppVM.CUE4ParseVM.Provider.LoadPackageObject(item.ObjectPath))
-                {
-                    case CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMesh skeletalMesh:
-                        ExportHelpers.Mesh(skeletalMesh, data.Parts);
-                        break;
-                    case CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh staticMesh:
-                        ExportHelpers.SMesh(staticMesh, data.Parts);
-                        break;
-                }
+                foreach (var modelPath in item.ModelPaths) // parts of one model come in together, as they fit
+                    switch (AppVM.CUE4ParseVM.Provider.LoadPackageObject(modelPath))
+                    {
+                        case CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMesh skeletalMesh:
+                            ExportHelpers.Mesh(skeletalMesh, data.Parts);
+                            break;
+                        case CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh staticMesh:
+                            ExportHelpers.SMesh(staticMesh, data.Parts);
+                            break;
+                    }
             });
             await Task.WhenAll(ExportHelpers.Tasks);
             ExportHelpers.Tasks.Clear();
