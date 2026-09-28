@@ -94,14 +94,16 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        // different skeletons can't be combined (3rd person body, 1st person arms, guns, ...)
-        if (upper.View != lower.View)
+        // different skeletons can't be combined (3rd person body, 1st person arms, guns, ...): the file name's first part
+        // says which model an animation is for ("TP_" 3rd person, "FP_" 1st person, "CS_" character select, "GN_" gun)
+        string ModelOf(AnimationItem item) => item.Name.Split('_')[0].ToUpperInvariant();
+        if (ModelOf(upper) != ModelOf(lower))
         {
             MessageBox.Show($"These two animations are for different models ({upper.View} and {lower.View}), so they can't be combined.",
                 title, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        if (upper.View is not ("3rd person" or "Character select"))
+        if (ModelOf(upper) is not ("TP" or "CS"))
         {
             MessageBox.Show($"Upper and lower body can only be combined on full-body (3rd person) animations, not \"{upper.View}\" ones.",
                 title, MessageBoxButton.OK, MessageBoxImage.Warning);
