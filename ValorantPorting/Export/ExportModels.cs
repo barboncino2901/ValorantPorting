@@ -14,6 +14,7 @@ public class ExportPart
     public string? Part;
     public List<ExportMaterial> StyleMaterials = new();
     public PartPlacement? Placement; // where the part sits in a model of several parts (ability props)
+    public PartBoneAttachment? AttachToBone; // a part the game attaches to a bone of the model's first part (Jett's ult knives)
 
     public List<int> DisabledSections = new(); // sections the game never draws (leftovers under cloth/body parts)
 
@@ -60,6 +61,8 @@ public record ExportAttatchment
 public record TextureParameter(string Name, string Value);
 
 public record PartPlacement(FVector Location, FRotator Rotation, FVector Scale);
+
+public record PartBoneAttachment(string Bone, FVector Location, FRotator Rotation, FVector Scale);
 
 public record ScalarParameter(string Name, float Value);
 

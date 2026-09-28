@@ -765,9 +765,14 @@ public static class ExportHelpers
     private static readonly (string Suffix, string Parameter)[] BuiltInTextureSlots =
     [
         ("_DF", "Albedo"), ("_D", "Albedo"), ("_BaseColor", "Albedo"), ("_Albedo", "Albedo"), ("_Diffuse", "Albedo"),
+        ("_BaseTiling", "Albedo"), // Clove's butterfly / Meddle spikeball
         ("_NM", "Normal"), ("_N", "Normal"), ("_Normal", "Normal"),
         ("_MRAE", "MRAE"), ("_MRS", "MRS"), ("_MRA", "MRS"), ("_AEM", "AEM")
     ];
+
+    // a texture the fallback above would use (named like a colour/normal/mask map)
+    public static bool IsBuiltInTextureName(string name) =>
+        BuiltInTextureSlots.Any(s => name.EndsWith(s.Suffix, StringComparison.OrdinalIgnoreCase));
 
     private static void AddBuiltInTextures(UMaterial material, ExportMaterial exportMaterial)
     {

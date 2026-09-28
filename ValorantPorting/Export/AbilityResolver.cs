@@ -5,6 +5,9 @@ using System.Text.RegularExpressions;
 using CUE4Parse.FileProvider;
 using CUE4Parse.FileProvider.Vfs;
 using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Exports.Material;
+using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
+using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.IO;
 using CUE4Parse.UE4.IO.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
@@ -110,6 +113,185 @@ public sealed class AbilityResolver
         {
             return false;
         }
+    }
+
+    // a model made only of effect materials: no colour/normal texture anywhere (Fade's Haunt orb: the game draws its
+    // look with effects, which can't be exported), so it isn't listed
+    public static bool LooksEffectOnly(IFileProvider provider, string modelObjectPath)
+    {
+        try
+        {
+            var materials = provider.LoadPackageObject(modelObjectPath) switch
+            {
+                USkeletalMesh skeletal => skeletal.Materials.Select(m => m?.Load() as UMaterialInterface),
+                UStaticMesh staticMesh => staticMesh.StaticMaterials.Select(m => m?.MaterialInterface?.Load() as UMaterialInterface),
+                _ => []
+            };
+            var list = materials.Where(m => m != null).ToList();
+            return list.Count > 0 && !list.Any(m => Textured(m!));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        static bool Textured(UMaterialInterface material)
+        {
+            UMaterialInterface? current = material;
+            for (var depth = 0; depth < 12 && current != null; depth++)
+            {
+                if (current is UMaterialInstanceConstant instance)
+                {
+                    if (instance.TextureParameterValues.Any(t => t?.ParameterValue?.Name is { } name && !name.Contains("Default", StringComparison.OrdinalIgnoreCase)))
+                        return true;
+                    current = instance.Parent?.Load() as UMaterialInterface;
+                }
+                else if (current is UMaterial baseMaterial)
+                    return baseMaterial.ReferencedTextures.Any(t => t?.Name is { } name && ExportHelpers.IsBuiltInTextureName(name));
+                else return false;
+            }
+
+            return false;
+        }
+    }
+
+    // a model the game only uses in the character select intro (Clove's butterfly)
+    public bool OnlyInCharacterSelect(string modelObjectPath)
+    {
+        var users = Users(modelObjectPath).Where(f => f.EndsWith(".uasset")).ToList();
+        return users.Count > 0 && users.All(f => f.Contains("/CharSelect/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public record BoneAttachment(string MeshPath, string Bone, Placement Offset);
+
+    // Models the game hangs on this model's bones (Jett's Blade Storm: a knife on each of the rig's bones Knife1-5),
+    // from the ability object holding both: its component tree says which bone/socket each one sits on.
+    public List<BoneAttachment>? BoneAttachmentsOf(string modelObjectPath)
+    {
+        var meshName = modelObjectPath[(modelObjectPath.LastIndexOf('.') + 1)..];
+        List<BoneAttachment>? best = null;
+        foreach (var file in Users(modelObjectPath).Where(f => f.EndsWith(".uasset") && !NotInGame.IsMatch(f)).Distinct().Take(12))
+        {
+            try
+            {
+                var exports = provider.LoadPackage(file).GetExports().ToList();
+                // the components showing this model ("WeaponMesh1P", or "X_GEN_VARIABLE" for a blueprint-added one)
+                var holders = exports.Where(e => (e.GetOrDefault<FPackageIndex>("SkeletalMesh") ?? e.GetOrDefault<FPackageIndex>("SkeletalMeshAsset"))?.Name == meshName)
+                    .Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (holders.Count == 0) continue;
+                foreach (var name in holders.ToList().Where(n => n.EndsWith("_GEN_VARIABLE"))) holders.Add(name[..^"_GEN_VARIABLE".Length]);
+
+                var attachedNodes = new List<UObject>();
+                foreach (var node in exports.Where(e => e.ExportType == "SCS_Node"))
+                {
+                    // attached to a native component by name, or a child node of a blueprint component
+                    if (holders.Contains(node.GetOrDefault<FName>("ParentComponentOrVariableName").Text)) attachedNodes.Add(node);
+                    if (holders.Contains(node.GetOrDefault<FPackageIndex>("ComponentTemplate")?.Name ?? ""))
+                        attachedNodes.AddRange(node.GetOrDefault("ChildNodes", Array.Empty<FPackageIndex>()).Select(c => c?.Load()).OfType<UObject>());
+                }
+
+                var found = new List<BoneAttachment>();
+                foreach (var node in attachedNodes.Distinct())
+                {
+                    var bone = node.GetOrDefault<FName>("AttachToName").Text;
+                    if (string.IsNullOrEmpty(bone) || bone == "None") continue;
+                    if (node.GetOrDefault<FPackageIndex>("ComponentTemplate")?.Load() is not { } template) continue;
+                    var mesh = template.GetOrDefault<FPackageIndex>("StaticMesh") ?? template.GetOrDefault<FPackageIndex>("SkeletalMesh");
+                    if (mesh?.Load()?.GetPathName() is not { } meshPath) continue;
+                    var offset = new FTransform(template.GetOrDefault("RelativeRotation", FRotator.ZeroRotator),
+                        template.GetOrDefault("RelativeLocation", FVector.ZeroVector), template.GetOrDefault("RelativeScale3D", FVector.OneVector));
+                    (bone, offset) = OnBone(modelObjectPath, bone, offset);
+                    found.Add(new BoneAttachment(meshPath, bone, new Placement(offset.Translation, offset.Rotator(), offset.Scale3D)));
+                }
+
+                if (found.Count > (best?.Count ?? 0)) best = found;
+            }
+            catch (Exception)
+            {
+                // unreadable: try the next one
+            }
+        }
+
+        return best?.OrderBy(a => a.Bone, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // a socket name -> its bone, with the socket's own offset added
+    private (string Bone, FTransform Offset) OnBone(string meshObjectPath, string name, FTransform offset)
+    {
+        try
+        {
+            if (provider.LoadPackageObject(meshObjectPath) is USkeletalMesh mesh)
+                foreach (var socket in mesh.Sockets.Select(s => s?.Load()).OfType<UObject>())
+                {
+                    if (!socket.GetOrDefault<FName>("SocketName").Text.Equals(name, StringComparison.OrdinalIgnoreCase)) continue;
+                    var socketTransform = new FTransform(socket.GetOrDefault("RelativeRotation", FRotator.ZeroRotator),
+                        socket.GetOrDefault("RelativeLocation", FVector.ZeroVector), socket.GetOrDefault("RelativeScale", FVector.OneVector));
+                    return (socket.GetOrDefault<FName>("BoneName").Text, offset * socketTransform);
+                }
+        }
+        catch (Exception)
+        {
+            // keep the name as a bone name
+        }
+
+        return (name, offset);
+    }
+
+    // The Abilities tab's list from the ability model files: names, one entry per model, parts placed, rigs with what
+    // hangs on them; models drawn only by effects are left out.
+    public static List<AbilityItem> BuildList(IFileProvider provider, IEnumerable<string> modelFiles, Func<string, (string Name, string Key)?> folderInfo)
+    {
+        var resolver = new AbilityResolver(provider);
+        var attachments = new Dictionary<string, List<BoneAttachment>>(StringComparer.OrdinalIgnoreCase);
+        bool IsRig(AbilityItem item)
+        {
+            if (!HasOnlyPlaceholderMaterials(provider, item.ObjectPath) || resolver.BoneAttachmentsOf(item.ObjectPath) is not { Count: > 0 } found) return false;
+            attachments[item.ObjectPath] = found;
+            return true;
+        }
+
+        var items = AbilityItem.Tidy(modelFiles.Select(file => new AbilityItem(file[..^".uasset".Length],
+            resolver.AbilityOf(PackageOf(file)) ?? folderInfo(file))), IsRig);
+        var result = new List<AbilityItem>();
+        foreach (var item in items)
+        {
+            if (attachments.TryGetValue(item.ObjectPath, out var found)) item.MakeRig(found);
+            else if (item.ModelPaths.All(p => LooksEffectOnly(provider, p))) continue;
+            if (item.ModelPaths.Count > 1) item.Placements = resolver.PlacementOf(item.ModelPaths);
+            if (resolver.OnlyInCharacterSelect(item.ObjectPath)) item.MarkCharacterSelectOnly();
+            result.Add(item);
+        }
+
+        return result.OrderBy(a => a.SortKey, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // an entry's parts for Blender: each placed as in game, a rig's models on their bones
+    public static List<ExportPart> ExportParts(IFileProvider provider, AbilityItem item)
+    {
+        var parts = new List<ExportPart>();
+        int Add(string path) => provider.LoadPackageObject(path) switch
+        {
+            USkeletalMesh skeletalMesh => ExportHelpers.Mesh(skeletalMesh, parts),
+            UStaticMesh staticMesh => ExportHelpers.SMesh(staticMesh, parts),
+            _ => -1
+        };
+
+        foreach (var modelPath in item.ModelPaths)
+        {
+            var index = Add(modelPath);
+            if (index >= 0 && item.Placements?.GetValueOrDefault(modelPath) is { } placement)
+                parts[index].Placement = new PartPlacement(placement.Location, placement.Rotation, placement.Scale);
+        }
+
+        if (parts.Count > 0)
+            foreach (var attachment in item.BoneAttachments ?? [])
+            {
+                var index = Add(attachment.MeshPath);
+                if (index >= 0)
+                    parts[index].AttachToBone = new PartBoneAttachment(attachment.Bone, attachment.Offset.Location, attachment.Offset.Rotation, attachment.Offset.Scale);
+            }
+
+        return parts;
     }
 
     public record Placement(FVector Location, FRotator Rotation, FVector Scale);

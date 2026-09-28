@@ -46,8 +46,7 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
         IconUrl = Key.Length > 0 ? ValorantNames.AbilityIcons.GetValueOrDefault($"{Codename}|{Key}") : null;
         Part = PartName(FileName, Codename, abilityFolder);
 
-        Title = $"{AgentName} · {AbilityName}{(Key.Length > 0 ? $" ({Key})" : "")}: {Part}";
-        SortKey = $"{AgentName}|{Array.IndexOf(KeyOrder, Key) switch { -1 => 9, var i => i }}|{AbilityName}|{Part}";
+        UpdateTitle();
         UpdateDetails();
         IsFavorite = UserLibrary.IsFavorite(LibraryId);
     }
@@ -59,18 +58,20 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
     // The Abilities tab's entries: one per model, duplicates dropped (a static copy of an animated model, the 3rd
     // person / character select copies of the same prop) and parts of one model merged ("Trap" + "Trap Eye" +
     // "Trap Rotator" -> "Trap", whose parts fit together as they are).
-    // looksEmpty: whether a model only has placeholder/invisible materials (Jett's Blade Storm skeletal model is an
-    // invisible holder; its static copy is the knife you see), so the other copy is kept instead
-    public static List<AbilityItem> Tidy(IEnumerable<AbilityItem> items, Func<AbilityItem, bool>? looksEmpty = null)
+    // isRig: an invisible model the game hangs other models on (Jett's Blade Storm rig carries the 5 knives); it's its
+    // own entry, next to the knife it carries
+    public static List<AbilityItem> Tidy(IEnumerable<AbilityItem> items, Func<AbilityItem, bool>? isRig = null)
     {
         var result = new List<AbilityItem>();
         foreach (var folder in items.GroupBy(i => i.Folder, StringComparer.OrdinalIgnoreCase))
         {
+            var rigs = folder.Where(i => i.Prefix == "AB" && isRig?.Invoke(i) == true).ToList();
+            result.AddRange(rigs);
             var unique = folder
                 .Where(i => !i.Part.StartsWith("Hidden ", StringComparison.OrdinalIgnoreCase)) // invisible helper meshes
+                .Where(i => !rigs.Contains(i) && !rigs.Any(r => r.SamePropKey.Equals(i.SamePropKey, StringComparison.OrdinalIgnoreCase) && !i.IsStatic))
                 .GroupBy(i => i.SamePropKey, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.OrderBy(i => g.Count() > 1 && looksEmpty?.Invoke(i) == true ? 1 : 0)
-                    .ThenBy(i => i.IsStatic ? 1 : 0).ThenBy(i => PrefixPreference.GetValueOrDefault(i.Prefix, 5))
+                .Select(g => g.OrderBy(i => i.IsStatic ? 1 : 0).ThenBy(i => PrefixPreference.GetValueOrDefault(i.Prefix, 5))
                     .ThenBy(i => i.Part.StartsWith("TP", StringComparison.Ordinal) ? 1 : 0).First())
                 .OrderBy(i => i.Part.Length)
                 .ToList();
@@ -107,12 +108,38 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
         UpdateDetails();
     }
 
+    // the rig of an ability, with the models the game hangs on its bones (they follow its animations)
+    public void MakeRig(List<Export.AbilityResolver.BoneAttachment> attachments)
+    {
+        BoneAttachments = attachments;
+        Part = "Animated set";
+        UpdateTitle();
+        UpdateDetails();
+    }
+
+    // a model the game only shows in the character select intro (Clove's butterfly)
+    public void MarkCharacterSelectOnly()
+    {
+        characterSelectOnly = true;
+        UpdateDetails();
+    }
+
+    private bool characterSelectOnly;
+
+    private void UpdateTitle()
+    {
+        Title = $"{AgentName} · {AbilityName}{(Key.Length > 0 ? $" ({Key})" : "")}: {Part}";
+        SortKey = $"{AgentName}|{Array.IndexOf(KeyOrder, Key) switch { -1 => 9, var i => i }}|{AbilityName}|{Part}";
+    }
+
     private void UpdateDetails()
     {
         var notes = new List<string>();
         if (partNames.Count > 0) notes.Add($"{partNames.Count + 1} parts: {Part}, {string.Join(", ", partNames)}");
+        if (BoneAttachments is { Count: > 0 } attached)
+            notes.Add($"{attached.Count} × {attached[0].MeshPath[(attached[0].MeshPath.LastIndexOf('.') + 1)..]} on the rig's bones, for the ability's animations");
         if (Prefix is "ABTP" or "TP") notes.Add("3rd person version");
-        if (Prefix == "ABCS") notes.Add("character select version");
+        if (Prefix == "ABCS" || characterSelectOnly) notes.Add("character select version");
         if (IsStatic) notes.Add("not animated");
         notes.Add(FileName);
         Details = string.Join("  ·  ", notes);
@@ -176,17 +203,18 @@ public partial class AbilityItem : ObservableObject, ILibraryItem
     public string AgentName { get; }    // "Skye"
     public string Key { get; private set; } // "Q", "E", "C", "X" or "" (other ability folders)
     public string AbilityName { get; }  // "Trailblazer"
-    public string Part { get; }         // "Wolf"
+    public string Part { get; private set; } // "Wolf"
     public string Prefix { get; }       // "AB", "ABTP", "ABCS", ...
     public string Directory { get; }    // the model file's folder
     public bool IsStatic { get; }       // a static (not animated) mesh
     public List<string> ModelPaths { get; } = []; // this model's parts (object paths), sent together
     // for a model of several parts: each part's in-game offset/rotation/size (from the object holding them)
     public Dictionary<string, Export.AbilityResolver.Placement>? Placements { get; set; }
+    public List<Export.AbilityResolver.BoneAttachment>? BoneAttachments { get; private set; }
     public string? IconUrl { get; }
-    public string Title { get; }
+    public string Title { get; private set; } = "";
     public string Details { get; private set; } = "";
-    public string SortKey { get; }
+    public string SortKey { get; private set; } = "";
 
     public bool Match(string filter)
     {

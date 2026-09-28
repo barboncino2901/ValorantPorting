@@ -315,20 +315,6 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
 EFFECT_SHELL = re.compile(r"vfx|liquid|appear|dissolve|reveal|hologram|distort|refract|shellmesh", re.IGNORECASE)
 
 
-# Ability effect materials with no textures or colour settings (their look is built in the effect's node graph, which
-# can't be exported): an approximate in-game colour instead of plain white. (base colour, glow strength)
-EFFECT_TINTS = {
-    "dome_inner_foe": ((0.02, 0.008, 0.035), 0.3),       # Fade's Haunt orb: dark ink
-    "ab_smonk_s0_q_butterfly_m": ((0.85, 0.3, 0.75), 1.0),  # Clove's butterflies: pink
-    "cable_x_cocoon": ((0.75, 0.85, 1.0), 0.2),          # Deadlock's cocoon strands: pale nanowire
-}
-
-
-def effect_tint(material_data):
-    names = f'{material_data.get("BaseMaterial") or ""} {material_data.get("MaterialName") or ""}'.lower()
-    return next((tint for key, tint in EFFECT_TINTS.items() if key in names), None)
-
-
 def effect_kind(material_data, mat_type=None):
     blend = (material_data.get("BlendMode") or "").lower()
     names = f'{material_data.get("BaseMaterial") or ""} {material_data.get("ParentName") or ""} {material_data.get("MaterialName") or ""}'
@@ -338,8 +324,6 @@ def effect_kind(material_data, mat_type=None):
         # a glow strip (Chamber's gun lines): only an emissive colour, no textures
         if [v for v in material_data.get("Vectors") or [] if re.search(r"emissive colou?r", v.get("Name") or "", re.I)]:
             return "glow"
-        if effect_tint(material_data):
-            return "tint"
     if blend.startswith("translucent") or blend in ("modulate", "alphacomposite", "alphaholdout"):
         return "hidden" if EFFECT_SHELL.search(names) else "glass"
     return None
@@ -395,17 +379,7 @@ def build_effect_material(target_slot, material_data, kind):
             links.new(tint.outputs[0], multiply.inputs[7])
             color = multiply.outputs[2]
 
-    if kind == "tint":
-        (red, green, blue), glow = effect_tint(material_data)
-        material.surface_render_method = 'DITHERED'
-        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-        bsdf.location = (100, 0)
-        bsdf.inputs["Base Color"].default_value = (red, green, blue, 1)
-        bsdf.inputs["Roughness"].default_value = 0.4
-        bsdf.inputs["Emission Color"].default_value = (red, green, blue, 1)
-        bsdf.inputs["Emission Strength"].default_value = glow
-        links.new(bsdf.outputs[0], output.inputs["Surface"])
-    elif kind == "glow":
+    if kind == "glow":
         emission = nodes.new("ShaderNodeEmission")
         emission.location = (0, 0)
         strength = scalars.get("Emissive Intensity") or scalars.get("Emissive_Intensity") or 2.0
@@ -437,6 +411,20 @@ def place_part(obj, placement):
     obj.rotation_euler = (math.radians(rotation.get("Roll", 0)), math.radians(-rotation.get("Pitch", 0)),
                           math.radians(-rotation.get("Yaw", 0)))
     obj.scale = (scale.get("X", 1), scale.get("Y", 1), scale.get("Z", 1))
+
+
+def attach_part_to_bone(child, rig, attachment):
+    """Hang a part on a bone of the model's rig with its in-game offset, so it follows the rig's animations."""
+    bone = attachment.get("Bone")
+    if child is None or rig is None or bone not in rig.data.bones:
+        return
+    place_part(child, attachment)
+    constraint = child.constraints.new('CHILD_OF')
+    constraint.name = "Valorant Porting attach"
+    constraint.target = rig
+    constraint.subtarget = bone
+    # Child Of: world = bone @ inverse_matrix @ own transform; the inverse matrix turns the Blender bone into Unreal's
+    constraint.inverse_matrix = unreal_bone_frame(rig, bone)
 
 
 def remove_disabled_sections(mesh_object, sections):
@@ -1231,6 +1219,7 @@ def import_response(response):
 
             imported_parts.append({
                 "MeshName": part.get("MeshName"),
+                "BoneAttachment": part.get("AttachToBone"),
                 "Attachments": attachments,
                 "Parent": imported_part,
                 "Mesh": mesh
@@ -1262,6 +1251,12 @@ def import_response(response):
                         slot.material = source.material
 
     import_part(import_data.get("Parts"))
+
+    # parts the game hangs on the model's bones (Jett's Blade Storm: a knife on each rig bone Knife1-5)
+    rig = next((p["Parent"] for p in imported_parts if p["Parent"].type == 'ARMATURE'), None)
+    for imported_part in imported_parts:
+        if (bone_attachment := imported_part.get("BoneAttachment")) and rig is not None:
+            attach_part_to_bone(imported_part["Parent"], rig, bone_attachment)
 
     # attachments: the parts of this import, by the name the app gave them (a name lookup in the scene would find
     # the same part of an earlier import of this gun, e.g. "Scope" instead of "Scope.001")
