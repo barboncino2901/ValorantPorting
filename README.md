@@ -17,9 +17,11 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
   Guns have their own animations too (reload, equip, inspect), in sync with the agent's.
 - **Maps tab** (experimental): exports a whole map (USD) and imports it into Blender with Valorant's environment
   shaders rebuilt (two-layer blends, tints, painted vertex colors), the map's sun and a sky light.
-- **Abilities tab**: ability models (Skye's dog, Raze's Boom Bot and grenade, Killjoy's turret, ...), held (1st person)
-  and in the world (3rd person), with their in-game names and icons. Their animations follow the Blender selection
-  in the Animations tab. Abilities that are only effects (smokes, walls, fire) have no model.
+- **Abilities tab**: ability models (Skye's dog, Raze's Boom Bot and grenade, Killjoy's turret, ...) with their in-game
+  names, keys and icons. Models made of several parts come in assembled as in game (Chamber's trap), and rigs come with
+  what hangs on them (Jett's Blade Storm knives on their bones). Their animations follow the Blender selection in the
+  Animations tab. Abilities that are only effects (smokes, walls, fire) have no model, and models the game draws
+  entirely with effects (Fade's Haunt orb) aren't listed.
 - **Upgrade levels and models**: export a skin as it looks at any upgrade level (e.g. the Level 1 Neo Frontier
   model), and pick which agent models to export (3rd person, 1st person arms, character select).
 - **Upper + lower body animations**: Riot splits many 3rd person animations into `_UB` and `_LB` halves; each pair
