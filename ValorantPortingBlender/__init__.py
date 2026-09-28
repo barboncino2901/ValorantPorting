@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 7, 2),
+    "version": (1, 7, 3),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -645,15 +645,79 @@ def import_animation(data):
 
     psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
               error_callback=on_error)
+    lower_action = armature.animation_data.action if armature.animation_data else None
+    repeat = max(1, min(int(data.get("Repeat") or 1), 20))
+    lower_loops = bool(data.get("LowerLoops"))
 
-    # upper + lower body pair (Riot's "_UB" / "_LB" halves): legs from the one above, everything else from this one
-    if upper_path := data.get("UpperAnimationPath"):
-        lower_action = armature.animation_data.action if armature.animation_data else None
-        psaimport(upper_path, context=bpy.context, oArmature=armature, bKeepProportions=True,
-                  bUpdateTimelineRange=True, error_callback=on_error)
-        upper_action = armature.animation_data.action if armature.animation_data else None
-        if lower_action and upper_action and lower_action != upper_action:
-            merge_upper_lower(armature, lower_action, upper_action, name)
+    upper_path = data.get("UpperAnimationPath")
+    if not upper_path:
+        if lower_action and repeat > 1 and lower_loops:
+            repeat_action(lower_action, repeat)
+            _fit_timeline(lower_action)
+        return
+
+    # upper + lower body: legs from the first animation, everything else from this one (Riot's "_UB"/"_LB" halves,
+    # or any two the user combines, e.g. an equip over a run)
+    psaimport(upper_path, context=bpy.context, oArmature=armature, bKeepProportions=True,
+              bUpdateTimelineRange=True, error_callback=on_error)
+    upper_action = armature.animation_data.action if armature.animation_data else None
+    if not (lower_action and upper_action and lower_action != upper_action):
+        return
+    upper_loops = bool(data.get("UpperLoops"))
+
+    # looping halves (runs, idles) repeat: as often as asked, and at least until they cover the other half
+    lower_times = repeat if lower_loops else 1
+    upper_times = repeat if upper_loops else 1
+    lower_length, upper_length = _action_length(lower_action), _action_length(upper_action)
+    if lower_loops and lower_length * lower_times < upper_length * upper_times:
+        lower_times = math.ceil(upper_length * upper_times / lower_length)
+    if upper_loops and upper_length * upper_times < lower_length * lower_times:
+        upper_times = math.ceil(lower_length * lower_times / upper_length)
+    if lower_times > 1:
+        repeat_action(lower_action, lower_times)
+    if upper_times > 1:
+        repeat_action(upper_action, upper_times)
+    ends = {"upper body": upper_length * upper_times, "lower body": lower_length * lower_times}
+    shorter = min(ends, key=ends.get)
+    if ends[shorter] < max(ends.values()) - 0.5:
+        Log.information(f"The {shorter} animation ends at frame {int(ends[shorter])} and holds its last pose after that")
+    merge_upper_lower(armature, lower_action, upper_action, name)
+
+
+def _action_length(action):
+    start, end = action.frame_range
+    return max(end - start, 1.0)
+
+
+def _fit_timeline(action):
+    start, end = action.frame_range
+    bpy.context.scene.frame_start, bpy.context.scene.frame_end = int(start), int(end)
+
+
+def repeat_action(action, times):
+    """Plays a looping animation (run, walk, idle) several times in a row by copying its keyframes, like extending it
+    by hand. The loop's last frame is its first pose again, so each copy starts where the previous one ends."""
+    start, end = action.frame_range
+    period = end - start
+    if times <= 1 or period <= 0:
+        return
+    for curve in _action_fcurves(action):
+        count = len(curve.keyframe_points)
+        if count == 0:
+            continue
+        coords = [0.0] * (count * 2)
+        curve.keyframe_points.foreach_get("co", coords)
+        keys = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
+        extra = [(frame + period * copy, value) for copy in range(1, times) for frame, value in keys
+                 if frame > start + 1e-4]  # the loop's first frame is the previous copy's last one
+        if not extra:
+            continue
+        curve.keyframe_points.add(len(extra))
+        flat = [x for key in keys + extra for x in key]
+        curve.keyframe_points.foreach_set("co", flat)
+        for point in curve.keyframe_points:
+            point.interpolation = 'LINEAR'
+        curve.update()
 
 
 def _action_fcurves(action):

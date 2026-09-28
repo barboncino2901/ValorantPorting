@@ -30,7 +30,9 @@ public class BlenderService : SocketServiceBase
 
     // Asks the Blender add-on to apply a .psa to the currently selected armature.
     // upperPsaPath: the upper-body half of an upper/lower body pair; Blender merges it with psaPath (the lower body)
-    public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null)
+    // repeat: how many times looping animations (runs, idles) play in a row; lowerLoops/upperLoops: which ones loop
+    public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
+        bool lowerLoops = false, bool upperLoops = false)
     {
         SendMessage(JsonConvert.SerializeObject(new
         {
@@ -38,7 +40,8 @@ public class BlenderService : SocketServiceBase
             Data = new
             {
                 Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
-                UpperAnimationPath = upperPsaPath?.Replace("\\", "/")
+                UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
+                Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops
             }
         }));
     }

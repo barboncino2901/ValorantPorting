@@ -20,7 +20,9 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
 - **Upgrade levels and models**: export a skin as it looks at any upgrade level (e.g. the Level 1 Neo Frontier
   model), and pick which agent models to export (3rd person, 1st person arms, character select).
 - **Upper + lower body animations**: Riot splits many 3rd person animations into `_UB` and `_LB` halves; one click
-  applies both as a single animation.
+  applies both as a single animation. You can also combine any two (e.g. an equip over a run: right-click >
+  "Use as upper body" / "Use as lower body"), with warnings for combinations that don't fit.
+- **Repeat loops**: runs, walks and idles can play several times in a row (Repeat ×2, ×3, ...).
 - **Favorites and recent**: right-click anything to favorite it; the "Show:" filter switches every tab between
   All, Favorites and Recent (what you sent to Blender).
 - Skin fixes: chroma variants, scopes and silencers get the right materials; effect-only parts (liquids, dissolve

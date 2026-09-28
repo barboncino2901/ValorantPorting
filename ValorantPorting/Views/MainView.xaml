@@ -19,6 +19,15 @@
         <Style x:Key="LibraryItemContainer" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
             <Setter Property="ContextMenu" Value="{StaticResource LibraryItemMenu}" />
         </Style>
+        <ContextMenu x:Key="AnimationItemMenu" x:Shared="False" Opened="OnLibraryMenuOpened">
+            <MenuItem Header="Add to favorites" Click="OnToggleFavoriteClick" />
+            <Separator />
+            <MenuItem Header="Use as upper body (combine)" Click="OnUseAsUpperBodyClick" />
+            <MenuItem Header="Use as lower body / legs (combine)" Click="OnUseAsLowerBodyClick" />
+        </ContextMenu>
+        <Style x:Key="AnimationItemContainer" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="ContextMenu" Value="{StaticResource AnimationItemMenu}" />
+        </Style>
     </adonisCtrls:AdonisWindow.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -140,7 +149,7 @@
                             <ListBox Grid.Row="1" x:Name="AnimationList" ItemsSource="{Binding Animations}"
                                      SelectedItem="{Binding SelectedAnimation, Mode=TwoWay}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                                     MouseDoubleClick="OnAnimationDoubleClick" ItemContainerStyle="{StaticResource LibraryItemContainer}">
+                                     MouseDoubleClick="OnAnimationDoubleClick" ItemContainerStyle="{StaticResource AnimationItemContainer}">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Margin="2" ToolTip="{Binding Folder}">
@@ -155,6 +164,17 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                             <DockPanel Grid.Row="2" Margin="{adonisUi:Space 1}">
+                                <DockPanel DockPanel.Dock="Top" Margin="0 0 0 6" Visibility="{Binding CombineVisibility}">
+                                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearCombineCommand}" />
+                                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Apply combined" Command="{Binding ExportCombinedBlenderCommand}"
+                                            ToolTip="Legs from the lower-body pick, everything else from the upper-body pick. Looping animations (runs, walks, idles) repeat to cover the other one; a shorter one-shot holds its last pose." />
+                                    <TextBlock Text="{Binding CombineText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="6 0 0 0" Visibility="{Binding RepeatVisibility}"
+                                            ToolTip="Looping animations (runs, walks, idles) can play several times in a row, like copying their keyframes by hand.">
+                                    <TextBlock Text="Repeat" VerticalAlignment="Center" Margin="0 0 4 0" />
+                                    <ComboBox ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="60" />
+                                </StackPanel>
                                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Command="{Binding ExportAnimationMergedBlenderCommand}"
                                         Visibility="{Binding BodyMergeVisibility}"
                                         ToolTip="Applies this animation's upper body (_UB) and lower body (_LB) halves as one animation: legs from the lower half, everything else from the upper half.">

@@ -49,8 +49,101 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private Visibility bodyMergeVisibility = Visibility.Collapsed;
 
     // Riot splits many 3rd person animations into an upper body ("_UB") and a lower body ("_LB") half
-    partial void OnSelectedAnimationChanged(AnimationItem? value) =>
+    partial void OnSelectedAnimationChanged(AnimationItem? value)
+    {
         BodyMergeVisibility = value != null && FindBodyHalves(value) != null ? Visibility.Visible : Visibility.Collapsed;
+        UpdateRepeatVisibility();
+    }
+
+    // Combining any two animations: the legs of one ("lower body") with everything else of another ("upper body"),
+    // e.g. an equip while running. Picked with a right-click in the Animations tab.
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CombineVisibility), nameof(CombineText))]
+    private AnimationItem? upperBodyPick;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CombineVisibility), nameof(CombineText))]
+    private AnimationItem? lowerBodyPick;
+    public Visibility CombineVisibility => UpperBodyPick != null || LowerBodyPick != null ? Visibility.Visible : Visibility.Collapsed;
+    public string CombineText =>
+        $"Upper body: {UpperBodyPick?.Title ?? "(right-click an animation)"}    ·    Lower body: {LowerBodyPick?.Title ?? "(right-click an animation)"}";
+    partial void OnUpperBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
+    partial void OnLowerBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
+
+    // How many times looping animations (runs, walks, idles) play in a row
+    public List<int> RepeatOptions { get; } = [1, 2, 3, 4, 5, 6, 8, 10];
+    [ObservableProperty] private int repeatCount = 1;
+    [ObservableProperty] private Visibility repeatVisibility = Visibility.Collapsed;
+
+    private void UpdateRepeatVisibility() =>
+        RepeatVisibility = SelectedAnimation?.IsLoop == true || UpperBodyPick?.IsLoop == true || LowerBodyPick?.IsLoop == true
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    [RelayCommand]
+    public void ClearCombine()
+    {
+        UpperBodyPick = null;
+        LowerBodyPick = null;
+    }
+
+    [RelayCommand]
+    public async Task ExportCombinedBlender()
+    {
+        const string title = "Combine animations";
+        if (UpperBodyPick is not { } upper || LowerBodyPick is not { } lower)
+        {
+            MessageBox.Show("Pick both halves first: right-click an animation > \"Use as upper body\", and another > \"Use as lower body\".",
+                title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // different skeletons can't be combined (3rd person body, 1st person arms, guns, ...)
+        if (upper.View != lower.View)
+        {
+            MessageBox.Show($"These two animations are for different models ({upper.View} and {lower.View}), so they can't be combined.",
+                title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (upper.View is not ("3rd person" or "Character select"))
+        {
+            MessageBox.Show($"Upper and lower body can only be combined on full-body (3rd person) animations, not \"{upper.View}\" ones.",
+                title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var warnings = new List<string>();
+        if (upper == lower) warnings.Add("Both halves are the same animation.");
+        if (upper.Name.EndsWith("_LB")) warnings.Add($"\"{upper.Title}\" is a lower-body animation: as the upper body it will barely move.");
+        if (lower.Name.EndsWith("_UB")) warnings.Add($"\"{lower.Title}\" is an upper-body animation: as the lower body the legs will barely move.");
+        if (!upper.Name.EndsWith("_UB") && !upper.Name.EndsWith("_LB")) warnings.Add($"\"{upper.Title}\" is a full-body animation: only its upper half is used.");
+        if (!lower.Name.EndsWith("_LB") && !lower.Name.EndsWith("_UB")) warnings.Add($"\"{lower.Title}\" is a full-body animation: only its legs are used.");
+        if (warnings.Count > 0 &&
+            MessageBox.Show(string.Join("\n\n", warnings) + "\n\nCombine anyway?", title,
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        await SendCombined(upper, lower, $"{upper.Name} + {lower.Name}");
+    }
+
+    private async Task SendCombined(AnimationItem upper, AnimationItem lower, string name)
+    {
+        if (animationExportRunning) return;
+        animationExportRunning = true;
+        try
+        {
+            var timer = Stopwatch.StartNew();
+            var lowerPath = await Task.Run(() => AnimationExport.ExportPsa(lower));
+            var upperPath = await Task.Run(() => AnimationExport.ExportPsa(upper));
+            if (lowerPath is null || upperPath is null) return;
+
+            BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop);
+            UserLibrary.AddRecent(upper.LibraryId);
+            UserLibrary.AddRecent(lower.LibraryId);
+            AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
+            _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {name}"));
+        }
+        finally
+        {
+            animationExportRunning = false;
+        }
+    }
 
     private (AnimationItem Upper, AnimationItem Lower)? FindBodyHalves(AnimationItem item)
     {
@@ -467,7 +560,7 @@ public partial class MainViewModel : ObservableObject
             var psaPath = await Task.Run(() => AnimationExport.ExportPsa(item));
             if (psaPath is null) return;
 
-            BlenderService.SendAnimation(item.Name, psaPath);
+            BlenderService.SendAnimation(item.Name, psaPath, repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop);
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));
@@ -484,27 +577,9 @@ public partial class MainViewModel : ObservableObject
     public async Task ExportAnimationMergedBlender()
     {
         if (SelectedAnimation is not { } item || FindBodyHalves(item) is not { } halves) return;
-        if (animationExportRunning) return;
-        animationExportRunning = true;
-        try
-        {
-            var timer = Stopwatch.StartNew();
-            var lowerPath = await Task.Run(() => AnimationExport.ExportPsa(halves.Lower));
-            var upperPath = await Task.Run(() => AnimationExport.ExportPsa(halves.Upper));
-            if (lowerPath is null || upperPath is null) return;
-
-            var name = halves.Upper.Name[..^3];
-            BlenderService.SendAnimation(name, lowerPath, upperPath);
-            UserLibrary.AddRecent(halves.Upper.LibraryId);
-            UserLibrary.AddRecent(halves.Lower.LibraryId);
-            AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
-            _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {name}"));
-        }
-        finally
-        {
-            animationExportRunning = false;
-        }
+        await SendCombined(halves.Upper, halves.Lower, halves.Upper.Name[..^3]);
     }
+
 
     [RelayCommand]
     public async Task ExportUnreal()

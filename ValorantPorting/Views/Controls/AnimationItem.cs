@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ValorantPorting.AppUtils;
 using ValorantPorting.Export;
@@ -24,7 +24,19 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         (Title, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
         Details = View.Length > 0 ? $"{View}  ·  {Name}" : Name;
         IsFavorite = UserLibrary.IsFavorite(LibraryId);
+        // "Sprinter" is Neon's internal name, not a sprint
+        var motion = assetName.Replace("Sprinter", "", StringComparison.OrdinalIgnoreCase);
+        IsLoop = LoopingName.IsMatch(motion) && !OneShotName.IsMatch(motion);
     }
+
+    // Cycles that can repeat seamlessly (runs, walks, idles); one-shots (equip, reload, a run's start/stop) can't.
+    private static readonly System.Text.RegularExpressions.Regex LoopingName =
+        new(@"run|walk|jog|sprint|strafe|idle|loop|glide", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    private static readonly System.Text.RegularExpressions.Regex OneShotName =
+        new(@"equip|reload|fire|inspect|jump|land|start|stop|intro|outro|enter|exit|cast|throw|death|hit|add|subtract|blendspace|aimoffset|pose|montage",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    public bool IsLoop { get; }
 
     [ObservableProperty] private bool isFavorite;
     public string LibraryId => "anim:" + ObjectPath;

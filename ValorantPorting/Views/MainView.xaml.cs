@@ -170,6 +170,18 @@ public partial class MainView
     }
 
 
+    private void OnUseAsUpperBodyClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Parent: ContextMenu menu } && LibraryItemOf(menu) is AnimationItem item)
+            AppVM.MainVM.UpperBodyPick = item;
+    }
+
+    private void OnUseAsLowerBodyClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Parent: ContextMenu menu } && LibraryItemOf(menu) is AnimationItem item)
+            AppVM.MainVM.LowerBodyPick = item;
+    }
+
     private void OnAnimationDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (AppVM.MainVM.SelectedAnimation is not null)
