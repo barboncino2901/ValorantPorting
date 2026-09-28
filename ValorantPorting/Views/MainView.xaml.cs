@@ -176,6 +176,20 @@ public partial class MainView
             AppVM.MainVM.ExportAnimationBlenderCommand.Execute(null);
     }
 
+    // Level picker for weapon skins with upgrade levels, model picker for agents
+    private static void ShowExportChoices(AssetSelectorItem selected)
+    {
+        var vm = AppVM.MainVM;
+        var levels = vm.CurrentAssetType == EAssetType.Weapon
+            ? selected.MainAsset.GetOrDefault("Levels", Array.Empty<UBlueprintGeneratedClass>())
+            : Array.Empty<UBlueprintGeneratedClass>();
+        vm.LevelOptions = levels.Length > 1
+            ? Enumerable.Range(1, levels.Length).Select(i => i == levels.Length ? $"Level {i} (max)" : $"Level {i}").ToList()
+            : new List<string>();
+        vm.SelectedLevel = Math.Max(0, levels.Length - 1);
+        vm.ModelVisibility = vm.CurrentAssetType == EAssetType.Character ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private async void OnAssetSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is not ListBox listBox) return;
@@ -186,6 +200,7 @@ public partial class MainView
             previous.ReleaseGameData();
         AppVM.MainVM.CurrentAsset = selected;
         AppVM.MainVM.Styles.Clear();
+        ShowExportChoices(selected);
         var chromas = selected.MainAsset.GetOrDefault("Chromas", Array.Empty<UObject>());
         var styles = new List<UObject>();
         foreach (UBlueprintGeneratedClass style in chromas)

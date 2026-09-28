@@ -84,11 +84,11 @@ public static class ExportHelpers
         }
     }
     
-    public static void Character(List<ExportPart> exportParts, UObject asset)
+    public static void Character(List<ExportPart> exportParts, UObject asset, ECharacterModels models = ECharacterModels.All)
     {
         var components = new List<UObject>();
         //1P Mesh
-        if (asset.TryGetValue(out UObject meshOverlay1P, "MeshOverlay1P"))
+        if (models.HasFlag(ECharacterModels.FirstPerson) && asset.TryGetValue(out UObject meshOverlay1P, "MeshOverlay1P"))
         {
             if (meshOverlay1P.Properties.Count < 2 && asset.TryGetValue(out UObject mesh1P, "Mesh1P"))
             {
@@ -100,12 +100,12 @@ public static class ExportHelpers
             }
         }
         //3P Mesh
-        if (asset.TryGetValue(out UObject meshCosmetic3P, "MeshCosmetic3P"))
+        if (models.HasFlag(ECharacterModels.ThirdPerson) && asset.TryGetValue(out UObject meshCosmetic3P, "MeshCosmetic3P"))
         {
             components.Add(meshCosmetic3P);
         }
         //CS Mesh
-        if (AppVM.MainVM.CurrentAsset.MainAsset.TryGetValue(out UObject characterSelectFxc, "CharacterSelectFXC"))
+        if (models.HasFlag(ECharacterModels.CharacterSelect) && AppVM.MainVM.CurrentAsset.MainAsset.TryGetValue(out UObject characterSelectFxc, "CharacterSelectFXC"))
         {
             var exports = AppVM.CUE4ParseVM.Provider.LoadPackageObjects(characterSelectFxc.GetPathName().Substring(0, characterSelectFxc.GetPathName().LastIndexOf(".")));
             foreach (var export in exports)
@@ -126,10 +126,14 @@ public static class ExportHelpers
     }
     
     
-    public static void Weapon(List<ExportPart> exportParts, UObject style)
+    // level: index into the skin's Levels (its model/materials as of that upgrade); null = fully upgraded
+    public static void Weapon(List<ExportPart> exportParts, UObject style, int? level = null)
     {
         var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
-        var levelTuple = GetHighestLevel();
+        var levelTuple = GetHighestLevel(level);
+        // chromas only exist on the fully upgraded skin
+        if (level is { } chosen && mainAsset.GetOrDefault("Levels", Array.Empty<UBlueprintGeneratedClass>()).Length > chosen + 1)
+            style = null;
         var handledStyleGun = style != null ? HandleStyle(style) : null;
 
         //gun mesh (if not in the skin's levels, the base gun mesh)
@@ -334,7 +338,7 @@ public static class ExportHelpers
     }
 
     public static Tuple<USkeletalMesh, UMaterialInstanceConstant[], UMaterialInstanceConstant[], UStaticMesh>
-        GetHighestLevel()
+        GetHighestLevel(int? upToLevel = null)
     {
         var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
         // 
@@ -344,7 +348,7 @@ public static class ExportHelpers
         UStaticMesh highestMagMeshUsed = null;
         //
         mainAsset.TryGetValue(out UBlueprintGeneratedClass[] levels, "Levels");
-        for (var i = 0; i < levels.Length; i++)
+        for (var i = 0; i < levels.Length && (upToLevel is null || i <= upToLevel); i++)
         {
             var activeO = levels[i];
             var cdoLo = activeO.ClassDefaultObject.Load();

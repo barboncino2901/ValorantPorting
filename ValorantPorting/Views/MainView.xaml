@@ -155,6 +155,11 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                             <DockPanel Grid.Row="2" Margin="{adonisUi:Space 1}">
+                                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Command="{Binding ExportAnimationMergedBlenderCommand}"
+                                        Visibility="{Binding BodyMergeVisibility}"
+                                        ToolTip="Applies this animation's upper body (_UB) and lower body (_LB) halves as one animation: legs from the lower half, everything else from the upper half.">
+                                    <TextBlock Text="Apply upper + lower body together" VerticalAlignment="Center" />
+                                </Button>
                                 <Button DockPanel.Dock="Right" Command="{Binding ExportAnimationBlenderCommand}">
                                     <StackPanel Orientation="Horizontal">
                                         <Image Source="/ValorantPorting;component/Resources/Blender.png"
@@ -245,6 +250,18 @@
                     <Separator Grid.Row="1" Style="{StaticResource NamedSeparator}" Tag="STYLES" />
 
                     <ScrollViewer Grid.Row="2" PreviewMouseWheel="StupidIdiotBadScroll">
+                        <StackPanel>
+                        <DockPanel Visibility="{Binding LevelVisibility}" Margin="0 0 0 6">
+                            <TextBlock Text="Upgrade level" VerticalAlignment="Center" Width="100" />
+                            <ComboBox ItemsSource="{Binding LevelOptions}" SelectedIndex="{Binding SelectedLevel, Mode=TwoWay}"
+                                      ToolTip="Skins with upgrades change their model at some levels. Variants (chromas) only exist on the fully upgraded skin." />
+                        </DockPanel>
+                        <DockPanel Visibility="{Binding ModelVisibility}" Margin="0 0 0 6">
+                            <TextBlock Text="Models" VerticalAlignment="Center" Width="100" />
+                            <ComboBox ItemsSource="{Binding ModelOptions}" DisplayMemberPath="Value" SelectedValuePath="Key"
+                                      SelectedValue="{Binding SelectedModels, Mode=TwoWay}"
+                                      ToolTip="3rd person = the full body model; 1st person = the arms you see in game; character select = the agent select screen model." />
+                        </DockPanel>
                         <ItemsControl ItemsSource="{Binding Styles}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -252,6 +269,7 @@
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                         </ItemsControl>
+                        </StackPanel>
                     </ScrollViewer>
 
                     <Separator Grid.Row="3" Style="{StaticResource NamedSeparator}" Tag="EXPORT" />

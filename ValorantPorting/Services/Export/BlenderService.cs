@@ -29,12 +29,17 @@ public class BlenderService : SocketServiceBase
     }
 
     // Asks the Blender add-on to apply a .psa to the currently selected armature.
-    public static void SendAnimation(string name, string psaPath)
+    // upperPsaPath: the upper-body half of an upper/lower body pair; Blender merges it with psaPath (the lower body)
+    public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null)
     {
         SendMessage(JsonConvert.SerializeObject(new
         {
             AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
-            Data = new { Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/") }
+            Data = new
+            {
+                Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
+                UpperAnimationPath = upperPsaPath?.Replace("\\", "/")
+            }
         }));
     }
 

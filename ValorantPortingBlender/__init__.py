@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 5, 6),
+    "version": (1, 7, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -579,6 +579,81 @@ def import_animation(data):
 
     psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
               error_callback=on_error)
+
+    # upper + lower body pair (Riot's "_UB" / "_LB" halves): legs from the one above, everything else from this one
+    if upper_path := data.get("UpperAnimationPath"):
+        lower_action = armature.animation_data.action if armature.animation_data else None
+        psaimport(upper_path, context=bpy.context, oArmature=armature, bKeepProportions=True,
+                  bUpdateTimelineRange=True, error_callback=on_error)
+        upper_action = armature.animation_data.action if armature.animation_data else None
+        if lower_action and upper_action and lower_action != upper_action:
+            merge_upper_lower(armature, lower_action, upper_action, name)
+
+
+def _action_fcurves(action):
+    if hasattr(action, "fcurves"):
+        return action.fcurves
+    from bpy_extras import anim_utils
+    return anim_utils.action_get_channelbag_for_slot(action, action.slots[0]).fcurves
+
+
+def lower_body_bones(armature):
+    """Bones Riot's lower-body animations drive: the pelvis and legs, the IK targets and the bones above the
+    "Splitter" bone (whose children are Spine1 = upper body, Pelvis = legs and the weapon aim bones)."""
+    bones = armature.data.bones
+    lower = set()
+    if splitter := bones.get("Splitter"):
+        lower.update(b.name for b in [splitter, *splitter.parent_recursive])
+    for root in ("Pelvis", "IK_RootTarget"):
+        if bone := bones.get(root):
+            lower.add(bone.name)
+            lower.update(child.name for child in bone.children_recursive)
+    return lower
+
+
+def merge_upper_lower(armature, lower_action, upper_action, name):
+    """One action from a lower-body and an upper-body animation: the lower one's curves for the legs, the upper
+    one's for everything else. Keeps the lower action (renamed) and removes the upper one."""
+    lower_bones = lower_body_bones(armature)
+    if not lower_bones:
+        Log.warning("No Splitter/Pelvis bones found; can't split this skeleton into upper and lower body")
+        return
+    target = _action_fcurves(lower_action)
+    existing = {(fc.data_path, fc.array_index): fc for fc in target}
+    for source in _action_fcurves(upper_action):
+        bone = source.data_path.split('"')[1] if '"' in source.data_path else None
+        if bone is None or bone in lower_bones:
+            continue
+        curve = existing.get((source.data_path, source.array_index))
+        if curve is None:
+            curve = _fcurve_new_on(lower_action, armature, source.data_path, source.array_index)
+        curve.keyframe_points.clear()
+        count = len(source.keyframe_points)
+        curve.keyframe_points.add(count)
+        coords = [0.0] * (count * 2)
+        source.keyframe_points.foreach_get("co", coords)
+        curve.keyframe_points.foreach_set("co", coords)
+        for point, original in zip(curve.keyframe_points, source.keyframe_points):
+            point.interpolation = original.interpolation
+        curve.update()
+    lower_action.name = f"{name} (upper + lower)"
+    armature.animation_data.action = lower_action
+    if hasattr(armature.animation_data, "action_slot") and len(lower_action.slots) > 0:
+        armature.animation_data.action_slot = lower_action.slots[0]
+    start = min(lower_action.frame_range[0], upper_action.frame_range[0])
+    end = max(lower_action.frame_range[1], upper_action.frame_range[1])
+    bpy.data.actions.remove(upper_action)
+    bpy.context.scene.frame_start, bpy.context.scene.frame_end = int(start), int(end)
+    Log.information(f"Merged upper and lower body into {lower_action.name}")
+
+
+def _fcurve_new_on(action, owner, data_path, index):
+    ad = owner.animation_data
+    if ad.action != action:
+        ad.action = action
+    if hasattr(action, "fcurves"):
+        return action.fcurves.new(data_path, index=index)
+    return action.fcurve_ensure_for_datablock(owner, data_path, index=index)
 
 
 def fix_valorant_materials(materials, summary):

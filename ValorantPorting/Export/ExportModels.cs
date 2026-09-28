@@ -20,6 +20,20 @@ public class ExportPart
     [JsonIgnore] public List<int> SectionMaterialSlots = new();
 }
 
+// Which of an agent's models to export
+[System.Flags]
+public enum ECharacterModels
+{
+    FirstPerson = 1,
+    ThirdPerson = 2,
+    CharacterSelect = 4,
+    All = FirstPerson | ThirdPerson | CharacterSelect
+}
+
+// What the user picked besides the chroma: a weapon's upgrade level (index into its Levels, null = fully upgraded)
+// and an agent's models
+public record ExportChoices(int? WeaponLevel = null, ECharacterModels Models = ECharacterModels.All);
+
 public record ExportMaterial
 {
     public string BlendMode; // Opaque, Masked, Translucent, Additive, ...

@@ -46,6 +46,23 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> gunbuddies = new();
     [ObservableProperty] private ObservableCollection<AnimationItem> animations = new();
     [ObservableProperty] private AnimationItem? selectedAnimation;
+    [ObservableProperty] private Visibility bodyMergeVisibility = Visibility.Collapsed;
+
+    // Riot splits many 3rd person animations into an upper body ("_UB") and a lower body ("_LB") half
+    partial void OnSelectedAnimationChanged(AnimationItem? value) =>
+        BodyMergeVisibility = value != null && FindBodyHalves(value) != null ? Visibility.Visible : Visibility.Collapsed;
+
+    private (AnimationItem Upper, AnimationItem Lower)? FindBodyHalves(AnimationItem item)
+    {
+        var isUpper = item.Name.EndsWith("_UB");
+        if (!isUpper && !item.Name.EndsWith("_LB")) return null;
+        var partnerSuffix = isUpper ? "_LB" : "_UB";
+        var dot = item.ObjectPath.LastIndexOf('.');
+        var partnerPath = item.ObjectPath[..(dot - 3)] + partnerSuffix + "." + item.Name[..^3] + partnerSuffix;
+        var partner = Animations.FirstOrDefault(a => a.ObjectPath == partnerPath);
+        if (partner == null) return null;
+        return isUpper ? (item, partner) : (partner, item);
+    }
     [ObservableProperty] private ObservableCollection<MapItem> maps = new();
     [ObservableProperty] private MapItem? selectedMap;
     private bool mapsLoaded;
@@ -77,7 +94,38 @@ public partial class MainViewModel : ObservableObject
     public event Action? LibraryFilterChanged;
     partial void OnLibraryFilterChanged(ELibraryFilter value) => LibraryFilterChanged?.Invoke();
 
+    // Weapon upgrade level to export ("Level 1" .. fully upgraded, the default) and which agent models
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(LevelVisibility))]
+    private List<string> levelOptions = new();
+    [ObservableProperty] private int selectedLevel;
+    public Visibility LevelVisibility => LevelOptions.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+
+    public List<KeyValuePair<ECharacterModels, string>> ModelOptions { get; } = new()
+    {
+        new(ECharacterModels.All, "All models"),
+        new(ECharacterModels.ThirdPerson, "3rd person"),
+        new(ECharacterModels.FirstPerson, "1st person (arms)"),
+        new(ECharacterModels.CharacterSelect, "Character select"),
+        new(ECharacterModels.FirstPerson | ECharacterModels.ThirdPerson, "1st + 3rd person")
+    };
+    [ObservableProperty] private ECharacterModels selectedModels = ECharacterModels.All;
+    [ObservableProperty] private Visibility modelVisibility = Visibility.Collapsed;
+
+    // The current choices; the level is null when the fully upgraded skin is picked
+    public ExportChoices GetExportChoices() => new(
+        CurrentAssetType == EAssetType.Weapon && LevelOptions.Count > 1 && SelectedLevel < LevelOptions.Count - 1 ? SelectedLevel : null,
+        CurrentAssetType == EAssetType.Character ? SelectedModels : ECharacterModels.All);
+
     public ImageSource StyleImage => currentAsset?.FullSource;
+
+    // " (Level 2)" / " (1st person)" so different picks of the same item get their own Blender collection
+    private string ExportNameSuffix()
+    {
+        var choices = GetExportChoices();
+        if (choices.WeaponLevel is { } level) return $" ({LevelOptions[level]})";
+        if (choices.Models != ECharacterModels.All) return $" ({ModelOptions.First(o => o.Key == choices.Models).Value})";
+        return "";
+    }
     public Visibility StyleVisibility => currentAsset is null ? Visibility.Collapsed : Visibility.Visible;
 
     public Visibility LoadingVisibility => IsReady ? Visibility.Collapsed : Visibility.Visible;
@@ -174,7 +222,7 @@ public partial class MainViewModel : ObservableObject
         {
             try
             {
-                data = await ExportData.Create(CurrentAsset.Asset, CurrentAssetType, GetSelectedStyles());
+                data = await ExportData.Create(CurrentAsset.Asset, CurrentAssetType, GetSelectedStyles(), GetExportChoices());
                 break;
             }
             catch (Exception ex) when (attempt < maxAttempts && ex.ToString().Contains("being used by another process"))
@@ -190,7 +238,7 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        data.Name = currentAsset.DisplayName;
+        data.Name = currentAsset.DisplayName + ExportNameSuffix();
         var filterKey = BuildAnimationFilterKey(CurrentAssetType, currentAsset);
         var reorient = CurrentAssetType != EAssetType.Weapon;
         BlenderService.Send(data, new BlenderExportSettings
@@ -433,12 +481,38 @@ public partial class MainViewModel : ObservableObject
     private bool animationExportRunning;
 
     [RelayCommand]
+    public async Task ExportAnimationMergedBlender()
+    {
+        if (SelectedAnimation is not { } item || FindBodyHalves(item) is not { } halves) return;
+        if (animationExportRunning) return;
+        animationExportRunning = true;
+        try
+        {
+            var timer = Stopwatch.StartNew();
+            var lowerPath = await Task.Run(() => AnimationExport.ExportPsa(halves.Lower));
+            var upperPath = await Task.Run(() => AnimationExport.ExportPsa(halves.Upper));
+            if (lowerPath is null || upperPath is null) return;
+
+            var name = halves.Upper.Name[..^3];
+            BlenderService.SendAnimation(name, lowerPath, upperPath);
+            UserLibrary.AddRecent(halves.Upper.LibraryId);
+            UserLibrary.AddRecent(halves.Lower.LibraryId);
+            AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
+            _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {name}"));
+        }
+        finally
+        {
+            animationExportRunning = false;
+        }
+    }
+
+    [RelayCommand]
     public async Task ExportUnreal()
     {
         var loadTimez = new Stopwatch();
         loadTimez.Start();
-        var data = await ExportData.Create(CurrentAsset.Asset, CurrentAssetType, GetSelectedStyles());
-        data.Name = currentAsset.DisplayName;
+        var data = await ExportData.Create(CurrentAsset.Asset, CurrentAssetType, GetSelectedStyles(), GetExportChoices());
+        data.Name = currentAsset.DisplayName + ExportNameSuffix();
         UnrealService.Send(data);
         loadTimez.Stop();
         AppLog.Information(

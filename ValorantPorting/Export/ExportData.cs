@@ -22,8 +22,9 @@ public class ExportData
     }
 
     
-    public static async Task<ExportData> Create(UObject asset, EAssetType assetType, UObject style)
+    public static async Task<ExportData> Create(UObject asset, EAssetType assetType, UObject style, ExportChoices? choices = null)
     {
+        choices ??= new ExportChoices();
         var data = new ExportData();
         data.Name = asset.GetOrDefault("DeveloperName", new FText("Unnamed")).Text;
         data.Type = assetType.ToString();
@@ -32,10 +33,10 @@ public class ExportData
             switch (assetType)
             {
                 case EAssetType.Character:
-                    ExportHelpers.Character(data.Parts, asset);
+                    ExportHelpers.Character(data.Parts, asset, choices.Models);
                     break;
                 case EAssetType.Weapon:
-                    ExportHelpers.Weapon(data.Parts, style);
+                    ExportHelpers.Weapon(data.Parts, style, choices.WeaponLevel);
                     break;
                 case EAssetType.GunBuddy:
                     ExportHelpers.GunBuddy(data.Parts, asset);
