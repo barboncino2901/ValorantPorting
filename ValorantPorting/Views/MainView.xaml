@@ -32,9 +32,20 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="{adonisUi:Space 1}" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+
+        <Border Grid.Row="1" Visibility="{Binding UpdateVisibility}" Background="#2D5A8C" Padding="10 6">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Later" Command="{Binding DismissUpdateCommand}" IsEnabled="{Binding UpdateIdle}" />
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="What's new" Command="{Binding ShowUpdateNotesCommand}" />
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Update now" Command="{Binding InstallUpdateCommand}" IsEnabled="{Binding UpdateIdle}"
+                        ToolTip="Downloads the new version from GitHub, replaces this one and restarts. The old version is removed once the new one has started (and put back if it doesn't start)." />
+                <TextBlock Text="{Binding UpdateText}" VerticalAlignment="Center" Foreground="White" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Border>
 
         <Menu Grid.Row="0">
             <MenuItem Header="File">
@@ -59,10 +70,11 @@
             <MenuItem Header="Help">
                 <MenuItem Header="Discord Server" Command="{Binding MenuCommand}" CommandParameter="Help_Discord" />
                 <MenuItem Header="GitHub Repo" Command="{Binding MenuCommand}" CommandParameter="Help_GitHub" />
+                <MenuItem Header="Check for updates" Command="{Binding MenuCommand}" CommandParameter="Help_Update" />
             </MenuItem>
         </Menu>
 
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="4*" />

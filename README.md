@@ -23,6 +23,10 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
   applies both as a single animation. You can also combine any two (e.g. an equip over a run: right-click >
   "Use as upper body" / "Use as lower body"), with warnings for combinations that don't fit.
 - **Repeat loops**: runs, walks and idles can play several times in a row (Repeat ×2, ×3, ...).
+- **Smarter animation search**: the best match comes first ("run forward", "vandal upper body"), and Riot's
+  internal names and small typos are understood ("RunN", "vandl").
+- **Updates from the app**: when a new release is out, a bar offers to update; the app downloads it from GitHub,
+  swaps itself and restarts (Help > Check for updates checks by hand).
 - **Favorites and recent**: right-click anything to favorite it; the "Show:" filter switches every tab between
   All, Favorites and Recent (what you sent to Blender).
 - Skin fixes: chroma variants, scopes and silencers get the right materials; effect-only parts (liquids, dissolve

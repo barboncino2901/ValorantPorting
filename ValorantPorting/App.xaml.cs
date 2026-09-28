@@ -25,9 +25,13 @@ public partial class App
     [DllImport("kernel32")]
     private static extern bool FreeConsole();
 
+    // started by the updater: the main window confirms the update once it's up
+    public static bool StartedAfterUpdate { get; private set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        StartedAfterUpdate = Services.UpdateService.StartedAfterUpdate(e.Args);
         AllocConsole();
 
         Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateLogger();

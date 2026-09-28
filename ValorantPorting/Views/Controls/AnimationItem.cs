@@ -1,4 +1,6 @@
-﻿using System;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ValorantPorting.AppUtils;
 using ValorantPorting.Export;
@@ -37,6 +39,22 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     public bool IsLoop { get; }
+
+    // Search data (see AnimationSearch), built on first use: the title and all names in lower case, and their words
+    // ("TP_Core_RunN_LB" -> tp, core, run, n, lb)
+    private string? searchTitle, searchText;
+    private HashSet<string>? titleWords, nameWords, allWords;
+    public string SearchTitle => searchTitle ??= AnimationSearch.Normalize(Title);
+    public string SearchText => searchText ??= AnimationSearch.Normalize($"{Title} {Name} {View} {Folder}");
+    public HashSet<string> TitleWords => titleWords ??= [..SearchTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries)];
+    public HashSet<string> NameWords => nameWords ??= [..SplitName(Name).Concat(SplitName(Folder))];
+    public HashSet<string> AllWords => allWords ??= [..TitleWords.Concat(NameWords)];
+    public bool IsShared => View.Contains("shared", StringComparison.OrdinalIgnoreCase) || Folder.Contains("_Core", StringComparison.OrdinalIgnoreCase);
+    public double SearchScore { get; set; } // of the current search, for sorting
+
+    private static IEnumerable<string> SplitName(string name) =>
+        System.Text.RegularExpressions.Regex.Split(name, @"[_/\s]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+            .Where(w => w.Length > 0).Select(w => w.ToLowerInvariant());
 
     [ObservableProperty] private bool isFavorite;
     public string LibraryId => "anim:" + ObjectPath;

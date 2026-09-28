@@ -35,6 +35,15 @@ public partial class MainView
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (App.StartedAfterUpdate)
+        {
+            UpdateService.ConfirmStarted();
+            MessageBox.Show($"Valorant Porting was updated to version {UpdateService.CurrentVersion.ToString(3)}.\n\n" +
+                            "The Blender add-on was updated too (in the \"Blender Add-ons\" folder). Install it in Blender: " +
+                            "Edit > Preferences > Add-ons > Install from Disk, then restart Blender.",
+                "Update installed", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
         if (string.IsNullOrWhiteSpace(AppSettings.Current.ArchivePath))
         {
             AppHelper.OpenWindow<StartupView>();
@@ -117,6 +126,7 @@ public partial class MainView
     {
         var hasText = !string.IsNullOrWhiteSpace(text);
         var library = AppVM.MainVM.LibraryFilter;
+        var animationSearch = AnimationSearch.Parse(text);
         listBox.Items.Filter = o =>
         {
             if (o is ILibraryItem item && !UserLibrary.Matches(item.LibraryId, library)) return false;
@@ -124,12 +134,22 @@ public partial class MainView
             {
                 AssetSelectorItem asset => !hasText || asset.Match(text),
                 // favorites/recent show across all models, so the "Show animations for" filter doesn't hide them
-                AnimationItem animation => (!hasText || animation.Match(text)) &&
+                AnimationItem animation => MatchesSearch(animation, animationSearch) &&
                                            (library != ELibraryFilter.All || AppVM.MainVM.MatchesAnimationContext(animation)),
                 MapItem map => !hasText || map.Match(text),
                 _ => true
             };
         };
+
+        // Animations while searching: best match first
+        if (System.Windows.Data.CollectionViewSource.GetDefaultView(listBox.ItemsSource) is System.Windows.Data.ListCollectionView view &&
+            listBox.Name == "AnimationList")
+        {
+            var ranked = animationSearch != null && library != ELibraryFilter.Recent;
+            if (ranked) view.CustomSort = BestMatchFirst.Instance;
+            else if (view.CustomSort != null) view.CustomSort = null;
+            if (ranked) return;
+        }
 
         // Recent: newest first; otherwise the list's normal order
         var sort = listBox.Items.SortDescriptions;
@@ -146,6 +166,23 @@ public partial class MainView
         {
             sort.Clear();
         }
+    }
+
+    private static bool MatchesSearch(AnimationItem animation, AnimationSearch? search)
+    {
+        if (search is null) return true;
+        var score = search.Score(animation);
+        if (score is null) return false;
+        animation.SearchScore = score.Value;
+        return true;
+    }
+
+    private sealed class BestMatchFirst : System.Collections.IComparer
+    {
+        public static readonly BestMatchFirst Instance = new();
+
+        public int Compare(object? x, object? y) =>
+            ((y as AnimationItem)?.SearchScore ?? 0).CompareTo((x as AnimationItem)?.SearchScore ?? 0);
     }
 
     // Right-click menu on tiles, animations and maps: add/remove favorite.

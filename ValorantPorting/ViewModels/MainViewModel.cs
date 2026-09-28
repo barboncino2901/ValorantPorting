@@ -211,6 +211,52 @@ public partial class MainViewModel : ObservableObject
         CurrentAssetType == EAssetType.Weapon && LevelOptions.Count > 1 && SelectedLevel < LevelOptions.Count - 1 ? SelectedLevel : null,
         CurrentAssetType == EAssetType.Character ? SelectedModels : ECharacterModels.All);
 
+
+    // Update banner: shown when GitHub has a newer release (checked at startup and from Help > Check for updates)
+    [ObservableProperty] private Visibility updateVisibility = Visibility.Collapsed;
+    [ObservableProperty] private string updateText = "";
+    [ObservableProperty] private bool updateIdle = true;
+    private UpdateService.Release? availableUpdate;
+
+    public async Task CheckForUpdates(bool manual)
+    {
+        if (!manual && !UpdateService.IsReleaseBuild) return;
+        var release = await UpdateService.FindNewerReleaseAsync();
+        if (release is null)
+        {
+            if (manual)
+                MessageBox.Show($"You have the latest version ({UpdateService.CurrentVersion.ToString(3)}), or GitHub couldn't be reached.",
+                    "Check for updates", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        availableUpdate = release;
+        UpdateText = $"Version {release.Version.ToString(3)} is available (you have {UpdateService.CurrentVersion.ToString(3)}).";
+        UpdateVisibility = Visibility.Visible;
+    }
+
+    [RelayCommand]
+    public async Task InstallUpdate()
+    {
+        if (availableUpdate is not { } release || !UpdateIdle) return;
+        UpdateIdle = false;
+        var status = new Progress<string>(text => UpdateText = text);
+        if (await UpdateService.InstallAsync(release, status))
+        {
+            Application.Current.Shutdown(); // the new version is running
+            return;
+        }
+
+        UpdateIdle = true;
+        UpdateText = $"Version {release.Version.ToString(3)} is available, but the update failed. Try again, or download it from GitHub.";
+    }
+
+    [RelayCommand]
+    public void ShowUpdateNotes() => AppHelper.Launch(availableUpdate?.PageUrl ?? UpdateService.ReleasesPage);
+
+    [RelayCommand]
+    public void DismissUpdate() => UpdateVisibility = Visibility.Collapsed;
+
     public ImageSource StyleImage => currentAsset?.FullSource;
 
     // " (Level 2)" / " (1st person)" so different picks of the same item get their own Blender collection
@@ -251,6 +297,7 @@ public partial class MainViewModel : ObservableObject
 
             await AppVM.AssetHandlerVM.Initialize();
         });
+        _ = CheckForUpdates(manual: false);
     }
 
     public UObject GetSelectedStyles()
@@ -295,6 +342,9 @@ public partial class MainViewModel : ObservableObject
                 break;
             case "Help_GitHub":
                 AppHelper.Launch(Globals.GITHUB_URL);
+                break;
+            case "Help_Update":
+                _ = CheckForUpdates(manual: true);
                 break;
             case "Help_About":
                 // TODO
