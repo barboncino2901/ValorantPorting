@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ValorantPorting.Views.Controls;
@@ -51,6 +51,9 @@ public partial class AnimationFilterOption : ObservableObject
                 _ => (parts[1], ["TP_"], true)
             };
         }
+
+        if (parts[0] == "ability") // an ability's models: its AB_ (1st person) / ABTP_ (3rd person) animations
+            return (parts[1], ["AB_", "ABTP_", "ABCS_"], false);
 
         if (parts[0] == "weapon")
         {

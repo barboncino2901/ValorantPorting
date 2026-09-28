@@ -143,6 +143,53 @@
                     </TabItem>
                     <TabItem Style="{StaticResource TabItemEqualSize}">
                         <TabItem.Header>
+                            <controls:TextWithIcon Label="Abilities"
+                                                   ImageSource="/ValorantPorting;component/Resources/Mesh.png" />
+                        </TabItem.Header>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ListBox Grid.Row="0" x:Name="AbilityList" ItemsSource="{Binding Abilities}"
+                                     SelectedItem="{Binding SelectedAbility, Mode=TwoWay}"
+                                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                     MouseDoubleClick="OnAbilityDoubleClick" ItemContainerStyle="{StaticResource LibraryItemContainer}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="2">
+                                            <Border DockPanel.Dock="Left" Width="34" Height="34" Margin="0 0 8 0" Background="#1E2733" CornerRadius="4">
+                                                <Image Source="{Binding IconUrl, TargetNullValue={x:Null}}" Width="28" Height="28"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
+                                                               Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <DockPanel Grid.Row="1" Margin="{adonisUi:Space 1}">
+                                <Button DockPanel.Dock="Right" Command="{Binding ExportAbilityBlenderCommand}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="/ValorantPorting;component/Resources/Blender.png"
+                                               VerticalAlignment="Center" Width="16" Height="16"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                        <TextBlock Text="Send to Blender" VerticalAlignment="Center" Margin="5 0 0 0" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock VerticalAlignment="Center" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="Ability models (held = 1st person, in the world = 3rd person). Their animations are in the Animations tab: select the model in Blender and the list follows it. Abilities that are only effects (smokes, walls, fire) have no model." />
+                            </DockPanel>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Style="{StaticResource TabItemEqualSize}">
+                        <TabItem.Header>
                             <controls:TextWithIcon Label="Animations"
                                                    ImageSource="/ValorantPorting;component/Resources/Dance.png" />
                         </TabItem.Header>

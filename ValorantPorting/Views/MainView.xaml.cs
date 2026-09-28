@@ -73,6 +73,18 @@ public partial class MainView
             return;
         }
 
+        if (assetType == EAssetType.Ability)
+        {
+            foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
+            AppVM.MainVM.CurrentAsset = null;
+            AppVM.MainVM.Styles.Clear();
+            AppVM.MainVM.LoadAbilities();
+            ApplySearchFilter(AbilityList, SearchText);
+            DiscordService.Update(assetType);
+            AppVM.MainVM.CurrentAssetType = assetType;
+            return;
+        }
+
         if (assetType == EAssetType.Animation)
         {
             foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
@@ -116,8 +128,8 @@ public partial class MainView
     {
         foreach (var tab in AssetControls.Items.OfType<TabItem>())
         {
-            var listBox = tab.Content as ListBox ??
-                          (ReferenceEquals(tab.Content, MapList.Parent) ? MapList : AnimationList);
+            var listBox = tab.Content as ListBox ?? (tab.Content as Grid)?.Children.OfType<ListBox>().FirstOrDefault();
+            if (listBox is null) continue;
             ApplySearchFilter(listBox, SearchText);
         }
     }
@@ -137,6 +149,7 @@ public partial class MainView
                 AnimationItem animation => MatchesSearch(animation, animationSearch) &&
                                            (library != ELibraryFilter.All || AppVM.MainVM.MatchesAnimationContext(animation)),
                 MapItem map => !hasText || map.Match(text),
+                AbilityItem ability => !hasText || ability.Match(text),
                 _ => true
             };
         };
@@ -217,6 +230,12 @@ public partial class MainView
     {
         if (sender is MenuItem { Parent: ContextMenu menu } && LibraryItemOf(menu) is AnimationItem item)
             AppVM.MainVM.LowerBodyPick = item;
+    }
+
+    private void OnAbilityDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (AppVM.MainVM.SelectedAbility is not null)
+            AppVM.MainVM.ExportAbilityBlenderCommand.Execute(null);
     }
 
     private void OnAnimationDoubleClick(object sender, MouseButtonEventArgs e)

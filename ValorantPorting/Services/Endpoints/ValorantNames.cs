@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -27,6 +27,7 @@ public static class ValorantNames
     public static IReadOnlyDictionary<string, AnimationNamer.Agent> Agents { get; private set; } = new Dictionary<string, AnimationNamer.Agent>();
     public static IReadOnlyDictionary<string, string> Guns { get; private set; } = new Dictionary<string, string>();
     public static IReadOnlyDictionary<string, string> Skins { get; private set; } = new Dictionary<string, string>();
+    public static IReadOnlyDictionary<string, string> AbilityIcons { get; private set; } = new Dictionary<string, string>(); // "Guide|Q" -> icon url
 
     private static readonly ManualResetEventSlim Ready = new(false);
 
@@ -74,6 +75,7 @@ public static class ValorantNames
         var slotKeys = new Dictionary<string, string> { ["Ability1"] = "Q", ["Ability2"] = "E", ["Grenade"] = "C", ["Ultimate"] = "X" };
 
         var agents = new Dictionary<string, AnimationNamer.Agent>(StringComparer.OrdinalIgnoreCase);
+        var abilityIcons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var agent in data["agents"]?.Children<JObject>() ?? [])
         {
             var codename = agent.Value<string>("developerName");
@@ -83,8 +85,9 @@ public static class ValorantNames
             var abilities = new Dictionary<string, string>();
             foreach (var ability in agent["abilities"]?.Children<JObject>() ?? [])
             {
-                if (slotKeys.TryGetValue(ability.Value<string>("slot") ?? "", out var key))
-                    abilities[key] = ability.Value<string>("displayName") ?? key;
+                if (!slotKeys.TryGetValue(ability.Value<string>("slot") ?? "", out var key)) continue;
+                abilities[key] = ability.Value<string>("displayName") ?? key;
+                if (ability.Value<string>("displayIcon") is { Length: > 0 } icon) abilityIcons[$"{codename}|{key}"] = icon;
             }
 
             agents[codename] = new AnimationNamer.Agent(name, abilities); // abilities keyed Q / E / C / X
@@ -123,6 +126,7 @@ public static class ValorantNames
         }
 
         Agents = agents;
+        AbilityIcons = abilityIcons;
         Guns = guns;
         Skins = skins;
         Maps = mapList;

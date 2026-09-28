@@ -21,6 +21,7 @@ public enum EAssetType
     [Description("Characters")] Character,
     [Description("Weapons")] Weapon,
     [Description("Gunbuddies")] GunBuddy,
+    [Description("Abilities")] Ability,
     [Description("Animations")] Animation, // must stay in tab order (tab index == enum value)
     [Description("Maps")] Map,
     [Description("Mesh")] Mesh

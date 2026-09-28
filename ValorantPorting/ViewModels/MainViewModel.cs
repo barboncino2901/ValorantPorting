@@ -176,6 +176,95 @@ public partial class MainViewModel : ObservableObject
     public event Action? LibraryFilterChanged;
     partial void OnLibraryFilterChanged(ELibraryFilter value) => LibraryFilterChanged?.Invoke();
 
+    // Abilities tab: every model in the agents' ability folders (Skye's dog, Raze's grenade, ...)
+    [ObservableProperty] private ObservableCollection<AbilityItem> abilities = new();
+    [ObservableProperty] private AbilityItem? selectedAbility;
+    private bool abilitiesLoaded;
+    private bool abilityExportRunning;
+
+    private static readonly System.Text.RegularExpressions.Regex AbilityModel = new(
+        @"^ShooterGame/Content/Characters/[^_/][^/]*/S0/Ability_[^/]+/.*(Skelmesh|Staticmesh)\.uasset$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    public void LoadAbilities()
+    {
+        if (abilitiesLoaded || AppVM.CUE4ParseVM is null) return;
+        abilitiesLoaded = true;
+        ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
+
+        var provider = AppVM.CUE4ParseVM.Provider;
+        var infos = new Dictionary<string, (string Name, string Key)?>(StringComparer.OrdinalIgnoreCase);
+        (string Name, string Key)? InfoOf(string file)
+        {
+            var parts = file.Split('/'); // ShooterGame, Content, Characters, Guide, S0, Ability_Q, ...
+            var folder = string.Join('/', parts.Skip(2).Take(4));
+            if (!infos.TryGetValue(folder, out var info)) infos[folder] = info = AbilityItem.ReadAbilityInfo(provider, folder);
+            return info;
+        }
+
+        var items = provider.Files.Keys
+            .Where(p => AbilityModel.IsMatch(p))
+            .Select(p => new AbilityItem(p[..^".uasset".Length], InfoOf(p)))
+            .OrderBy(a => a.SortKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        Abilities = new ObservableCollection<AbilityItem>(items);
+        AppLog.Information($"Ability list loaded: {items.Count} models.");
+    }
+
+    [RelayCommand]
+    public async Task ExportAbilityBlender()
+    {
+        if (SelectedAbility is not { } item)
+        {
+            AppLog.Warning("Select an ability model first.");
+            return;
+        }
+
+        if (abilityExportRunning) return;
+        abilityExportRunning = true;
+        try
+        {
+            var timer = Stopwatch.StartNew();
+            var data = new ExportData { Name = item.Title, Type = "Ability" };
+            await Task.Run(() =>
+            {
+                switch (AppVM.CUE4ParseVM.Provider.LoadPackageObject(item.ObjectPath))
+                {
+                    case CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMesh skeletalMesh:
+                        ExportHelpers.Mesh(skeletalMesh, data.Parts);
+                        break;
+                    case CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh staticMesh:
+                        ExportHelpers.SMesh(staticMesh, data.Parts);
+                        break;
+                }
+            });
+            await Task.WhenAll(ExportHelpers.Tasks);
+            ExportHelpers.Tasks.Clear();
+            if (data.Parts.Count == 0)
+            {
+                AppLog.Warning($"{item.Title}: the model could not be read.");
+                return;
+            }
+
+            BlenderService.Send(data, new BlenderExportSettings
+            {
+                ReorientBones = false, // like guns: ability props animate with their own bone orientation
+                AnimationFilterKey = $"ability|{item.Folder}/|{item.AgentName} {item.AbilityName}: {item.Part}"
+            });
+            UserLibrary.AddRecent(item.LibraryId);
+            AppLog.Information($"Sent {item.Title} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
+            _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Title}"));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Could not send {item.Title}: {ex.Message}");
+        }
+        finally
+        {
+            abilityExportRunning = false;
+        }
+    }
+
     // Weapon upgrade level to export ("Level 1" .. fully upgraded, the default) and which agent models
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(LevelVisibility))]
     private List<string> levelOptions = new();
