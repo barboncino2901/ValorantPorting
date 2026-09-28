@@ -1,4 +1,4 @@
-# ValorantPorting [![Discord](https://discord.com/api/guilds/866821077769781249/widget.png?style=shield)](https://discord.com/invite/valorant3d)
+# ValorantPorting [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/rzXpJP9bB7)
 A free and open-source tool that automates porting Valorant agents, weapon skins, gun buddies, animations and maps
 to Blender.
 
