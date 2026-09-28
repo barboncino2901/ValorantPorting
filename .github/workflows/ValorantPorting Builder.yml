@@ -38,11 +38,10 @@ jobs:
           cmake --build natives-build --config Release
           Copy-Item natives-build/Release/CUE4Parse-Natives.dll ./ValorantPorting/bin/Publish/
 
-      - name: Blender add-on ZIP files
+      - name: Blender add-on ZIP
         # the add-on folder itself goes into the zip, which is what Blender's "Install from Disk" expects
         run: |
           Compress-Archive -Path ValorantPortingBlender -DestinationPath ValorantPortingBlender.zip
-          Compress-Archive -Path ValorantPortingBlenderOctane -DestinationPath ValorantPortingBlenderOctane.zip
 
       - name: GIT Release
         uses: softprops/action-gh-release@v2
@@ -54,5 +53,4 @@ jobs:
             ./ValorantPorting/bin/Publish/ValorantPorting.exe
             ./ValorantPorting/bin/Publish/CUE4Parse-Natives.dll
             ValorantPortingBlender.zip
-            ValorantPortingBlenderOctane.zip
             ./ValorantPortingBlender/valorant_psk_psa_b5.py
