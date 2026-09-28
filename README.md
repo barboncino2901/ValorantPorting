@@ -19,10 +19,13 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
   shaders rebuilt (two-layer blends, tints, painted vertex colors), the map's sun and a sky light.
 - **Upgrade levels and models**: export a skin as it looks at any upgrade level (e.g. the Level 1 Neo Frontier
   model), and pick which agent models to export (3rd person, 1st person arms, character select).
-- **Upper + lower body animations**: Riot splits many 3rd person animations into `_UB` and `_LB` halves; one click
-  applies both as a single animation. You can also combine any two (e.g. an equip over a run: right-click >
+- **Upper + lower body animations**: Riot splits many 3rd person animations into `_UB` and `_LB` halves; each pair
+  also has a "(full body)" entry that applies both at once. You can also combine any two (e.g. an equip over a run: right-click >
   "Use as upper body" / "Use as lower body"), with warnings for combinations that don't fit.
 - **Repeat loops**: runs, walks and idles can play several times in a row (Repeat ×2, ×3, ...).
+- **Tidier animation list**: each entry shows which model it's for (3rd person, 1st person, gun, ...); ~5,000 montages
+  that only repeated another animation are hidden, and montages that play several animations in a row (e.g. a
+  character select intro, then its idle) come through as one "(sequence)".
 - **Smarter animation search**: the best match comes first ("run forward", "vandal upper body"), and Riot's
   internal names and small typos are understood ("RunN", "vandl").
 - **Updates from the app**: when a new release is out, a bar offers to update; the app downloads it from GitHub,
@@ -63,8 +66,7 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
 - **Agents / Weapon Skins / Gun Buddies**: pick an item (and a chroma), then send it to Blender. Skins with upgrades
   show an "Upgrade level" choice; agents show a "Models" choice.
 - **Animations**: select the agent's or gun's armature in Blender, pick an animation and apply it (or double-click).
-  Gun animations: `GN_` = 1st person, `GNTP_` = 3rd person. For an animation ending in `_UB` or `_LB`, "Apply upper +
-  lower body together" applies both halves at once.
+  Gun animations: `GN_` = 1st person, `GNTP_` = 3rd person. "(full body)" entries apply an upper + lower body pair.
 - **Guns in hand**: select the agent (3rd or 1st person) before sending a gun. To detach, delete the
   "Valorant Porting attach" constraint on the gun.
 - **Maps**: pick a map and export it. The first export of a map takes a while and a few GB of disk space;

@@ -168,6 +168,10 @@
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
                                                            Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
+                                                <Border Background="#3A4A63" CornerRadius="3" Padding="5 0" Margin="0 1 6 1" VerticalAlignment="Center"
+                                                        ToolTip="The model this animation is for">
+                                                    <TextBlock Text="{Binding ModelTag}" FontSize="10.5" Foreground="#D6E2F5" />
+                                                </Border>
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
                                             </StackPanel>
                                             <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
@@ -187,11 +191,6 @@
                                     <TextBlock Text="Repeat" VerticalAlignment="Center" Margin="0 0 4 0" />
                                     <ComboBox ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="60" />
                                 </StackPanel>
-                                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Command="{Binding ExportAnimationMergedBlenderCommand}"
-                                        Visibility="{Binding BodyMergeVisibility}"
-                                        ToolTip="Applies this animation's upper body (_UB) and lower body (_LB) halves as one animation: legs from the lower half, everything else from the upper half.">
-                                    <TextBlock Text="Apply upper + lower body together" VerticalAlignment="Center" />
-                                </Button>
                                 <Button DockPanel.Dock="Right" Command="{Binding ExportAnimationBlenderCommand}">
                                     <StackPanel Orientation="Horizontal">
                                         <Image Source="/ValorantPorting;component/Resources/Blender.png"

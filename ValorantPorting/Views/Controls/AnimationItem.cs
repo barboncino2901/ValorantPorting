@@ -8,6 +8,13 @@ using ValorantPorting.Services.Endpoints;
 
 namespace ValorantPorting.Views.Controls;
 
+public enum EAnimationKind
+{
+    Single,   // one animation
+    FullBody, // an upper body (_UB) + lower body (_LB) pair, applied together
+    Sequence  // a montage playing several animations one after the other
+}
+
 // One animation in the Animations tab (Valorant animations have no icons, so this is a text entry).
 public partial class AnimationItem : ObservableObject, ILibraryItem
 {
@@ -29,7 +36,50 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         // "Sprinter" is Neon's internal name, not a sprint
         var motion = assetName.Replace("Sprinter", "", StringComparison.OrdinalIgnoreCase);
         IsLoop = LoopingName.IsMatch(motion) && !OneShotName.IsMatch(motion);
+        ModelTag = ModelTags.TryGetValue(assetName.Split('_')[0], out var tag) ? tag : "";
     }
+
+    // "Vandal: Equip (full body)": both halves of an upper/lower body pair
+    public static AnimationItem FullBody(AnimationItem upper, AnimationItem lower)
+    {
+        var package = upper.ObjectPath[..upper.ObjectPath.LastIndexOf('.')];
+        var item = new AnimationItem(package[..^3], upper.Name[..^3]);
+        item.Kind = EAnimationKind.FullBody;
+        item.UpperHalf = upper;
+        item.LowerHalf = lower;
+        item.AddToTitle(" (full body)");
+        return item;
+    }
+
+    // a montage that plays several animations in a row
+    public void MakeSequence(IReadOnlyList<AnimationItem> clips)
+    {
+        Kind = EAnimationKind.Sequence;
+        Clips = clips;
+        AddToTitle(" (sequence)");
+    }
+
+    public EAnimationKind Kind { get; private set; } = EAnimationKind.Single;
+    public AnimationItem? UpperHalf { get; private set; }
+    public AnimationItem? LowerHalf { get; private set; }
+    public IReadOnlyList<AnimationItem> Clips { get; private set; } = [];
+
+    private void AddToTitle(string text)
+    {
+        Title += text;
+        searchTitle = searchText = null;
+        titleWords = allWords = null;
+        OnPropertyChanged(nameof(Title));
+    }
+
+    // Which model an animation is for, from its name's first part; shown as a tag in the list
+    private static readonly Dictionary<string, string> ModelTags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["TP"] = "3rd person", ["FP"] = "1st person", ["CS"] = "Char select", ["GN"] = "Gun", ["GNTP"] = "Gun 3rd person",
+        ["AB"] = "Ability prop", ["ABTP"] = "Ability prop", ["ABCS"] = "Ability prop", ["EQ"] = "Melee"
+    };
+
+    public string ModelTag { get; }
 
     // Cycles that can repeat seamlessly (runs, walks, idles); one-shots (equip, reload, a run's start/stop) can't.
     private static readonly System.Text.RegularExpressions.Regex LoopingName =
@@ -60,7 +110,7 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
     public string LibraryId => "anim:" + ObjectPath;
     public int RecentRank => UserLibrary.RecentRank(LibraryId);
 
-    public string Title { get; }     // e.g. "Jett · Tailwind (E): Dash East"
+    public string Title { get; private set; } // e.g. "Jett · Tailwind (E): Dash East"
     public string View { get; }      // e.g. "3rd person"
     public string Details { get; }   // second line in the list: view + original file name
     public string Name { get; }

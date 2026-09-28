@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -29,7 +29,8 @@ public sealed class AnimationSearch
         ["left"] = ["w"], ["right"] = ["e"],
         ["upper"] = ["ub"], ["lower"] = ["lb"], ["legs"] = ["lb", "lower"],
         ["1st"] = ["fp", "first"], ["first"] = ["fp", "1st"], ["3rd"] = ["tp", "third"], ["third"] = ["tp", "3rd"],
-        ["crouch"] = ["crouch"], ["jog"] = ["run"], ["sprinting"] = ["sprint"], ["running"] = ["run"], ["walking"] = ["walk"]
+        ["ult"] = ["x"], ["ultimate"] = ["x"], ["signature"] = ["e"], ["ability"] = ["q", "e", "c"],
+        ["jog"] = ["run"], ["sprinting"] = ["sprint"], ["running"] = ["run"], ["walking"] = ["walk"]
     };
 
     private static readonly HashSet<string> Ignored = ["the", "a", "an", "animation", "animations", "anim", "of", "for"];

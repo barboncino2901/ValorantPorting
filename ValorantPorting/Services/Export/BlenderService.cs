@@ -1,4 +1,6 @@
-﻿using System.Net.Sockets;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Net.Sockets;
 using System.Text;
 using Newtonsoft.Json;
 using ValorantPorting.Export;
@@ -31,8 +33,9 @@ public class BlenderService : SocketServiceBase
     // Asks the Blender add-on to apply a .psa to the currently selected armature.
     // upperPsaPath: the upper-body half of an upper/lower body pair; Blender merges it with psaPath (the lower body)
     // repeat: how many times looping animations (runs, idles) play in a row; lowerLoops/upperLoops: which ones loop
+    // sequencePaths: all clips of a montage that plays several in a row (psaPath is the first), joined in Blender
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
-        bool lowerLoops = false, bool upperLoops = false)
+        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null)
     {
         SendMessage(JsonConvert.SerializeObject(new
         {
@@ -41,7 +44,8 @@ public class BlenderService : SocketServiceBase
             {
                 Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
                 UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
-                Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops
+                Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
+                SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList()
             }
         }));
     }

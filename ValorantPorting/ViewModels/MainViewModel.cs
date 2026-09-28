@@ -46,12 +46,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> gunbuddies = new();
     [ObservableProperty] private ObservableCollection<AnimationItem> animations = new();
     [ObservableProperty] private AnimationItem? selectedAnimation;
-    [ObservableProperty] private Visibility bodyMergeVisibility = Visibility.Collapsed;
 
     // Riot splits many 3rd person animations into an upper body ("_UB") and a lower body ("_LB") half
     partial void OnSelectedAnimationChanged(AnimationItem? value)
     {
-        BodyMergeVisibility = value != null && FindBodyHalves(value) != null ? Visibility.Visible : Visibility.Collapsed;
         UpdateRepeatVisibility();
     }
 
@@ -147,17 +145,6 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private (AnimationItem Upper, AnimationItem Lower)? FindBodyHalves(AnimationItem item)
-    {
-        var isUpper = item.Name.EndsWith("_UB");
-        if (!isUpper && !item.Name.EndsWith("_LB")) return null;
-        var partnerSuffix = isUpper ? "_LB" : "_UB";
-        var dot = item.ObjectPath.LastIndexOf('.');
-        var partnerPath = item.ObjectPath[..(dot - 3)] + partnerSuffix + "." + item.Name[..^3] + partnerSuffix;
-        var partner = Animations.FirstOrDefault(a => a.ObjectPath == partnerPath);
-        if (partner == null) return null;
-        return isUpper ? (item, partner) : (partner, item);
-    }
     [ObservableProperty] private ObservableCollection<MapItem> maps = new();
     [ObservableProperty] private MapItem? selectedMap;
     private bool mapsLoaded;
@@ -210,7 +197,6 @@ public partial class MainViewModel : ObservableObject
     public ExportChoices GetExportChoices() => new(
         CurrentAssetType == EAssetType.Weapon && LevelOptions.Count > 1 && SelectedLevel < LevelOptions.Count - 1 ? SelectedLevel : null,
         CurrentAssetType == EAssetType.Character ? SelectedModels : ECharacterModels.All);
-
 
     // Update banner: shown when GitHub has a newer release (checked at startup and from Help > Check for updates)
     [ObservableProperty] private Visibility updateVisibility = Visibility.Collapsed;
@@ -590,9 +576,30 @@ public partial class MainViewModel : ObservableObject
             .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        items.AddRange(AnimationMontages.FullBodyPairs(items));
+        items = items
+            .OrderBy(a => a.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         Animations = new ObservableCollection<AnimationItem>(items);
         AppLog.Information($"Animation list loaded: {items.Count} entries.");
         MemoryHelper.ReleaseAfterLoading("Animation list loaded");
+
+        // montages: hide the ones that only repeat animations already listed, mark the ones playing several in a row
+        var provider = AppVM.CUE4ParseVM.Provider;
+        Task.Run(() =>
+        {
+            var result = AnimationMontages.Classify(provider, items);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                foreach (var (montage, clips) in result.Sequences) montage.MakeSequence(clips);
+                Animations = new ObservableCollection<AnimationItem>(items.Where(i => !result.Hidden.Contains(i)));
+                AnimationFilterChanged?.Invoke();
+                AppLog.Information($"Animation list: {result.Hidden.Count} duplicate montages hidden, {result.Sequences.Count} sequences.");
+            });
+            MemoryHelper.ReleaseAfterLoading("Animation montages sorted");
+        });
     }
 
     [RelayCommand]
@@ -608,11 +615,26 @@ public partial class MainViewModel : ObservableObject
         animationExportRunning = true;
         try
         {
-            var timer = Stopwatch.StartNew();
-            var psaPath = await Task.Run(() => AnimationExport.ExportPsa(item));
-            if (psaPath is null) return;
+            if (item.Kind == EAnimationKind.FullBody)
+            {
+                animationExportRunning = false;
+                await SendCombined(item.UpperHalf!, item.LowerHalf!, item.Name);
+                UserLibrary.AddRecent(item.LibraryId);
+                return;
+            }
 
-            BlenderService.SendAnimation(item.Name, psaPath, repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop);
+            var timer = Stopwatch.StartNew();
+            var clips = item.Kind == EAnimationKind.Sequence ? item.Clips : [item];
+            var paths = new List<string>();
+            foreach (var clip in clips)
+            {
+                var path = await Task.Run(() => AnimationExport.ExportPsa(clip));
+                if (path is null) return;
+                paths.Add(path);
+            }
+
+            BlenderService.SendAnimation(item.Name, paths[0], repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop,
+                sequencePaths: paths.Count > 1 ? paths : null);
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));
@@ -624,14 +646,6 @@ public partial class MainViewModel : ObservableObject
     }
 
     private bool animationExportRunning;
-
-    [RelayCommand]
-    public async Task ExportAnimationMergedBlender()
-    {
-        if (SelectedAnimation is not { } item || FindBodyHalves(item) is not { } halves) return;
-        await SendCombined(halves.Upper, halves.Lower, halves.Upper.Name[..^3]);
-    }
-
 
     [RelayCommand]
     public async Task ExportUnreal()

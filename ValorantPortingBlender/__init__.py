@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 7, 3),
+    "version": (1, 8, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -646,6 +646,16 @@ def import_animation(data):
     psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
               error_callback=on_error)
     lower_action = armature.animation_data.action if armature.animation_data else None
+    # montages that play several clips in a row (e.g. a character select intro, then its idle): the app sends every
+    # clip; they're imported in order and joined into one action, back to back
+    if len(clips := data.get("SequencePaths") or []) > 1 and lower_action:
+        actions = [lower_action]
+        for clip in clips[1:]:
+            psaimport(clip, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
+                      error_callback=on_error)
+            if armature.animation_data and armature.animation_data.action not in actions:
+                actions.append(armature.animation_data.action)
+        lower_action = join_actions(armature, actions, name)
     repeat = max(1, min(int(data.get("Repeat") or 1), 20))
     lower_loops = bool(data.get("LowerLoops"))
 
@@ -682,6 +692,42 @@ def import_animation(data):
     if ends[shorter] < max(ends.values()) - 0.5:
         Log.information(f"The {shorter} animation ends at frame {int(ends[shorter])} and holds its last pose after that")
     merge_upper_lower(armature, lower_action, upper_action, name)
+
+
+def join_actions(armature, actions, name):
+    """Appends each action's keyframes after the previous one's end into the first action; removes the others."""
+    first = actions[0]
+    target = {(fc.data_path, fc.array_index): fc for fc in _action_fcurves(first)}
+    offset = first.frame_range[1]
+    for action in actions[1:]:
+        start, end = action.frame_range
+        for source in _action_fcurves(action):
+            curve = target.get((source.data_path, source.array_index))
+            if curve is None:
+                curve = target[(source.data_path, source.array_index)] = _fcurve_new_on(first, armature, source.data_path, source.array_index)
+            count = len(source.keyframe_points)
+            coords = [0.0] * (count * 2)
+            source.keyframe_points.foreach_get("co", coords)
+            # the next clip starts where this one ends (skip its first frame when it lands on the seam)
+            keys = [(offset + frame - start, value) for frame, value in zip(coords[0::2], coords[1::2])
+                    if not (frame <= start + 1e-4 and len(curve.keyframe_points) and offset > 0)]
+            old = len(curve.keyframe_points)
+            curve.keyframe_points.add(len(keys))
+            flat = [0.0] * ((old + len(keys)) * 2)
+            curve.keyframe_points.foreach_get("co", flat)
+            flat[old * 2:] = [x for key in keys for x in key]
+            curve.keyframe_points.foreach_set("co", flat)
+            for point in curve.keyframe_points[old:]:
+                point.interpolation = 'LINEAR'
+            curve.update()
+        offset += end - start
+        bpy.data.actions.remove(action)
+    first.name = name
+    armature.animation_data.action = first
+    if hasattr(armature.animation_data, "action_slot") and len(first.slots) > 0:
+        armature.animation_data.action_slot = first.slots[0]
+    _fit_timeline(first)
+    return first
 
 
 def _action_length(action):
