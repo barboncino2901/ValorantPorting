@@ -119,6 +119,7 @@ public static class MapExport
                     var texturePath = (texture.Value["ObjectPath"] ?? texture.Value["AssetPathName"])?.ToString();
                     if (!string.IsNullOrEmpty(texturePath)) textures[texture.Name] = TextureFile(texturePath);
                 }
+                ReplacePlaceholderTextures(result.ObjectPath, textures);
 
                 summary[Path.GetFileNameWithoutExtension(file)] = new JObject
                 {
@@ -139,6 +140,26 @@ public static class MapExport
         var path = Path.ChangeExtension(worldFile, ".materials.json");
         File.WriteAllText(path, summary.ToString(Newtonsoft.Json.Formatting.None));
         return path;
+    }
+
+    // Slots resolved to a placeholder texture get the real texture a parent material instance sets, if any.
+    private static void ReplacePlaceholderTextures(string objectPath, JObject textures)
+    {
+        if (!textures.Properties().Any(t => MaterialTextures.IsPlaceholder("/" + t.Value)))
+            return;
+        try
+        {
+            var material = AppVM.CUE4ParseVM.Provider.LoadPackageObject<UMaterialInterface>(objectPath);
+            foreach (var (name, texture) in MaterialTextures.Inherited(material))
+            {
+                if (textures[name] is { } current && !MaterialTextures.IsPlaceholder("/" + current)) continue;
+                if (MaterialTextures.EnsurePng(texture, App.AssetsFolder.FullName) is { } file) textures[name] = file;
+            }
+        }
+        catch (Exception)
+        {
+            // unresolvable material: keep the placeholders
+        }
     }
 
     // "/Game/environment/.../Brick_DF.0" -> "ShooterGame/Content/environment/.../Brick_DF.png" (where the export writes it)

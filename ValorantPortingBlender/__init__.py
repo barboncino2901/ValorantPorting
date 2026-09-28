@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 7, 1),
+    "version": (1, 7, 2),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -748,12 +748,27 @@ def fix_valorant_materials(materials, summary):
 
         info = find_material_info(summary, material.name) or {}
         base_input = principled.inputs['Base Color']
+        effect = effect_surface(material.name, info)
+        if effect == "hidden":
+            material.user_remap(_hidden_material())  # few materials: the slow remap is fine here
+            continue
+        if effect == "water":
+            for link in list(base_input.links):
+                links.remove(link)
+            base_input.default_value = WATER_COLOR
+            principled.inputs['Roughness'].default_value = 0.05
+            principled.inputs['Metallic'].default_value = 0.0
+            continue
         if not base_input.is_linked:
             # untextured material left white by the USD import: use its own color parameter if it has one
             color = next((c for name, c in (info.get("Colors") or {}).items()
                           if isinstance(c, dict) and "R" in c and not NON_ALBEDO_COLORS.search(name)), None)
             if color is not None:
-                base_input.default_value = (color["R"], color["G"], color["B"], 1.0)
+                rgb = [color["R"], color["G"], color["B"]]
+                peak = max(rgb)
+                if peak > 1.0:  # glow colors are HDR (e.g. 1500, 0, 0): keep the hue, not the brightness
+                    rgb = [c / peak for c in rgb]
+                base_input.default_value = (*rgb, 1.0)
                 flat_colored += 1
         ao = (info.get("Colors") or {}).get("AO color")
         base_link = principled.inputs['Base Color'].links[0] if principled.inputs['Base Color'].is_linked else None
@@ -769,6 +784,24 @@ def fix_valorant_materials(materials, summary):
                 links.new(mix.outputs['Result'], principled.inputs['Base Color'])
                 ao_fixed += 1
     Log.information(f"Material fixes: {mra_fixed} MRA, {ao_fixed} foliage AO color, {flat_colored} flat colors")
+
+
+WATER_COLOR = (0.01, 0.045, 0.05, 1.0)  # dark teal, like the maps' ponds and rivers
+WATER_SURFACE = re.compile(r"water_?surface|river_?(water|surface)|pond", re.IGNORECASE)
+# thin water sheets running over walls, and shadow/foam decals: effects drawn on top of a real surface
+WATER_FILM = re.compile(r"water_.*(wall|marble)", re.IGNORECASE)
+SHADOW_DECAL = re.compile(r"shadow|foam", re.IGNORECASE)
+
+
+def effect_surface(name, info):
+    """'water', 'hidden' or None for a map material the Valorant shaders didn't rebuild."""
+    if WATER_FILM.search(name):
+        return "hidden"
+    if WATER_SURFACE.search(name):
+        return "water"
+    if info.get("BlendMode") == 4 or SHADOW_DECAL.search(name):  # 4 = Modulate: only darkens what's under it
+        return "hidden"
+    return None
 
 
 # Color parameters that aren't the surface color itself.
@@ -830,8 +863,15 @@ def setup_map_lighting(objects, map_name):
         if light.data.type != 'SUN':
             continue
         direction = (light.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized()
+        # the map's light actor is the parent ("DirectionalLight_Sun", "DirectionalLight_Aurora_FillLight")
+        names = f"{light.name} {light.parent.name if light.parent else ''}".lower()
+        is_sun = "sun" in names and "fill" not in names
+        if is_sun and direction.z > -0.15:
+            # a sunset sun right at the horizon (Summit): keep its heading, just low enough to graze the buildings
+            direction = Vector((direction.x, direction.y, 0)).normalized() * 0.99 + Vector((0, 0, -0.15))
+            direction.normalize()
         if direction.z < -0.05:  # skip the "look up" helper lights that shine upward
-            suns.append((light.data.energy, direction, tuple(light.data.color)))
+            suns.append((is_sun, light.data.energy, direction, tuple(light.data.color), names.strip()))
     for obj in objects:
         if obj.type == 'MESH' and (SKY_MESHES.search(obj.name) or (obj.parent and SKY_MESHES.search(obj.parent.name))):
             obj.visible_shadow = False
@@ -842,7 +882,9 @@ def setup_map_lighting(objects, map_name):
 
     scene = bpy.context.scene
     if suns:
-        energy, direction, color = max(suns, key=lambda s: s[0])
+        # the light named "Sun" (Summit also has a stronger white fill light pointing straight down), else the brightest
+        _, energy, direction, color, sun_name = max(suns, key=lambda s: (s[0], s[1]))
+        Log.information(f"Map sun: {sun_name} (of {len(suns)} directional lights)")
         # the USD export mirrors the light direction on X (checked against in-game shadows)
         direction = Vector((-direction.x, direction.y, direction.z))
         sun_data = bpy.data.lights.new(f"{map_name} Sun", 'SUN')

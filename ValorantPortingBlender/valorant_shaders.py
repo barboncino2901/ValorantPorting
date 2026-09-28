@@ -27,6 +27,8 @@ TEXTURE_SLOTS = {
     "NM B": ["Normal B", "Texture B Normal"],
 }
 NON_COLOR_SLOTS = {"MRA", "MRA B", "NM", "NM B"}
+# switches that make an environment material glow (otherwise its default white "Emissive Mult" is unused)
+EMISSIVE_SWITCHES = ["Use Alpha As Emissive", "Blend Emissive", "Diffuse Color Emissive", "Emissive Map Texture"]
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -299,6 +301,11 @@ def _find(mapping, names):
     return None
 
 
+def _is_placeholder(relative_path):
+    """Riot's layered-material stand-in textures ("Default_Base", "Default_NM", ...)."""
+    return "/LayeredEnv/_Textures_Base/" in relative_path.replace("\\", "/")
+
+
 def _image(assets_root, relative_path, non_color):
     path = os.path.join(assets_root, relative_path)
     if not os.path.exists(path):
@@ -318,30 +325,35 @@ def _build_radianite(material, info, assets_root):
     colors = info.get("Colors") or {}
     scalars = info.get("Scalars") or {}
     textures = info.get("Textures") or {}
-    dark = _color(colors.get("Cloud Color A", {"R": 0.0, "G": 0.1, "B": 0.1}))
-    bright = _color(colors.get("Cloud Color B", {"R": 0.0, "G": 0.8, "B": 0.5}))
+    cloud_a = _color(colors.get("Cloud Color A", {"R": 0.01, "G": 0.44, "B": 0.26}))
+    extra = colors.get("Additional Cloud Color", {"R": 0.2, "G": 0.8, "B": 1.0})
+    extra_weight = 0.35 * scalars.get("Additional Cloud Intensity", 0.25)
+    # in game: a calm teal (cloud color A pulled slightly toward the bluish additional cloud color) with soft
+    # darker/lighter clouds, fairly matte and faintly self-lit
+    base = tuple(0.65 * cloud_a[i] + extra_weight * extra[ch] for i, ch in enumerate("RGB"))
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     nodes.clear()
     output = nodes.new('ShaderNodeOutputMaterial')
     bsdf = nodes.new('ShaderNodeBsdfPrincipled')
     links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
-    coords = nodes.new('ShaderNodeTexCoord')
+    position = nodes.new('ShaderNodeNewGeometry')  # world space, so neighbouring roof pieces line up
     noise = nodes.new('ShaderNodeTexNoise')
-    noise.inputs['Scale'].default_value = 0.4 * scalars.get("Cloud UV Scale", 1.0)
-    noise.inputs['Detail'].default_value = 4.0
-    links.new(coords.outputs['Object'], noise.inputs['Vector'])
+    noise.inputs['Scale'].default_value = 0.08 * scalars.get("Cloud UV Scale", 1.0)
+    noise.inputs['Detail'].default_value = 3.0
+    noise.inputs['Roughness'].default_value = 0.45
+    links.new(position.outputs['Position'], noise.inputs['Vector'])
     ramp = nodes.new('ShaderNodeValToRGB')
-    ramp.color_ramp.elements[0].position = 0.3
-    ramp.color_ramp.elements[0].color = dark
-    ramp.color_ramp.elements[1].position = 0.75
-    ramp.color_ramp.elements[1].color = tuple(c * 0.6 for c in bright[:3]) + (1.0,)
+    ramp.color_ramp.elements[0].position = 0.35
+    ramp.color_ramp.elements[0].color = tuple(c * 0.7 for c in base) + (1.0,)
+    ramp.color_ramp.elements[1].position = 0.7
+    ramp.color_ramp.elements[1].color = tuple(min(c * 1.25, 1.0) for c in base) + (1.0,)
     links.new(noise.outputs['Fac'], ramp.inputs['Fac'])
     links.new(ramp.outputs['Color'], bsdf.inputs['Base Color'])
     links.new(ramp.outputs['Color'], bsdf.inputs['Emission Color'])
-    bsdf.inputs['Emission Strength'].default_value = 0.35
-    bsdf.inputs['Metallic'].default_value = 0.2
-    bsdf.inputs['Roughness'].default_value = 0.2
+    bsdf.inputs['Emission Strength'].default_value = 0.2
+    bsdf.inputs['Metallic'].default_value = 0.0
+    bsdf.inputs['Roughness'].default_value = 0.6
     relative = _find(textures, TEXTURE_SLOTS["NM"])
     image = _image(assets_root, relative, True) if relative else None
     if image is not None:
@@ -386,6 +398,14 @@ def rebuild_material(material, info, assets_root):
     colors = info.get("Colors") or {}
     scalars = info.get("Scalars") or {}
     switches = info.get("Switches") or {}
+
+    # Summit's wet ground variants: no diffuse of their own (a placeholder), their pattern is the "Custom Texture"
+    diffuse = _find(textures, TEXTURE_SLOTS["DF"])
+    custom = _find(textures, ["Custom Texture"])
+    if (diffuse is None or _is_placeholder(diffuse)) and custom and not _is_placeholder(custom) \
+            and _find(switches, ["Use Custom Texture"]):
+        textures = {k: v for k, v in textures.items() if k not in TEXTURE_SLOTS["DF"]}
+        textures["Diffuse"] = custom
 
     images = {}
     for slot, names in TEXTURE_SLOTS.items():
@@ -437,7 +457,9 @@ def rebuild_material(material, info, assets_root):
     set_color("Tint B", "Layer B Tint", "Texture Tint B")
     set_color("AO Color", "AO color")
     set_color("VC", "Lightmass-only Vertex Color")
-    set_color("Emissive Mult", "Emissive Mult")
+    # "Emissive Mult" is white on almost every environment material; it only glows when an emissive switch is on
+    if any(_find(switches, [name]) for name in EMISSIVE_SWITCHES):
+        set_color("Emissive Mult", "Emissive Mult")
 
     blend_power = _find(scalars, ["Mask Blend Power"])
     if blend_power is not None and "Vertex Blend" in shader.inputs:
