@@ -39,6 +39,7 @@ public record ExportMaterial
     public string BlendMode; // Opaque, Masked, Translucent, Additive, ...
     public string BaseMaterial; // the root material (shader) the instance is made from
     public string MaterialName;
+    public string MaterialPath; // unique: chromas reuse material names in their own folders
     public string? MaterialNameToSwap;
     public string ParentName;
     public List<ScalarParameter> Scalars = new();

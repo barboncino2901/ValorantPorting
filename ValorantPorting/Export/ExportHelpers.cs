@@ -692,6 +692,7 @@ public static class ExportHelpers
     // materials (translucent liquids, additive glows) instead of drawing them as solid surfaces.
     private static void DescribeMaterial(UMaterialInterface material, ExportMaterial exportMaterial)
     {
+        exportMaterial.MaterialPath = material.GetPathName();
         if (material is UMaterialInstanceConstant materialInstance)
         {
             var (textures, scalars, vectors) = MaterialParameters(materialInstance);

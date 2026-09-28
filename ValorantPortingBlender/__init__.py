@@ -18,7 +18,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 7, 0),
+    "version": (1, 7, 1),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -131,8 +131,6 @@ def import_mesh(path: str) -> bpy.types.Object:
 
 def import_texture(path: str) -> bpy.types.Image:
     path, name = path.split(".")
-    if existing := bpy.data.images.get(name):
-        return existing
 
     raw_path = path[1:] if path.startswith("/") else path
     translated_path = resolve_asset_path(path)
@@ -148,24 +146,37 @@ def import_texture(path: str) -> bpy.types.Image:
     return None
 
 
+def find_built_material(name, path):
+    """A material an earlier import already built for this game material: by its game path when the app sent one
+    (chroma variants reuse material names, e.g. "BoltSniper_Arcade_Simple_MI" in each variant's folder)."""
+    if path:
+        return next((m for m in bpy.data.materials if m.get("vp_path") == path and m.get("vp_built")), None)
+    existing = bpy.data.materials.get(name)
+    return existing if existing is not None and existing.get("vp_built") is True else None
+
+
 def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type):
     material_name = material_data.get("MaterialName")
+    material_path = material_data.get("MaterialPath")
     # NOTE: Blender 5.0+ made Material.use_nodes always return True (deprecated),
     # AND new materials now come pre-populated with a default node tree (Principled BSDF +
     # Material Output) automatically. Neither of those can be used anymore to tell "a fresh
     # placeholder material" apart from "one we already fully built." Use our own explicit
     # marker instead, set at the bottom of this function once building is actually done.
-    if (existing := bpy.data.materials.get(material_name)) and existing.get("vp_built") is True:
+    if existing := find_built_material(material_name, material_path):
         target_slot.material = existing
         return
     if kind := effect_kind(material_data):
         build_effect_material(target_slot, material_data, kind)
         return
     target_material = target_slot.material
-    if target_material.name.casefold() != material_name.casefold():
+    # never rebuild a finished material in place: other imports may use it (chroma materials share names)
+    if target_material.name.casefold() != material_name.casefold() or target_material.get("vp_built"):
         target_material = target_material.copy()
         target_material.name = material_name
         target_slot.material = target_material
+    if material_path:
+        target_material["vp_path"] = material_path
     target_material.use_nodes = True
 
     nodes = target_material.node_tree.nodes
@@ -290,6 +301,8 @@ def import_material(target_slot: bpy.types.MaterialSlot, material_data, mat_type
             if imported_shader_node.inputs.get(output.name) is not None:
                 new_shader_internals.links.new(output, imported_shader_node.inputs.get(output.name))
 
+    add_iridescence(nodes, links, MAIN_SHADER, material_data)
+
     # mark this material as fully built so future lookups can safely reuse it
     target_material["vp_built"] = True
 
@@ -316,9 +329,11 @@ def build_effect_material(target_slot, material_data, kind):
 
     name = material_data.get("MaterialName")
     material = target_slot.material  # the importer's placeholder of the same name, else a new one
-    if material is None or material.name.casefold() != name.casefold():
+    if material is None or material.name.casefold() != name.casefold() or material.get("vp_built"):
         material = bpy.data.materials.new(name)
     target_slot.material = material
+    if material_data.get("MaterialPath"):
+        material["vp_path"] = material_data.get("MaterialPath")
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     nodes.clear()
@@ -394,6 +409,57 @@ def remove_disabled_sections(mesh_object, sections):
         bm.to_mesh(mesh_object.data)
         mesh_object.data.update()
     bm.free()
+
+
+def add_iridescence(nodes, links, shader, material_data):
+    """Riot's iridescent skins (e.g. Prism III): the albedo is a grayscale position along the "Iridescence Gradient"
+    strip, shifted by the viewing angle, on the parts the AEM's blue channel marks. Each chroma has its own strip."""
+    def linked_image(socket_name):
+        socket = shader.inputs.get(socket_name)
+        if socket is None or not socket.is_linked:
+            return None
+        node = socket.links[0].from_node
+        return node if node.type == 'TEX_IMAGE' else None
+
+    gradient, albedo, aem = linked_image("Iridescence Gradient"), linked_image("Albedo"), linked_image("AEM")
+    if gradient is None or albedo is None:
+        return
+    scalars = {v.get("Name"): v.get("Value") for v in material_data.get("Scalars") or []}
+    gradient.extension = 'EXTEND'
+    gradient.interpolation = 'Linear'
+
+    facing = nodes.new("ShaderNodeLayerWeight")
+    view = nodes.new("ShaderNodeMath")
+    view.operation = 'MULTIPLY'
+    links.new(facing.outputs["Facing"], view.inputs[0])
+    view.inputs[1].default_value = float(scalars.get("Camera View Scale", 0.5))
+    tone = nodes.new("ShaderNodeSeparateColor")
+    links.new(albedo.outputs[0], tone.inputs[0])
+    position = nodes.new("ShaderNodeMath")
+    position.operation = 'ADD'
+    links.new(tone.outputs[0], position.inputs[0])
+    links.new(view.outputs[0], position.inputs[1])
+    offset = nodes.new("ShaderNodeMath")
+    offset.operation = 'ADD'
+    offset.use_clamp = True
+    links.new(position.outputs[0], offset.inputs[0])
+    offset.inputs[1].default_value = float(scalars.get("Diffuse Offset", 0.0))
+    uv = nodes.new("ShaderNodeCombineXYZ")
+    links.new(offset.outputs[0], uv.inputs[0])
+    uv.inputs[1].default_value = 0.5
+    links.new(uv.outputs[0], gradient.inputs[0])
+
+    mix = nodes.new("ShaderNodeMix")
+    mix.data_type = 'RGBA'
+    links.new(albedo.outputs[0], mix.inputs[6])
+    links.new(gradient.outputs[0], mix.inputs[7])
+    if aem is not None:
+        mask = nodes.new("ShaderNodeSeparateColor")
+        links.new(aem.outputs[0], mask.inputs[0])
+        links.new(mask.outputs[2], mix.inputs[0])
+    else:
+        mix.inputs[0].default_value = 1.0
+    links.new(mix.outputs[2], shader.inputs["Albedo"])
 
 
 def import_shaders(shaderName):
@@ -965,6 +1031,7 @@ def import_response(response):
             bpy.context.view_layer.objects.active = mesh
 
             imported_parts.append({
+                "MeshName": part.get("MeshName"),
                 "Attachments": attachments,
                 "Parent": imported_part,
                 "Mesh": mesh
@@ -988,20 +1055,17 @@ def import_response(response):
 
     import_part(import_data.get("Parts"))
 
-    # attachments
+    # attachments: the parts of this import, by the name the app gave them (a name lookup in the scene would find
+    # the same part of an earlier import of this gun, e.g. "Scope" instead of "Scope.001")
+    parts_by_name = {p["MeshName"]: p["Parent"] for p in imported_parts if p.get("MeshName")}
     for imported_part in imported_parts:
         attachments = imported_part.get("Attachments")
         parent_obj = imported_part.get("Parent")
         for attachment in attachments:
             child_name = attachment.get("AttatchmentName")
             if child_name is not None:
-                child_obj = bpy.context.scene.objects[child_name]
-                if child_obj.parent is not None:
-                    # Attachment Name somehow points to mesh, get parent armature instead
-                    child_obj = child_obj.parent
-                if "revolver" in parent_obj.name.lower():
-                    bone_name = "Magazine_Extra"
-                if child_obj:
+                child_obj = parts_by_name.get(child_name)
+                if child_obj is not None:
                     constraint_object(child_obj, parent_obj, attachment.get("BoneName"), attachment.get("Offset"), attachment.get("Rotation"))
         if new_collection not in parent_obj.users_collection:
             new_collection.objects.link(parent_obj)
@@ -1028,6 +1092,12 @@ def register():
             import_event.clear()
             try:
                 import_response(server.data)
+                # imports run from a timer, outside any operator: without an undo step of their own, Ctrl+Z
+                # afterwards can step into a half-undone state and crash Blender
+                try:
+                    bpy.ops.ed.undo_push(message="Valorant Porting import")
+                except Exception:
+                    pass
             except Exception as e:
                 # Never let one failed import stop the timer (Blender unregisters timers that raise).
                 Log.error(f"Import failed: {e}")
