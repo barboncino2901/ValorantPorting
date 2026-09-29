@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Newtonsoft.Json;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports.Animation;
 using ValorantPorting.Views.Controls;
@@ -26,6 +28,55 @@ public static class AnimationMontages
             if (lower.TryGetValue(PairKey(upper), out var match))
                 pairs.Add(AnimationItem.FullBody(upper, match));
         return pairs;
+    }
+
+    // Sorting opens ~5,600 montages (about 5 s), so the result is kept in .data and reused until the game files or the
+    // app change. One file, replaced each time. gameUpdate: when the game files last changed (null: don't cache).
+    public static Result ClassifyCached(IFileProvider provider, IReadOnlyList<AnimationItem> items, DateTime? gameUpdate)
+    {
+        var file = Path.Combine(App.DataFolder.FullName, "montage-sort-cache.json");
+        var stamp = gameUpdate is { } changed ? $"{Services.UpdateService.CurrentVersion}|{changed.Ticks}|{items.Count}" : null;
+        var byPath = new Dictionary<string, AnimationItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items.Where(i => i.Kind == EAnimationKind.Single)) byPath.TryAdd(item.ObjectPath, item);
+
+        if (stamp != null && Read(file) is { } cached && cached.Stamp == stamp)
+        {
+            var hidden = cached.Hidden.Select(p => byPath.GetValueOrDefault(p)).ToList();
+            var sequences = cached.Sequences.ToDictionary(s => byPath.GetValueOrDefault(s.Key)!, s => s.Value.Select(p => byPath.GetValueOrDefault(p)!).ToList());
+            if (hidden.All(h => h != null) && sequences.All(s => s.Key != null && s.Value.All(c => c != null)))
+                return new Result(hidden.ToHashSet()!, sequences);
+        }
+
+        var result = Classify(provider, items);
+        if (stamp != null)
+        {
+            try
+            {
+                App.DataFolder.Create();
+                File.WriteAllText(file, JsonConvert.SerializeObject(new CacheFile(stamp, result.Hidden.Select(h => h.ObjectPath).ToList(),
+                    result.Sequences.ToDictionary(s => s.Key.ObjectPath, s => s.Value.Select(c => c.ObjectPath).ToList()))));
+            }
+            catch (Exception)
+            {
+                // no cache this time: sorted again on the next start
+            }
+        }
+
+        return result;
+    }
+
+    private record CacheFile(string Stamp, List<string> Hidden, Dictionary<string, List<string>> Sequences);
+
+    private static CacheFile? Read(string file)
+    {
+        try
+        {
+            return File.Exists(file) ? JsonConvert.DeserializeObject<CacheFile>(File.ReadAllText(file)) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     public static Result Classify(IFileProvider provider, IReadOnlyList<AnimationItem> items)

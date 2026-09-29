@@ -25,6 +25,7 @@ public partial class MainView
 
         AppLog.Logger = LoggerRtb;
         AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
+        AppVM.MainVM.AbilitiesLoaded += () => ApplySearchFilter(AbilityList, SearchText);
         AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
         // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
         UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>

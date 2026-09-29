@@ -164,6 +164,7 @@ public partial class MainViewModel : ObservableObject
     private (string Folder, string[] Prefixes, bool SharedAgentAnimations)? activeAnimationFilter;
 
     public event Action? AnimationFilterChanged;
+    public event Action? AbilitiesLoaded;
 
     // "Show:" dropdown next to the search box: everything, only favorites, or recently sent items (newest first).
     public KeyValuePair<ELibraryFilter, string>[] LibraryFilters { get; } =
@@ -190,9 +191,14 @@ public partial class MainViewModel : ObservableObject
     {
         if (abilitiesLoaded || AppVM.CUE4ParseVM is null) return;
         abilitiesLoaded = true;
-        ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
-
         var provider = AppVM.CUE4ParseVM.Provider;
+        // built in the background (about a second: it reads every ability model), so the window doesn't freeze
+        Task.Run(() => BuildAbilityList(provider));
+    }
+
+    private void BuildAbilityList(CUE4Parse.FileProvider.IFileProvider provider)
+    {
+        ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
         var infos = new Dictionary<string, (string Name, string Key)?>(StringComparer.OrdinalIgnoreCase);
         (string Name, string Key)? InfoOf(string file)
         {
@@ -203,8 +209,12 @@ public partial class MainViewModel : ObservableObject
         }
 
         var items = AbilityResolver.BuildList(provider, provider.Files.Keys.Where(p => AbilityModel.IsMatch(p)).ToList(), InfoOf);
-        Abilities = new ObservableCollection<AbilityItem>(items);
-        AppLog.Information($"Ability list loaded: {items.Count} models.");
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            Abilities = new ObservableCollection<AbilityItem>(items);
+            AbilitiesLoaded?.Invoke();
+            AppLog.Information($"Ability list loaded: {items.Count} models.");
+        });
     }
 
     [RelayCommand]
@@ -686,7 +696,7 @@ public partial class MainViewModel : ObservableObject
         var provider = AppVM.CUE4ParseVM.Provider;
         Task.Run(() =>
         {
-            var result = AnimationMontages.Classify(provider, items);
+            var result = AnimationMontages.ClassifyCached(provider, items, MapExport.LastGameUpdate());
             Application.Current.Dispatcher.Invoke(() =>
             {
                 foreach (var (montage, clips) in result.Sequences) montage.MakeSequence(clips);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Collections.Generic;
@@ -85,7 +85,7 @@ public static class MapExport
     }
 
     // When the installed game files last changed (newest archive); null if unknown, which disables texture reuse.
-    private static DateTime? LastGameUpdate()
+    internal static DateTime? LastGameUpdate()
     {
         try
         {
