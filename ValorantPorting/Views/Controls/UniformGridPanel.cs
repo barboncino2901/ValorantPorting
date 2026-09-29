@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Windows;
@@ -40,6 +40,15 @@ public class UniformGridPanel : VirtualizingPanel, IScrollInfo
             FrameworkPropertyMetadataOptions.AffectsArrange | FrameworkPropertyMetadataOptions.AffectsMeasure));
 
     /// <summary>
+    ///     MinItemHeight DependencyProperty: tiles never get shorter than this (their name would be cut off when the
+    ///     list has little height, e.g. with the scene bar open); the list scrolls instead
+    /// </summary>
+    public static readonly DependencyProperty MinItemHeightProperty = DependencyProperty.Register("MinItemHeight", typeof(double),
+        typeof(UniformGridPanel),
+        new FrameworkPropertyMetadata(0.0,
+            FrameworkPropertyMetadataOptions.AffectsArrange | FrameworkPropertyMetadataOptions.AffectsMeasure));
+
+    /// <summary>
     ///     Orientation DependencyProperty
     /// </summary>
     public static readonly DependencyProperty OrientationProperty = DependencyProperty.RegisterAttached("Orientation",
@@ -74,6 +83,12 @@ public class UniformGridPanel : VirtualizingPanel, IScrollInfo
     {
         get => (int)GetValue(RowsProperty);
         set => SetValue(RowsProperty, value);
+    }
+
+    public double MinItemHeight
+    {
+        get => (double)GetValue(MinItemHeightProperty);
+        set => SetValue(MinItemHeightProperty, value);
     }
 
     /// <summary>
@@ -249,10 +264,8 @@ public class UniformGridPanel : VirtualizingPanel, IScrollInfo
             return new Size(Columns * childSize.Width * Math.Ceiling((double)itemsCount / (Columns * Rows)),
                 _viewport.Height);
 
-        var pageHeight = Rows * childSize.Height;
-
         var sizeWidth = _viewport.Width;
-        var sizeHeight = pageHeight * Math.Ceiling((double)itemsCount / (Rows * Columns));
+        var sizeHeight = childSize.Height * Math.Ceiling((double)itemsCount / Columns);
 
         return new Size(sizeWidth, sizeHeight);
     }
@@ -301,7 +314,7 @@ public class UniformGridPanel : VirtualizingPanel, IScrollInfo
     private Size GetChildSize(Size availableSize)
     {
         var width = availableSize.Width / Columns;
-        var height = availableSize.Height / Rows;
+        var height = Math.Max(availableSize.Height / Rows, MinItemHeight);
 
         return new Size(width, height);
     }
@@ -313,15 +326,21 @@ public class UniformGridPanel : VirtualizingPanel, IScrollInfo
     /// <param name="lastVisibleItemIndex">The item index of the last visible item</param>
     private void GetVisibleRange(out int firstVisibleItemIndex, out int lastVisibleItemIndex)
     {
-        var childSize = GetChildSize(_extent);
-
         var pageSize = Columns * Rows;
-        var pageNumber = Orientation == Orientation.Horizontal
-            ? (int)Math.Floor(_offset.X / _viewport.Width)
-            : (int)Math.Floor(_offset.Y / _viewport.Height);
-
-        firstVisibleItemIndex = pageNumber * pageSize;
-        lastVisibleItemIndex = firstVisibleItemIndex + pageSize * 2 - 1;
+        if (Orientation == Orientation.Horizontal)
+        {
+            var pageNumber = (int)Math.Floor(_offset.X / _viewport.Width);
+            firstVisibleItemIndex = pageNumber * pageSize;
+            lastVisibleItemIndex = firstVisibleItemIndex + pageSize * 2 - 1;
+        }
+        else
+        {
+            var rowHeight = GetChildSize(_viewport).Height;
+            var firstRow = rowHeight > 0 ? (int)Math.Floor(_offset.Y / rowHeight) : 0;
+            var visibleRows = rowHeight > 0 ? (int)Math.Ceiling(_viewport.Height / rowHeight) : Rows;
+            firstVisibleItemIndex = firstRow * Columns;
+            lastVisibleItemIndex = firstVisibleItemIndex + (visibleRows + Rows) * Columns - 1; // a page more, for smooth scrolling
+        }
 
         var itemsControl = ItemsControl.GetItemsOwner(this);
         var itemCount = itemsControl.HasItems ? itemsControl.Items.Count : 0;
@@ -462,7 +481,7 @@ public class UniformGridPanel : VirtualizingPanel, IScrollInfo
 
     public void SetVerticalOffset(double offset)
     {
-        _offset.Y = Math.Max(0, offset);
+        _offset.Y = Math.Max(0, Math.Min(offset, _extent.Height - _viewport.Height)); // not past the last row
 
         if (ScrollOwner != null) ScrollOwner.InvalidateScrollInfo();
 

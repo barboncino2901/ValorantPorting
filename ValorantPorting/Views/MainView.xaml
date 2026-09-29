@@ -125,7 +125,7 @@
                         <ListBox ItemsSource="{Binding Outfits}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <controls:UniformGridPanel IsItemsHost="True" Rows="5" Columns="10"
+                                    <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="92" Rows="5" Columns="10"
                                                                VerticalAlignment="Top" HorizontalAlignment="Left" />
                                 </ItemsPanelTemplate>
                             </ListBox.ItemsPanel>
@@ -139,7 +139,7 @@
                         <ListBox ItemsSource="{Binding Weapons}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <controls:UniformGridPanel IsItemsHost="True" Rows="5" Columns="6"
+                                    <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="92" Rows="5" Columns="6"
                                                                VerticalAlignment="Top" HorizontalAlignment="Left" />
                                 </ItemsPanelTemplate>
                             </ListBox.ItemsPanel>
@@ -153,7 +153,7 @@
                         <ListBox ItemsSource="{Binding Gunbuddies}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <controls:UniformGridPanel IsItemsHost="True" Rows="5" Columns="10"
+                                    <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="92" Rows="5" Columns="10"
                                                                VerticalAlignment="Top" HorizontalAlignment="Left" />
                                 </ItemsPanelTemplate>
                             </ListBox.ItemsPanel>
@@ -244,33 +244,71 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                            <DockPanel Grid.Row="2" Margin="{adonisUi:Space 1}">
-                                <DockPanel DockPanel.Dock="Top" Margin="0 0 0 6" Visibility="{Binding CombineVisibility}">
-                                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearCombineCommand}" />
-                                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddCombinedToSceneCommand}"
-                                            ToolTip="Puts this upper + lower body combination in the scene (see the bar at the top)." />
-                                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Apply combined" Command="{Binding ExportCombinedBlenderCommand}"
-                                            ToolTip="Legs from the lower-body pick, everything else from the upper-body pick. Looping animations (runs, walks, idles) repeat to cover the other one; a shorter one-shot holds its last pose." />
-                                    <TextBlock Text="{Binding CombineText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                </DockPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="6 0 0 0" Visibility="{Binding RepeatVisibility}"
-                                            ToolTip="Looping animations (runs, walks, idles) can play several times in a row, like copying their keyframes by hand.">
-                                    <TextBlock Text="Repeat" VerticalAlignment="Center" Margin="0 0 4 0" />
-                                    <ComboBox ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="60" />
-                                </StackPanel>
-                                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddAnimationToSceneCommand}"
-                                        ToolTip="Puts the selected animation in the scene: agent animations go on the agent, gun animations (GN_) on the gun." />
-                                <Button DockPanel.Dock="Right" Command="{Binding ExportAnimationBlenderCommand}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Image Source="/ValorantPorting;component/Resources/Blender.png"
-                                               VerticalAlignment="Center" Width="16" Height="16"
-                                               RenderOptions.BitmapScalingMode="HighQuality" />
-                                        <TextBlock Text="Apply to selected armature in Blender" VerticalAlignment="Center" Margin="5 0 0 0" />
+                            <!-- two clear parts: the selected animation, and combining two -->
+                            <StackPanel Grid.Row="2" Margin="{adonisUi:Space 1}">
+                                <Separator Style="{StaticResource NamedSeparator}" Tag="SELECTED ANIMATION" />
+                                <DockPanel Margin="0 2 0 0">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Visibility="{Binding RepeatSingleVisibility}"
+                                                ToolTip="This animation loops (a run, walk or idle): it can play several times in a row.">
+                                        <TextBlock Text="Play" VerticalAlignment="Center" Margin="0 0 4 0" />
+                                        <ComboBox ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="60" />
                                     </StackPanel>
-                                </Button>
-                                <TextBlock VerticalAlignment="Center" Opacity="0.7" TextWrapping="Wrap"
-                                           Text="Select the agent/gun armature in Blender, pick an animation (search e.g. &quot;wushu dash&quot;, &quot;AK reload&quot;), then apply or double-click." />
-                            </DockPanel>
+                                    <TextBlock Text="{Binding SelectedAnimationText}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0 6 0 0">
+                                    <Button Command="{Binding ExportAnimationBlenderCommand}"
+                                            ToolTip="Applies the animation to the armature selected in Blender (double-clicking the animation does the same).">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Image Source="/ValorantPorting;component/Resources/Blender.png"
+                                                   VerticalAlignment="Center" Width="16" Height="16"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                            <TextBlock Text="Apply to selected armature" VerticalAlignment="Center" Margin="5 0 0 0" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddAnimationToSceneCommand}"
+                                            ToolTip="Puts this animation in the scene (the bar at the top): agent animations go on the agent, gun animations on the gun." />
+                                </StackPanel>
+                                <TextBlock Margin="0 4 0 0" Opacity="0.6" FontSize="11" TextWrapping="Wrap"
+                                           Text="Select the agent or gun in Blender first. Search e.g. &quot;jett dash&quot;, &quot;vandal reload&quot;." />
+
+                                <Separator Style="{StaticResource NamedSeparator}" Tag="COMBINE TWO ANIMATIONS" Margin="0 10 0 0" />
+                                <TextBlock Visibility="{Binding CombineHintVisibility}" Margin="0 2 0 0" Opacity="0.6" FontSize="11" TextWrapping="Wrap"
+                                           Text="The legs of one animation with the rest of the body from another (e.g. an equip while running). Right-click an animation &gt; &quot;Use as upper body&quot;, and another &gt; &quot;Use as lower body / legs&quot;." />
+                                <StackPanel Visibility="{Binding CombineVisibility}" Margin="0 2 0 0">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Visibility="{Binding RepeatCombinedVisibility}"
+                                                    ToolTip="One of the two loops (a run, walk or idle): the combination can play several times in a row.">
+                                            <TextBlock Text="Play" VerticalAlignment="Center" Margin="0 0 4 0" />
+                                            <ComboBox ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="60" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock TextTrimming="CharacterEllipsis">
+                                                <Run Text="Upper body: " Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
+                                                <Run Text="{Binding CombineUpperText, Mode=OneWay}" FontWeight="SemiBold" />
+                                            </TextBlock>
+                                            <TextBlock TextTrimming="CharacterEllipsis" Margin="0 2 0 0">
+                                                <Run Text="Legs: " Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
+                                                <Run Text="{Binding CombineLowerText, Mode=OneWay}" FontWeight="SemiBold" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0 6 0 0">
+                                        <Button Command="{Binding ExportCombinedBlenderCommand}"
+                                                ToolTip="Legs from the lower-body pick, everything else from the upper-body pick. A looping half repeats to cover the other; a shorter one-shot holds its last pose.">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Image Source="/ValorantPorting;component/Resources/Blender.png"
+                                                       VerticalAlignment="Center" Width="16" Height="16"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                                <TextBlock Text="Apply combined to selected armature" VerticalAlignment="Center" Margin="5 0 0 0" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Margin="6 0 0 0" Content="Add combined to scene" Command="{Binding AddCombinedToSceneCommand}"
+                                                ToolTip="Puts this combination in the scene (the bar at the top) as the agent's animation." />
+                                        <Button Margin="6 0 0 0" Content="Clear" Command="{Binding ClearCombineCommand}"
+                                                ToolTip="Forget both picks." />
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
                         </Grid>
                     </TabItem>
                     <TabItem Style="{StaticResource TabItemEqualSize}">

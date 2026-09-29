@@ -45,7 +45,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> weapons = new();
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> gunbuddies = new();
     [ObservableProperty] private ObservableCollection<AnimationItem> animations = new();
-    [ObservableProperty] private AnimationItem? selectedAnimation;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedAnimationText))]
+    private AnimationItem? selectedAnimation;
 
     // Riot splits many 3rd person animations into an upper body ("_UB") and a lower body ("_LB") half
     partial void OnSelectedAnimationChanged(AnimationItem? value)
@@ -55,24 +56,30 @@ public partial class MainViewModel : ObservableObject
 
     // Combining any two animations: the legs of one ("lower body") with everything else of another ("upper body"),
     // e.g. an equip while running. Picked with a right-click in the Animations tab.
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CombineVisibility), nameof(CombineText))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CombineVisibility), nameof(CombineHintVisibility), nameof(CombineUpperText))]
     private AnimationItem? upperBodyPick;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CombineVisibility), nameof(CombineText))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CombineVisibility), nameof(CombineHintVisibility), nameof(CombineLowerText))]
     private AnimationItem? lowerBodyPick;
     public Visibility CombineVisibility => UpperBodyPick != null || LowerBodyPick != null ? Visibility.Visible : Visibility.Collapsed;
-    public string CombineText =>
-        $"Upper body: {UpperBodyPick?.Title ?? "(right-click an animation)"}    ·    Lower body: {LowerBodyPick?.Title ?? "(right-click an animation)"}";
+    public Visibility CombineHintVisibility => CombineVisibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+    public string CombineUpperText => UpperBodyPick?.Title ?? "not picked (right-click an animation > Use as upper body)";
+    public string CombineLowerText => LowerBodyPick?.Title ?? "not picked (right-click an animation > Use as lower body / legs)";
+    public string SelectedAnimationText => SelectedAnimation?.Title ?? "Nothing selected: click an animation in the list";
     partial void OnUpperBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
     partial void OnLowerBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
 
     // How many times looping animations (runs, walks, idles) play in a row
     public List<int> RepeatOptions { get; } = [1, 2, 3, 4, 5, 6, 8, 10];
     [ObservableProperty] private int repeatCount = 1;
-    [ObservableProperty] private Visibility repeatVisibility = Visibility.Collapsed;
+    // "Play ×N" next to the selected animation when it loops, and next to the combination when either half loops
+    [ObservableProperty] private Visibility repeatSingleVisibility = Visibility.Collapsed;
+    [ObservableProperty] private Visibility repeatCombinedVisibility = Visibility.Collapsed;
 
-    private void UpdateRepeatVisibility() =>
-        RepeatVisibility = SelectedAnimation?.IsLoop == true || UpperBodyPick?.IsLoop == true || LowerBodyPick?.IsLoop == true
-            ? Visibility.Visible : Visibility.Collapsed;
+    private void UpdateRepeatVisibility()
+    {
+        RepeatSingleVisibility = SelectedAnimation?.IsLoop == true ? Visibility.Visible : Visibility.Collapsed;
+        RepeatCombinedVisibility = UpperBodyPick?.IsLoop == true || LowerBodyPick?.IsLoop == true ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     [RelayCommand]
     public void ClearCombine()
