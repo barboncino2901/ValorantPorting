@@ -268,8 +268,24 @@ public partial class MainViewModel : ObservableObject
         new(ECharacterModels.CharacterSelect, "Character select"),
         new(ECharacterModels.FirstPerson | ECharacterModels.ThirdPerson, "1st + 3rd person")
     };
-    [ObservableProperty] private ECharacterModels selectedModels = ECharacterModels.All;
-    [ObservableProperty] private Visibility modelVisibility = Visibility.Collapsed;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(FirstPersonCameraVisibility))]
+    private ECharacterModels selectedModels = ECharacterModels.All;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(FirstPersonCameraVisibility))]
+    private Visibility modelVisibility = Visibility.Collapsed;
+
+    // 1st person arms can come with a camera on their "Camera" bone: the in-game view, following the animations
+    public bool FirstPersonCamera
+    {
+        get => AppSettings.Current.FirstPersonCamera;
+        set
+        {
+            AppSettings.Current.FirstPersonCamera = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public Visibility FirstPersonCameraVisibility =>
+        ModelVisibility == Visibility.Visible && SelectedModels.HasFlag(ECharacterModels.FirstPerson) ? Visibility.Visible : Visibility.Collapsed;
 
     // The current choices; the level is null when the fully upgraded skin is picked
     public ExportChoices GetExportChoices() => new(
@@ -453,7 +469,9 @@ public partial class MainViewModel : ObservableObject
         BlenderService.Send(data, new BlenderExportSettings
         {
             ReorientBones = reorient,
-            AnimationFilterKey = filterKey
+            AnimationFilterKey = filterKey,
+            FirstPersonCamera = CurrentAssetType == EAssetType.Character && FirstPersonCamera &&
+                                GetExportChoices().Models.HasFlag(ECharacterModels.FirstPerson)
         });
         RegisterSentAsset(filterKey);
         if (currentAsset is ILibraryItem sentItem) UserLibrary.AddRecent(sentItem.LibraryId);

@@ -26,6 +26,8 @@ public partial class AppSettings : ObservableObject
 
     [ObservableProperty] private ELanguage language;
 
+    [ObservableProperty] private bool firstPersonCamera; // add a camera on the 1st person arms' "Camera" bone
+
     public static void Load()
     {
         if (File.Exists(FilePath.FullName))

@@ -10,7 +10,7 @@ import time
 import bpy
 import os
 import bpy.props
-from mathutils import Matrix, Vector, Quaternion
+from mathutils import Matrix, Vector, Quaternion, Euler
 import math
 from .valorant_psk_psa_b5 import pskimport, psaimport
 from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merge_duplicate_materials, find_material_info
@@ -100,6 +100,17 @@ def resolve_asset_path(path: str) -> str:
     return path
 
 
+def disk_path(path):
+    """Windows can't open files whose full path is longer than 260 characters (an app kept deep in folders gets long
+    asset paths); the long-path form (prefix \\?\) has no such limit and works for Blender's file and image loading."""
+    if os.name != 'nt' or not path or len(path) < 240 or path.startswith(LONG_PATH_PREFIX):
+        return path
+    return LONG_PATH_PREFIX + os.path.abspath(path)
+
+
+LONG_PATH_PREFIX = "\\\\?\\"
+
+
 def import_mesh(path: str) -> bpy.types.Object:
     path = resolve_asset_path(path)
     base_path = os.path.join(import_assets_root, path.split(".")[0])
@@ -109,17 +120,17 @@ def import_mesh(path: str) -> bpy.types.Object:
         candidates.append(base_path + "_Skelmesh_LOD0")
 
     for mesh_path in candidates:
-        if os.path.exists(mesh_path + ".psk"):
+        if os.path.exists(disk_path(mesh_path + ".psk")):
             pskimport(
-                mesh_path + ".psk",
+                disk_path(mesh_path + ".psk"),
                 bReorientBones=import_settings.get("ReorientBones"),
                 bScaleDown=True,
                 bToSRGB=False)
             return bpy.context.active_object
 
-        if os.path.exists(mesh_path + ".pskx"):
+        if os.path.exists(disk_path(mesh_path + ".pskx")):
             pskimport(
-                mesh_path + ".pskx",
+                disk_path(mesh_path + ".pskx"),
                 bScaleDown=True,
                 bToSRGB=False)
             return bpy.context.active_object
@@ -137,8 +148,8 @@ def import_texture(path: str) -> bpy.types.Image:
 
     for candidate in [translated_path, raw_path]:
         texture_path = os.path.join(import_assets_root, candidate + ".png")
-        if os.path.exists(texture_path):
-            return bpy.data.images.load(texture_path, check_existing=True)
+        if os.path.exists(disk_path(texture_path)):
+            return bpy.data.images.load(disk_path(texture_path), check_existing=True)
 
     print(f"[DEBUG] Texture not found in either location. Tried: "
           f"{os.path.join(import_assets_root, translated_path + '.png')!r} and "
@@ -427,6 +438,38 @@ def attach_part_to_bone(child, rig, attachment):
     constraint.inverse_matrix = unreal_bone_frame(rig, bone)
 
 
+# Valorant's horizontal field of view (fixed, 16:9)
+FIRST_PERSON_FOV = 103.0
+
+
+def add_first_person_camera(objects, collection):
+    """A camera where the player's eyes are: the 1st person arms' "Camera" bone, looking forward, with the game's field
+    of view. It follows the bone, so animations that move the view (inspects, equips) move the camera too."""
+    rigs = [o for o in objects if o is not None and o.type == 'ARMATURE' and "Camera" in o.data.bones]
+    rig = next((o for o in rigs if o.name.upper().startswith("FP_")), rigs[0] if rigs else None)
+    if rig is None:
+        Log.warning("No 1st person arms with a Camera bone; no camera added")
+        return None
+    data = bpy.data.cameras.new("1st person camera")
+    data.sensor_fit = 'HORIZONTAL'
+    data.angle = math.radians(FIRST_PERSON_FOV)
+    data.clip_start = 0.01  # the arms are a few cm from the eyes
+    camera = bpy.data.objects.new("1st person camera", data)
+    collection.objects.link(camera)
+    # at rest the bone is at eye height and the arms point along +X; the camera looks along +X, up +Z
+    rest = rig.matrix_world @ rig.data.bones["Camera"].matrix_local
+    camera.matrix_world = Matrix.Translation(rest.translation) @ Euler((math.pi / 2, 0, -math.pi / 2)).to_matrix().to_4x4()
+    constraint = camera.constraints.new('CHILD_OF')
+    constraint.name = "Valorant Porting camera"
+    constraint.target = rig
+    constraint.subtarget = "Camera"
+    constraint.inverse_matrix = rest.inverted()  # rest pose = where it was placed; the bone's motion moves it
+    if bpy.context.scene.camera is None:
+        bpy.context.scene.camera = camera
+    Log.information(f"Added a 1st person camera on {rig.name}")
+    return camera
+
+
 def remove_disabled_sections(mesh_object, sections):
     """Deletes the faces of mesh sections the game never draws (Unreal "disabled" sections, e.g. the body part a cloth
     piece replaces); drawn, they cover the real surface with stray texture. The .psk has one material slot per section."""
@@ -675,7 +718,7 @@ def import_animation(data):
         Log.error(message)
         show_message(message, icon='ERROR')
 
-    psaimport(path, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
+    psaimport(disk_path(path), context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
               error_callback=on_error)
     lower_action = armature.animation_data.action if armature.animation_data else None
     # montages that play several clips in a row (e.g. a character select intro, then its idle): the app sends every
@@ -683,7 +726,7 @@ def import_animation(data):
     if len(clips := data.get("SequencePaths") or []) > 1 and lower_action:
         actions = [lower_action]
         for clip in clips[1:]:
-            psaimport(clip, context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
+            psaimport(disk_path(clip), context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
                       error_callback=on_error)
             if armature.animation_data and armature.animation_data.action not in actions:
                 actions.append(armature.animation_data.action)
@@ -700,7 +743,7 @@ def import_animation(data):
 
     # upper + lower body: legs from the first animation, everything else from this one (Riot's "_UB"/"_LB" halves,
     # or any two the user combines, e.g. an equip over a run)
-    psaimport(upper_path, context=bpy.context, oArmature=armature, bKeepProportions=True,
+    psaimport(disk_path(upper_path), context=bpy.context, oArmature=armature, bKeepProportions=True,
               bUpdateTimelineRange=True, error_callback=on_error)
     upper_action = armature.animation_data.action if armature.animation_data else None
     if not (lower_action and upper_action and lower_action != upper_action):
@@ -1257,6 +1300,9 @@ def import_response(response):
     for imported_part in imported_parts:
         if (bone_attachment := imported_part.get("BoneAttachment")) and rig is not None:
             attach_part_to_bone(imported_part["Parent"], rig, bone_attachment)
+
+    if import_settings.get("FirstPersonCamera"):
+        add_first_person_camera([p["Parent"] for p in imported_parts], new_collection)
 
     # attachments: the parts of this import, by the name the app gave them (a name lookup in the scene would find
     # the same part of an earlier import of this gun, e.g. "Scope" instead of "Scope.001")

@@ -4,4 +4,5 @@ public class BlenderExportSettings : ExportSettingsBase
 {
     public bool ReorientBones;
     public string? AnimationFilterKey; // stored on imported armatures so the app can follow the Blender selection
+    public bool FirstPersonCamera; // a camera on the 1st person arms' "Camera" bone, like the in-game view
 }

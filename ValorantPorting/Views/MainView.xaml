@@ -340,6 +340,9 @@
                                       SelectedValue="{Binding SelectedModels, Mode=TwoWay}"
                                       ToolTip="3rd person = the full body model; 1st person = the arms you see in game; character select = the agent select screen model." />
                         </DockPanel>
+                        <CheckBox Visibility="{Binding FirstPersonCameraVisibility}" IsChecked="{Binding FirstPersonCamera, Mode=TwoWay}"
+                                  Content="Add a 1st person camera" Margin="0 0 0 6"
+                                  ToolTip="Adds a camera where the player's eyes are (the arms' Camera bone), with Valorant's field of view. It follows the arms' animations." />
                         <ItemsControl ItemsSource="{Binding Styles}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
