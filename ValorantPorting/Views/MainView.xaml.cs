@@ -65,6 +65,7 @@ public partial class MainView
 
         var assetType = (EAssetType)tabControl.SelectedIndex;
         var handlers = AppVM.AssetHandlerVM.Handlers;
+        AppVM.MainVM.ActiveTab = assetType; // the right column follows the tab
 
         if (assetType == EAssetType.Map)
         {

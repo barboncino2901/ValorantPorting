@@ -26,7 +26,7 @@ public partial class MainViewModel : ObservableObject
 {
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StyleImage))]
-    [NotifyPropertyChangedFor(nameof(StyleVisibility))]
+    [NotifyPropertyChangedFor(nameof(StyleVisibility), nameof(AssetHintVisibility))]
     private IExportableAsset? currentAsset;
 
     public EAssetType CurrentAssetType;
@@ -45,7 +45,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> weapons = new();
     [ObservableProperty] private ObservableCollection<AssetSelectorItem> gunbuddies = new();
     [ObservableProperty] private ObservableCollection<AnimationItem> animations = new();
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedAnimationText))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedAnimationText), nameof(SelectedAnimationVisibility))]
     private AnimationItem? selectedAnimation;
 
     // Riot splits many 3rd person animations into an upper body ("_UB") and a lower body ("_LB") half
@@ -64,7 +64,7 @@ public partial class MainViewModel : ObservableObject
     public Visibility CombineHintVisibility => CombineVisibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
     public string CombineUpperText => UpperBodyPick?.Title ?? "not picked (right-click an animation > Use as upper body)";
     public string CombineLowerText => LowerBodyPick?.Title ?? "not picked (right-click an animation > Use as lower body / legs)";
-    public string SelectedAnimationText => SelectedAnimation?.Title ?? "Nothing selected: click an animation in the list";
+    public string SelectedAnimationText => SelectedAnimation?.Title ?? "Pick an animation on the left.";
     partial void OnUpperBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
     partial void OnLowerBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
 
@@ -190,7 +190,7 @@ public partial class MainViewModel : ObservableObject
 
     // Abilities tab: every model in the agents' ability folders (Skye's dog, Raze's grenade, ...)
     [ObservableProperty] private ObservableCollection<AbilityItem> abilities = new();
-    [ObservableProperty] private AbilityItem? selectedAbility;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedAbilityVisibility))] private AbilityItem? selectedAbility;
     private bool abilitiesLoaded;
     private bool abilityExportRunning;
 
@@ -379,6 +379,18 @@ public partial class MainViewModel : ObservableObject
         return "";
     }
     public Visibility StyleVisibility => currentAsset is null ? Visibility.Collapsed : Visibility.Visible;
+
+    // The right column: the picked agent/skin's options, or the panel of the Animations / Abilities / Maps tab
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AnimationPanelVisibility), nameof(AbilityPanelVisibility), nameof(MapPanelVisibility), nameof(AssetHintVisibility))]
+    private EAssetType activeTab;
+    public Visibility AnimationPanelVisibility => ActiveTab == EAssetType.Animation ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AbilityPanelVisibility => ActiveTab == EAssetType.Ability ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility MapPanelVisibility => ActiveTab == EAssetType.Map ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AssetHintVisibility =>
+        currentAsset is null && ActiveTab is EAssetType.Character or EAssetType.Weapon or EAssetType.GunBuddy ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SelectedAnimationVisibility => SelectedAnimation is null ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility SelectedAbilityVisibility => SelectedAbility is null ? Visibility.Collapsed : Visibility.Visible;
 
     public Visibility LoadingVisibility => IsReady ? Visibility.Collapsed : Visibility.Visible;
 
