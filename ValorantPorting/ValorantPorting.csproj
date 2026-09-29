@@ -5,7 +5,7 @@
         <Nullable>enable</Nullable>
         <UseWPF>true</UseWPF>
         <ApplicationIcon>ValorantPorting.ico</ApplicationIcon>
-        <Version>1.9.0</Version>
+        <Version>1.10.0</Version>
         <RootNamespace>ValorantPorting</RootNamespace>
         <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     </PropertyGroup>
@@ -26,6 +26,7 @@
         <ProjectReference Include="..\CUE4Parse\CUE4Parse\CUE4Parse.csproj"/>
     </ItemGroup>
     <ItemGroup>
+        <EmbeddedResource Include="..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
         <Resource Include="Resources\Backpack.png"/>
         <Resource Include="Resources\Dance.png"/>
         <Resource Include="Resources\Glider.png"/>

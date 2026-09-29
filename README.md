@@ -15,6 +15,10 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
 - **Guns in hand**: select an agent in Blender, then send a gun - it snaps into the right hand and follows the
   animations (reloads included). Select a gun, then send a buddy - it hangs on the gun's buddy point.
   Guns have their own animations too (reload, equip, inspect), in sync with the agent's.
+- **Scenes**: "Add to scene" an agent, a gun skin and animations (one for the agent, one for the gun), then
+  "Send scene to Blender": the agent comes in with the gun in their hand and both animated, in one go (3rd or 1st person).
+- **1st person camera**: exporting an agent's 1st person arms can add a camera at the player's eyes, with Valorant's
+  field of view, that follows the animations.
 - **Maps tab** (experimental): exports a whole map (USD) and imports it into Blender with Valorant's environment
   shaders rebuilt (two-layer blends, tints, painted vertex colors), the map's sun and a sky light.
 - **Abilities tab**: ability models (Skye's dog, Raze's Boom Bot and grenade, Killjoy's turret, ...) with their in-game
@@ -33,8 +37,9 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
   character select intro, then its idle) come through as one "(sequence)".
 - **Smarter animation search**: the best match comes first ("run forward", "vandal upper body"), and Riot's
   internal names and small typos are understood ("RunN", "vandl").
-- **Updates from the app**: when a new release is out, a bar offers to update; the app downloads it from GitHub,
-  swaps itself and restarts (Help > Check for updates checks by hand).
+- **Updates from the app**: when a new release is out, a bar offers to update and shows what's new; the app downloads
+  it from GitHub, swaps itself and restarts (Help > Check for updates checks by hand). Changes are listed in
+  [CHANGELOG.md](CHANGELOG.md).
 - **Favorites and recent**: right-click anything to favorite it; the "Show:" filter switches every tab between
   All, Favorites and Recent (what you sent to Blender).
 - Skin fixes: chroma variants, scopes and silencers get the right materials; effect-only parts (liquids, dissolve
@@ -96,7 +101,9 @@ cmake --build natives-build --config Release
 ```
 The Blender add-on is the `ValorantPortingBlender` folder; zip the folder itself to install it.
 
-The GitHub Actions workflow ("ValorantPorting Builder", run manually) builds all of this and creates a release.
+The GitHub Actions workflow ("ValorantPorting Builder", run manually) builds all of this and creates a release. Add a
+`## <version>` section to [CHANGELOG.md](CHANGELOG.md) first: it becomes the release text, which the app shows as
+"What's new".
 
 ## Credits
 * Valorant [live] code: [FModel](https://github.com/4sval/FModel) & [MercuryCommons](https://github.com/FortniteCentral/MercuryCommons)

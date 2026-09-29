@@ -43,10 +43,23 @@ jobs:
         run: |
           Compress-Archive -Path ValorantPortingBlender -DestinationPath ValorantPortingBlender.zip
 
+      - name: Release notes
+        # this version's section of CHANGELOG.md ("## <version>"), shown by the app as "What's new"
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.appVersion }}"
+          $lines = Get-Content CHANGELOG.md
+          $start = [array]::IndexOf($lines, "## $version")
+          if ($start -lt 0) { Write-Warning "CHANGELOG.md has no '## $version' section"; "" | Set-Content release-notes.md; exit 0 }
+          $end = $start + 1
+          while ($end -lt $lines.Count -and -not $lines[$end].StartsWith('## ')) { $end++ }
+          if ($end -gt $start + 1) { $lines[($start + 1)..($end - 1)] | Set-Content release-notes.md } else { "" | Set-Content release-notes.md }
+
       - name: GIT Release
         uses: softprops/action-gh-release@v2
         with:
           name: "ValorantPorting v${{ github.event.inputs.appVersion }}"
+          body_path: release-notes.md
           tag_name: ${{ github.event.inputs.appVersion }}
           target_commitish: ${{ github.sha }}
           files: |

@@ -345,8 +345,18 @@ public partial class MainViewModel : ObservableObject
         UpdateText = $"Version {release.Version.ToString(3)} is available, but the update failed. Try again, or download it from GitHub.";
     }
 
+    // the new version's notes (its GitHub release text, from CHANGELOG.md); the release page if it has none
     [RelayCommand]
-    public void ShowUpdateNotes() => AppHelper.Launch(availableUpdate?.PageUrl ?? UpdateService.ReleasesPage);
+    public void ShowUpdateNotes()
+    {
+        if (availableUpdate is not { } release || string.IsNullOrWhiteSpace(release.Notes))
+        {
+            AppHelper.Launch(availableUpdate?.PageUrl ?? UpdateService.ReleasesPage);
+            return;
+        }
+
+        ReleaseNotes.Show("What's new", $"What's new in version {release.Version.ToString(3)}", release.Notes, release.PageUrl);
+    }
 
     [RelayCommand]
     public void DismissUpdate() => UpdateVisibility = Visibility.Collapsed;

@@ -39,10 +39,14 @@ public partial class MainView
         if (App.StartedAfterUpdate)
         {
             UpdateService.ConfirmStarted();
-            MessageBox.Show($"Valorant Porting was updated to version {UpdateService.CurrentVersion.ToString(3)}.\n\n" +
-                            "The Blender add-on was updated too (in the \"Blender Add-ons\" folder). Install it in Blender: " +
-                            "Edit > Preferences > Add-ons > Install from Disk, then restart Blender.",
-                "Update installed", MessageBoxButton.OK, MessageBoxImage.Information);
+            const string addonNote = "The Blender add-on was updated too (in the \"Blender Add-ons\" folder). Install it in Blender: " +
+                                     "Edit > Preferences > Add-ons > Install from Disk, then restart Blender.";
+            var version = UpdateService.CurrentVersion.ToString(3);
+            if (ReleaseNotes.ForThisVersion() is { } notes)
+                ReleaseNotes.Show("Update installed", $"Valorant Porting was updated to version {version}.\n\n{addonNote}\n\nWhat's new:", notes);
+            else
+                MessageBox.Show($"Valorant Porting was updated to version {version}.\n\n{addonNote}",
+                    "Update installed", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         if (string.IsNullOrWhiteSpace(AppSettings.Current.ArchivePath))
