@@ -65,18 +65,6 @@ public partial class MainViewModel : ObservableObject
     public string CombineUpperText => UpperBodyPick?.Title ?? "Empty";
     public string CombineLowerText => LowerBodyPick?.Title ?? "Empty";
 
-    // The Animations panel shows one of two modes: one animation, or two mixed (picking a half switches to it)
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SingleMode), nameof(SingleModeVisibility), nameof(CombineModeVisibility))]
-    private bool combineMode;
-    public bool SingleMode
-    {
-        get => !CombineMode;
-        set => CombineMode = !value;
-    }
-    public Visibility SingleModeVisibility => CombineMode ? Visibility.Collapsed : Visibility.Visible;
-    public Visibility CombineModeVisibility => CombineMode ? Visibility.Visible : Visibility.Collapsed;
-
     [RelayCommand]
     public void UseSelectedAsUpper()
     {
@@ -91,17 +79,14 @@ public partial class MainViewModel : ObservableObject
         else AppLog.Warning("Click an animation in the list first.");
     }
     public string SelectedAnimationText => SelectedAnimation?.Title ?? "Pick an animation on the left.";
-    partial void OnUpperBodyPickChanged(AnimationItem? value)
-    {
-        UpdateRepeatVisibility();
-        if (value != null) CombineMode = true;
-    }
+    partial void OnUpperBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
+    partial void OnLowerBodyPickChanged(AnimationItem? value) => UpdateRepeatVisibility();
 
-    partial void OnLowerBodyPickChanged(AnimationItem? value)
-    {
-        UpdateRepeatVisibility();
-        if (value != null) CombineMode = true;
-    }
+    [RelayCommand]
+    public void ClearUpper() => UpperBodyPick = null;
+
+    [RelayCommand]
+    public void ClearLower() => LowerBodyPick = null;
 
     // How many times looping animations (runs, walks, idles) play in a row
     public List<int> RepeatOptions { get; } = [1, 2, 3, 4, 5, 6, 8, 10];

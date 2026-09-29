@@ -49,7 +49,8 @@
                         <TextBlock Text="Send scene to Blender" VerticalAlignment="Center" Margin="5 0 0 0" />
                     </StackPanel>
                 </Button>
-                <TextBlock Text="Scene" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="White" Margin="0 0 10 0" />
+                <TextBlock Text="Scene" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="White" Margin="0 0 10 0"
+                           ToolTip="A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
                 <TextBlock Text="{Binding SceneText}" VerticalAlignment="Center" Foreground="White" TextTrimming="CharacterEllipsis"
                            ToolTip="Add pieces with &quot;Add to scene&quot;: agents and gun skins (with their options) on the right, animations in the Animations tab. Adding again replaces that piece." />
             </DockPanel>
@@ -282,89 +283,83 @@
                            VerticalAlignment="Center" TextAlignment="Center"
                            Text="Click an item on the left to see its options (variants, upgrade levels, models) and send it to Blender." />
 
-                <!-- Animations tab: one animation, or two mixed (legs from one, the rest from the other) -->
+                <!-- Animations tab: the selected animation (apply it as it is), and a mix of two built from it -->
                 <ScrollViewer Visibility="{Binding AnimationPanelVisibility}" VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="{adonisUi:Space 1}">
-                        <Grid Margin="0 0 0 12">
+                        <Separator Style="{StaticResource NamedSeparator}" Tag="ANIMATION" />
+                        <TextBlock Text="{Binding SelectedAnimationText}" FontSize="18" TextWrapping="Wrap" Margin="0 4 0 0" />
+                        <StackPanel Orientation="Horizontal" Margin="0 2 0 0" Visibility="{Binding SelectedAnimationVisibility}">
+                            <Border Background="#3A4A63" CornerRadius="3" Padding="5 0" Margin="0 1 6 1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding SelectedAnimation.ModelTag}" FontSize="10.5" Foreground="#D6E2F5" />
+                            </Border>
+                            <TextBlock Text="{Binding SelectedAnimation.Name}" FontSize="11" Opacity="0.6" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <DockPanel Margin="0 10 0 0" Visibility="{Binding RepeatSingleVisibility}"
+                                   ToolTip="This animation loops (a run, walk or idle): it can play several times in a row.">
+                            <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="70" />
+                            <TextBlock Text="Repeat" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <Button Command="{Binding ExportAnimationBlenderCommand}" Margin="0 12 0 0" Padding="8 8"
+                                ToolTip="Applies this animation to the agent or gun selected in Blender (double-clicking it in the list does the same).">
+                            <StackPanel Orientation="Horizontal">
+                                <Image Source="/ValorantPorting;component/Resources/Blender.png" VerticalAlignment="Center" Width="16" Height="16"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                <TextBlock Text="Apply in Blender" VerticalAlignment="Center" Margin="6 0 0 0" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Button>
+                        <Button Content="Add to scene" Command="{Binding AddAnimationToSceneCommand}" Margin="0 6 0 0" Padding="8 5"
+                                ToolTip="A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
+                        <TextBlock Margin="0 8 0 0" TextWrapping="Wrap" Opacity="0.6" FontSize="11"
+                                   Text="Click the agent or gun in Blender first: the animation goes on it." />
+
+                        <Separator Style="{StaticResource NamedSeparator}" Tag="MIX TWO ANIMATIONS" Margin="0 16 0 0" />
+                        <TextBlock Margin="0 4 0 8" TextWrapping="Wrap" Opacity="0.75"
+                                   Text="Legs from one animation, the rest of the body from another (e.g. an equip while running). Put the selected animation in the mix:" />
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="6" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <ToggleButton Grid.Column="0" Content="One animation" Padding="8 6" IsChecked="{Binding SingleMode, Mode=TwoWay}"
-                                          ToolTip="Apply one animation from the list." />
-                            <ToggleButton Grid.Column="1" Content="Mix two" Padding="8 6" IsChecked="{Binding CombineMode, Mode=TwoWay}"
-                                          ToolTip="Legs from one animation, the rest of the body from another (e.g. an equip while running)." />
+                            <Button Grid.Column="0" Content="Use as upper body" Command="{Binding UseSelectedAsUpperCommand}" Padding="6 5" />
+                            <Button Grid.Column="2" Content="Use as legs" Command="{Binding UseSelectedAsLowerCommand}" Padding="6 5" />
                         </Grid>
 
-                        <!-- one animation -->
-                        <StackPanel Visibility="{Binding SingleModeVisibility}">
-                            <TextBlock Text="{Binding SelectedAnimationText}" FontSize="18" TextWrapping="Wrap" />
-                            <StackPanel Orientation="Horizontal" Margin="0 2 0 0" Visibility="{Binding SelectedAnimationVisibility}">
-                                <Border Background="#3A4A63" CornerRadius="3" Padding="5 0" Margin="0 1 6 1" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding SelectedAnimation.ModelTag}" FontSize="10.5" Foreground="#D6E2F5" />
-                                </Border>
-                                <TextBlock Text="{Binding SelectedAnimation.Name}" FontSize="11" Opacity="0.6" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <Border Visibility="{Binding CombineVisibility}" Background="#262B35" CornerRadius="4" Padding="10 8" Margin="0 10 0 0">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="✕" Command="{Binding ClearUpperCommand}" Padding="7 1" Margin="6 0 0 0" ToolTip="Empty this slot" />
+                                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                                        <Run Text="Upper body   " Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
+                                        <Run Text="{Binding CombineUpperText, Mode=OneWay}" FontWeight="SemiBold" />
+                                    </TextBlock>
+                                </DockPanel>
+                                <DockPanel Margin="0 6 0 0">
+                                    <Button DockPanel.Dock="Right" Content="✕" Command="{Binding ClearLowerCommand}" Padding="7 1" Margin="6 0 0 0" ToolTip="Empty this slot" />
+                                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                                        <Run Text="Legs   " Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
+                                        <Run Text="{Binding CombineLowerText, Mode=OneWay}" FontWeight="SemiBold" />
+                                    </TextBlock>
+                                </DockPanel>
+                                <DockPanel Margin="0 10 0 0" Visibility="{Binding RepeatCombinedVisibility}"
+                                           ToolTip="One of the two loops (a run, walk or idle): the mix can play several times in a row.">
+                                    <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="70" />
+                                    <TextBlock Text="Repeat" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <Button Command="{Binding ExportCombinedBlenderCommand}" Margin="0 10 0 0" Padding="8 8"
+                                        ToolTip="A looping half repeats to cover the other; a shorter one-shot holds its last pose.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Image Source="/ValorantPorting;component/Resources/Blender.png" VerticalAlignment="Center" Width="16" Height="16"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                        <TextBlock Text="Apply mix in Blender" VerticalAlignment="Center" Margin="6 0 0 0" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Content="Add mix to scene" Command="{Binding AddCombinedToSceneCommand}" Margin="0 6 0 0" Padding="8 5"
+                                        ToolTip="A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
                             </StackPanel>
-                            <DockPanel Margin="0 10 0 0" Visibility="{Binding RepeatSingleVisibility}"
-                                       ToolTip="This animation loops (a run, walk or idle): it can play several times in a row.">
-                                <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="70" />
-                                <TextBlock Text="Repeat" VerticalAlignment="Center" />
-                            </DockPanel>
-                            <Button Command="{Binding ExportAnimationBlenderCommand}" Margin="0 12 0 0" Padding="8 8">
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="/ValorantPorting;component/Resources/Blender.png" VerticalAlignment="Center" Width="16" Height="16"
-                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                    <TextBlock Text="Apply in Blender" VerticalAlignment="Center" Margin="6 0 0 0" FontWeight="SemiBold" />
-                                </StackPanel>
-                            </Button>
-                            <Button Content="Add to scene" Command="{Binding AddAnimationToSceneCommand}" Margin="0 6 0 0" Padding="8 5"
-                                    ToolTip="Puts this animation in the scene (the bar at the top) instead of applying it now." />
-                            <TextBlock Margin="0 10 0 0" TextWrapping="Wrap" Opacity="0.6" FontSize="11"
-                                       Text="Click the agent or gun in Blender first; the animation goes on it. Double-clicking an animation applies it too." />
-                        </StackPanel>
+                        </Border>
 
-                        <!-- two mixed -->
-                        <StackPanel Visibility="{Binding CombineModeVisibility}">
-                            <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0 0 0 10"
-                                       Text="Legs from one animation, the rest of the body from another, e.g. an equip while running. Click an animation in the list, then &quot;Use selected&quot;." />
-                            <TextBlock Text="UPPER BODY" FontSize="11" Opacity="0.6" Margin="0 0 0 3" />
-                            <Border Background="#262B35" CornerRadius="4" Padding="8 6">
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="Use selected" Command="{Binding UseSelectedAsUpperCommand}" Margin="8 0 0 0" Padding="8 3" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding CombineUpperText}" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                </DockPanel>
-                            </Border>
-                            <TextBlock Text="LEGS" FontSize="11" Opacity="0.6" Margin="0 10 0 3" />
-                            <Border Background="#262B35" CornerRadius="4" Padding="8 6">
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="Use selected" Command="{Binding UseSelectedAsLowerCommand}" Margin="8 0 0 0" Padding="8 3" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding CombineLowerText}" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                </DockPanel>
-                            </Border>
-                            <DockPanel Margin="0 10 0 0" Visibility="{Binding RepeatCombinedVisibility}"
-                                       ToolTip="One of the two loops (a run, walk or idle): the mix can play several times in a row.">
-                                <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="70" />
-                                <TextBlock Text="Repeat" VerticalAlignment="Center" />
-                            </DockPanel>
-                            <Button Command="{Binding ExportCombinedBlenderCommand}" Margin="0 12 0 0" Padding="8 8"
-                                    ToolTip="A looping half repeats to cover the other; a shorter one-shot holds its last pose.">
-                                <StackPanel Orientation="Horizontal">
-                                    <Image Source="/ValorantPorting;component/Resources/Blender.png" VerticalAlignment="Center" Width="16" Height="16"
-                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                    <TextBlock Text="Apply mix in Blender" VerticalAlignment="Center" Margin="6 0 0 0" FontWeight="SemiBold" />
-                                </StackPanel>
-                            </Button>
-                            <Grid Margin="0 6 0 0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="6" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0" Content="Add mix to scene" Command="{Binding AddCombinedToSceneCommand}" Padding="8 5"
-                                        ToolTip="Puts this mix in the scene (the bar at the top) instead of applying it now." />
-                                <Button Grid.Column="2" Content="Clear" Command="{Binding ClearCombineCommand}" Padding="12 5" ToolTip="Empty both slots." />
-                            </Grid>
-                        </StackPanel>
+                        <TextBlock Margin="0 16 0 0" TextWrapping="Wrap" Opacity="0.6" FontSize="11" Text="A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
                     </StackPanel>
                 </ScrollViewer>
 
@@ -477,7 +472,7 @@
                     <DockPanel Grid.Row="4">
                     <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddAssetToSceneCommand}"
                             Visibility="{Binding AddToSceneVisibility}"
-                            ToolTip="Puts this agent / gun skin, with the options above, in the scene (see the bar at the top)." />
+                            ToolTip="Puts this agent / gun skin, with the options above, in the scene. A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
                     <Button Command="{Binding ExportBlenderCommand}">
                         <Button.Content>
                             <StackPanel Orientation="Horizontal">
