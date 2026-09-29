@@ -11,6 +11,9 @@ running the release workflow with that version.
   lower body animations and with 1st person arms.
 - **1st person camera**: when exporting an agent's 1st person arms, tick "Add a 1st person camera" to get a camera
   where the player's eyes are, with Valorant's field of view. It follows the animations.
+- **Clearer layout**: the Animations, Abilities and Maps tabs show their controls in the right column, so the lists get
+  the full height. In the Animations tab, "Apply in Blender" applies the selected animation; "Use as upper body" /
+  "Use as legs" build a mix of two. The log at the bottom is visible again, and tile names no longer get cut off.
 - **What's new**: the update banner and the first start after an update now show what changed (this list).
 - **Faster**: the Animations tab remembers how it sorted the montages, so it's ready right away after the first start
   (until the game updates). The Abilities tab no longer freezes the window while it loads.
