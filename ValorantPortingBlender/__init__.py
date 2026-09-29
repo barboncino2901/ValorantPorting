@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import os
 import socket
+import queue
 import threading
 import re
 import traceback
@@ -57,7 +58,7 @@ class Receiver(threading.Thread):
     def __init__(self, event):
         threading.Thread.__init__(self, daemon=True)
         self.event = event
-        self.data = None
+        self.messages = queue.Queue()  # every message, in order (one slot lost messages sent while Blender was busy)
         self.socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.keep_alive = True
 
@@ -76,7 +77,7 @@ class Receiver(threading.Thread):
                         if data == "MessageFinished":
                             break
                         data_string += data
-                self.data = json.loads(data_string)
+                self.messages.put(json.loads(data_string))
                 self.event.set()
 
             except OSError:
@@ -1197,7 +1198,49 @@ def import_map(data, assets_root=""):
     Log.information(f"Imported map {name} ({', '.join(timings)})")
 
 
+def select_only(obj):
+    """Makes obj the only selected and the active object (None: nothing selected), like clicking it."""
+    for other in list(bpy.context.selected_objects):
+        other.select_set(False)
+    bpy.context.view_layer.objects.active = obj
+    if obj is not None:
+        obj.select_set(True)
+
+
+def import_scene(data):
+    """A scene from the app, in order: the agent, the gun in the agent's hand, then the animations on each. Each step
+    is a normal import/animation; the scene only picks which armature is selected before it."""
+    rigs = {}  # "agent:TP" / "agent:FP" / "agent:CS" / "gun" -> armature
+    focus = None  # the agent armature the scene used (selected at the end, like after importing it)
+    for step in data.get("Steps") or []:
+        settings = step.get("Settings") or {}
+        role = settings.get("SceneRole")
+        target = step.get("SceneTarget") or settings.get("SceneTarget")
+        if target and target not in rigs:
+            what = "animation" if (step.get("Data") or {}).get("Type") == "Animation" else "gun"
+            Log.warning(f"Scene: no {target} armature for the {what}")
+            if what == "animation":
+                show_message(f"The scene's agent has no armature for this animation ({target}); it was skipped.", icon='ERROR')
+                continue
+        select_only(rigs.get(target))
+        if target and target.startswith("agent:") and target in rigs:
+            focus = rigs[target]
+        before = set(bpy.data.objects)
+        import_response(step)
+        new_rigs = [o for o in bpy.data.objects if o not in before and o.type == 'ARMATURE']
+        if role == "agent":
+            for rig in new_rigs:
+                rigs.setdefault("agent:" + rig.name.split("_")[0].upper(), rig)
+        elif role == "gun" and new_rigs:
+            rigs["gun"] = next((r for r in new_rigs if r.name.upper().startswith("GN_")), new_rigs[0])
+    select_only(focus or rigs.get("agent:TP") or next(iter(rigs.values()), None))
+    Log.information(f"Imported scene {data.get('Name')} ({len(data.get('Steps') or [])} steps)")
+
+
 def import_response(response):
+    if (response.get("Data") or {}).get("Type") == "Scene":
+        import_scene(response.get("Data"))
+        return
     if (response.get("Data") or {}).get("Type") == "Animation":
         import_animation(response.get("Data"))
         return
@@ -1337,10 +1380,9 @@ def register():
     server.start()
 
     def handler():
-        if import_event.is_set():
-            import_event.clear()
+        if not server.messages.empty():  # one message per tick, in the order they came
             try:
-                import_response(server.data)
+                import_response(server.messages.get_nowait())
                 # imports run from a timer, outside any operator: without an undo step of their own, Ctrl+Z
                 # afterwards can step into a half-undone state and crash Blender
                 try:

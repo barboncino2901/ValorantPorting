@@ -22,9 +22,24 @@ public class ExportData
     }
 
     
-    public static async Task<ExportData> Create(UObject asset, EAssetType assetType, UObject style, ExportChoices? choices = null)
+    // mainAsset: the item's main asset when it isn't the selected one (a scene's agent or gun)
+    public static async Task<ExportData> Create(UObject asset, EAssetType assetType, UObject style, ExportChoices? choices = null,
+        UObject? mainAsset = null)
     {
         choices ??= new ExportChoices();
+        ExportHelpers.MainAssetOverride = mainAsset;
+        try
+        {
+            return await CreateData(asset, assetType, style, choices);
+        }
+        finally
+        {
+            ExportHelpers.MainAssetOverride = null;
+        }
+    }
+
+    private static async Task<ExportData> CreateData(UObject asset, EAssetType assetType, UObject style, ExportChoices choices)
+    {
         var data = new ExportData();
         data.Name = asset.GetOrDefault("DeveloperName", new FText("Unnamed")).Text;
         data.Type = assetType.ToString();

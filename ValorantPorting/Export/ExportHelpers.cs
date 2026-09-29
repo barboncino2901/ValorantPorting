@@ -105,7 +105,7 @@ public static class ExportHelpers
             components.Add(meshCosmetic3P);
         }
         //CS Mesh
-        if (models.HasFlag(ECharacterModels.CharacterSelect) && AppVM.MainVM.CurrentAsset.MainAsset.TryGetValue(out UObject characterSelectFxc, "CharacterSelectFXC"))
+        if (models.HasFlag(ECharacterModels.CharacterSelect) && MainAsset.TryGetValue(out UObject characterSelectFxc, "CharacterSelectFXC"))
         {
             var exports = AppVM.CUE4ParseVM.Provider.LoadPackageObjects(characterSelectFxc.GetPathName().Substring(0, characterSelectFxc.GetPathName().LastIndexOf(".")));
             foreach (var export in exports)
@@ -129,7 +129,7 @@ public static class ExportHelpers
     // level: index into the skin's Levels (its model/materials as of that upgrade); null = fully upgraded
     public static void Weapon(List<ExportPart> exportParts, UObject style, int? level = null)
     {
-        var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
+        var mainAsset = MainAsset;
         var levelTuple = GetHighestLevel(level);
         // chromas only exist on the fully upgraded skin
         if (level is { } chosen && mainAsset.GetOrDefault("Levels", Array.Empty<UBlueprintGeneratedClass>()).Length > chosen + 1)
@@ -267,7 +267,7 @@ public static class ExportHelpers
         var found = new List<(string, USkeletalMesh, UMaterialInstanceConstant[]?)>();
         try
         {
-            var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
+            var mainAsset = MainAsset;
             if (!mainAsset.TryGetValue(out UBlueprintGeneratedClass gunPrimary, "Equippable")) return found;
             var gunDefaults = gunPrimary.ClassDefaultObject.Load();
             if (gunDefaults is null || !gunDefaults.TryGetValue(out FSoftObjectPath[] forced, "ForcedAttachments")) return found;
@@ -340,7 +340,7 @@ public static class ExportHelpers
     public static Tuple<USkeletalMesh, UMaterialInstanceConstant[], UMaterialInstanceConstant[], UStaticMesh>
         GetHighestLevel(int? upToLevel = null)
     {
-        var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
+        var mainAsset = MainAsset;
         // 
         USkeletalMesh highestMeshUsed = null;
         UMaterialInstanceConstant[] highestWeapMaterialUsed = { };
@@ -490,7 +490,7 @@ public static class ExportHelpers
     
     public static USkeletalMesh GetBaseWeapon()
     {
-        var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
+        var mainAsset = MainAsset;
         if (mainAsset.TryGetValue(out UBlueprintGeneratedClass equippable, "Equippable"))
         {
             var classDefaultObject = equippable.ClassDefaultObject.Load();
@@ -508,7 +508,7 @@ public static class ExportHelpers
     // for some reason the mag mash is not in the properties here so gotta load all exports
     public static UStaticMesh GetMagMesh()
     {
-        var mainAsset = AppVM.MainVM.CurrentAsset.MainAsset;
+        var mainAsset = MainAsset;
         if (mainAsset.TryGetValue(out UBlueprintGeneratedClass equippable, "Equippable"))
         {
             var classDefaultObject = equippable.ClassDefaultObject.Load();
@@ -788,6 +788,10 @@ public static class ExportHelpers
     }
 
     internal static bool WriteFiles = true; // off for dev checks that only look at the export data
+
+    // the agent/skin being exported: the selected one, or (while a scene is sent) the scene's
+    internal static UObject? MainAssetOverride;
+    private static UObject MainAsset => MainAssetOverride ?? AppVM.MainVM.CurrentAsset.MainAsset;
 
     public static void Save(UObject obj)
     {

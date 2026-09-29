@@ -84,13 +84,20 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     public async Task ExportCombinedBlender()
     {
-        const string title = "Combine animations";
         if (UpperBodyPick is not { } upper || LowerBodyPick is not { } lower)
         {
             MessageBox.Show("Pick both halves first: right-click an animation > \"Use as upper body\", and another > \"Use as lower body\".",
-                title, MessageBoxButton.OK, MessageBoxImage.Information);
+                "Combine animations", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
+
+        if (CheckCombine(upper, lower)) await SendCombined(upper, lower, $"{upper.Name} + {lower.Name}");
+    }
+
+    // whether two animations can be combined (same model, full-body skeleton); asks about odd picks
+    private static bool CheckCombine(AnimationItem upper, AnimationItem lower)
+    {
+        const string title = "Combine animations";
 
         // different skeletons can't be combined (3rd person body, 1st person arms, guns, ...): the file name's first part
         // says which model an animation is for ("TP_" 3rd person, "FP_" 1st person, "CS_" character select, "GN_" gun)
@@ -99,13 +106,13 @@ public partial class MainViewModel : ObservableObject
         {
             MessageBox.Show($"These two animations are for different models ({upper.View} and {lower.View}), so they can't be combined.",
                 title, MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            return false;
         }
         if (ModelOf(upper) is not ("TP" or "CS"))
         {
             MessageBox.Show($"Upper and lower body can only be combined on full-body (3rd person) animations, not \"{upper.View}\" ones.",
                 title, MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            return false;
         }
 
         var warnings = new List<string>();
@@ -114,12 +121,9 @@ public partial class MainViewModel : ObservableObject
         if (lower.Name.EndsWith("_UB")) warnings.Add($"\"{lower.Title}\" is an upper-body animation: as the lower body the legs will barely move.");
         if (!upper.Name.EndsWith("_UB") && !upper.Name.EndsWith("_LB")) warnings.Add($"\"{upper.Title}\" is a full-body animation: only its upper half is used.");
         if (!lower.Name.EndsWith("_LB") && !lower.Name.EndsWith("_UB")) warnings.Add($"\"{lower.Title}\" is a full-body animation: only its legs are used.");
-        if (warnings.Count > 0 &&
-            MessageBox.Show(string.Join("\n\n", warnings) + "\n\nCombine anyway?", title,
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            return;
-
-        await SendCombined(upper, lower, $"{upper.Name} + {lower.Name}");
+        return warnings.Count == 0 ||
+               MessageBox.Show(string.Join("\n\n", warnings) + "\n\nCombine anyway?", title,
+                   MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
     }
 
     private async Task SendCombined(AnimationItem upper, AnimationItem lower, string name)

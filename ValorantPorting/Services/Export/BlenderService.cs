@@ -18,16 +18,24 @@ public class BlenderService : SocketServiceBase
         Client.Connect("localhost", Globals.BLENDER_PORT);
     }
 
-    public static void Send(ExportData data, BlenderExportSettings settings)
-    {
-        var export = new BlenderExport
-        {
-            Data = data,
-            Settings = settings,
-            AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/")
-        };
+    public static void Send(ExportData data, BlenderExportSettings settings) => SendMessage(JsonConvert.SerializeObject(ExportMessage(data, settings)));
 
-        SendMessage(JsonConvert.SerializeObject(export));
+    public static BlenderExport ExportMessage(ExportData data, BlenderExportSettings settings) => new()
+    {
+        Data = data,
+        Settings = settings,
+        AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/")
+    };
+
+    // A scene: several imports/animations in one message, done in order by the add-on (agent, gun in its hand, the
+    // animations on each). One message, so none of them can be lost while Blender is busy with the first.
+    public static void SendScene(string name, IReadOnlyList<object> steps)
+    {
+        SendMessage(JsonConvert.SerializeObject(new
+        {
+            AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
+            Data = new { Name = name, Type = "Scene", Steps = steps }
+        }));
     }
 
     // Asks the Blender add-on to apply a .psa to the currently selected armature.
@@ -35,20 +43,23 @@ public class BlenderService : SocketServiceBase
     // repeat: how many times looping animations (runs, idles) play in a row; lowerLoops/upperLoops: which ones loop
     // sequencePaths: all clips of a montage that plays several in a row (psaPath is the first), joined in Blender
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
-        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null)
+        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null) =>
+        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths)));
+
+    // sceneTarget: in a scene, which armature it goes on ("agent:TP", "agent:FP", "agent:CS" or "gun")
+    public static object AnimationMessage(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
+        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null) => new
     {
-        SendMessage(JsonConvert.SerializeObject(new
+        AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
+        SceneTarget = sceneTarget,
+        Data = new
         {
-            AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
-            Data = new
-            {
-                Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
-                UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
-                Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
-                SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList()
-            }
-        }));
-    }
+            Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
+            UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
+            Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
+            SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList()
+        }
+    };
 
     // Asks the Blender add-on to import a map exported as USD.
     public static void SendMap(string name, string usdPath, string? materialsPath)

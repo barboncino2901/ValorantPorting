@@ -33,9 +33,27 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="{adonisUi:Space 1}" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+
+        <Border Grid.Row="2" Visibility="{Binding SceneVisibility}" Background="#3A3F4B" Padding="10 6">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearSceneCommand}" />
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Command="{Binding SendSceneCommand}"
+                        ToolTip="Imports the agent, puts the gun in their hand and plays the animations on each, in one go.">
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="/ValorantPorting;component/Resources/Blender.png" VerticalAlignment="Center" Width="16" Height="16"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock Text="Send scene to Blender" VerticalAlignment="Center" Margin="5 0 0 0" />
+                    </StackPanel>
+                </Button>
+                <TextBlock Text="Scene" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="White" Margin="0 0 10 0" />
+                <TextBlock Text="{Binding SceneText}" VerticalAlignment="Center" Foreground="White" TextTrimming="CharacterEllipsis"
+                           ToolTip="Add pieces with &quot;Add to scene&quot;: agents and gun skins (with their options) on the right, animations in the Animations tab. Adding again replaces that piece." />
+            </DockPanel>
+        </Border>
 
         <Border Grid.Row="1" Visibility="{Binding UpdateVisibility}" Background="#2D5A8C" Padding="10 6">
             <DockPanel>
@@ -74,7 +92,7 @@
             </MenuItem>
         </Menu>
 
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="4*" />
@@ -229,6 +247,8 @@
                             <DockPanel Grid.Row="2" Margin="{adonisUi:Space 1}">
                                 <DockPanel DockPanel.Dock="Top" Margin="0 0 0 6" Visibility="{Binding CombineVisibility}">
                                     <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearCombineCommand}" />
+                                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddCombinedToSceneCommand}"
+                                            ToolTip="Puts this upper + lower body combination in the scene (see the bar at the top)." />
                                     <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Apply combined" Command="{Binding ExportCombinedBlenderCommand}"
                                             ToolTip="Legs from the lower-body pick, everything else from the upper-body pick. Looping animations (runs, walks, idles) repeat to cover the other one; a shorter one-shot holds its last pose." />
                                     <TextBlock Text="{Binding CombineText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -238,6 +258,8 @@
                                     <TextBlock Text="Repeat" VerticalAlignment="Center" Margin="0 0 4 0" />
                                     <ComboBox ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="60" />
                                 </StackPanel>
+                                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddAnimationToSceneCommand}"
+                                        ToolTip="Puts the selected animation in the scene: agent animations go on the agent, gun animations (GN_) on the gun." />
                                 <Button DockPanel.Dock="Right" Command="{Binding ExportAnimationBlenderCommand}">
                                     <StackPanel Orientation="Horizontal">
                                         <Image Source="/ValorantPorting;component/Resources/Blender.png"
@@ -355,7 +377,11 @@
 
                     <Separator Grid.Row="3" Style="{StaticResource NamedSeparator}" Tag="EXPORT" />
 
-                    <Button Grid.Row="4" Command="{Binding ExportBlenderCommand}">
+                    <DockPanel Grid.Row="4">
+                    <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Add to scene" Command="{Binding AddAssetToSceneCommand}"
+                            Visibility="{Binding AddToSceneVisibility}"
+                            ToolTip="Puts this agent / gun skin, with the options above, in the scene (see the bar at the top)." />
+                    <Button Command="{Binding ExportBlenderCommand}">
                         <Button.Content>
                             <StackPanel Orientation="Horizontal">
                                 <Image Source="/ValorantPorting;component/Resources/Blender.png"
@@ -365,6 +391,7 @@
                             </StackPanel>
                         </Button.Content>
                     </Button>
+                    </DockPanel>
 
                     <Button Grid.Row="6" Command="{Binding ExportUnrealCommand}">
                         <Button.Content>

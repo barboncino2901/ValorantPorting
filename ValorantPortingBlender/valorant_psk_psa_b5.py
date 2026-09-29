@@ -1564,7 +1564,13 @@ def psaimport(filepath,
         # share almost no bones with agents. Applying across skeletons mangles the model, so refuse.
         armature_is_3p = "splitter" in skeleton_bones_lowered
         animation_is_3p = "splitter" in psa_bone_names_lowered
-        too_few_matches = len(psa_bones) < 0.5 * len(psa_bone_names_lowered)
+        # matches besides the generic root bones, against both sides: a skin's gun often has fewer bones than the
+        # standard gun animation (Gunslinger Vandal: 13 of the equip's 34), but every one it has is animated
+        generic = {"skeleton", "root"}
+        psa_names = set(psa_bone_names_lowered) - generic
+        matched = psa_names & (set(skeleton_bones_lowered) - generic)
+        too_few_matches = (len(matched) < 0.5 * max(1, len(psa_names)) and
+                           len(matched) < 0.4 * max(1, len(set(skeleton_bones_lowered) - generic)))
         if too_few_matches or armature_is_3p != animation_is_3p:
             if too_few_matches:
                 reason = "it is for a different skeleton (e.g. a weapon or ability prop)"

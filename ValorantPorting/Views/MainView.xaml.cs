@@ -257,6 +257,7 @@ public partial class MainView
             : new List<string>();
         vm.SelectedLevel = Math.Max(0, levels.Length - 1);
         vm.ModelVisibility = vm.CurrentAssetType == EAssetType.Character ? Visibility.Visible : Visibility.Collapsed;
+        vm.AddToSceneVisibility = vm.CurrentAssetType is EAssetType.Character or EAssetType.Weapon ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async void OnAssetSelectionChanged(object sender, SelectionChangedEventArgs e)
