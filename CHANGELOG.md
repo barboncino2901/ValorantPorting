@@ -4,6 +4,13 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.10.1
+
+- **Fix**: agents' eyes no longer get a white film over them (the eye shadow layer was drawn as white glass).
+- **Add-on check**: if Blender still runs an older Valorant Porting add-on than the app, the app now says so and how to
+  update it (an old add-on can't import scenes and may turn animations into empty collections). Reinstall the add-on
+  from the "Blender Add-ons" folder after every app update, then restart Blender.
+
 ## 1.10.0
 
 - **Scenes**: pick an agent, a gun skin and animations with "Add to scene", then "Send scene to Blender" imports the

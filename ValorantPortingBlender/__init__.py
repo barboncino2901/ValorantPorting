@@ -19,7 +19,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 10, 0),
+    "version": (1, 10, 1),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -337,7 +337,13 @@ def effect_kind(material_data, mat_type=None):
         if [v for v in material_data.get("Vectors") or [] if re.search(r"emissive colou?r", v.get("Name") or "", re.I)]:
             return "glow"
     if blend.startswith("translucent") or blend in ("modulate", "alphacomposite", "alphaholdout"):
-        return "hidden" if EFFECT_SHELL.search(names) else "glass"
+        if EFFECT_SHELL.search(names):
+            return "hidden"
+        # agents' eye overlay: a texture whose alpha says where it shows (the eyelid shadow at the rim, a highlight);
+        # drawn as glass it put a white film over the eyes
+        if re.search(r"overlay", names, re.I) or [t for t in material_data.get("Textures") or [] if "overlay" in (t.get("Name") or "").lower()]:
+            return "overlay"
+        return "glass"
     return None
 
 
@@ -369,12 +375,14 @@ def build_effect_material(target_slot, material_data, kind):
     color_value = next((vectors[n] for n in vectors if re.search(r"emissive|color|tint", n, re.I)), None)
 
     color = None
+    alpha = None
     if texture_path and (image := import_texture(texture_path)):
         image.alpha_mode = 'CHANNEL_PACKED'
         texture = nodes.new("ShaderNodeTexImage")
         texture.image = image
         texture.location = (-500, 0)
         color = texture.outputs[0]
+        alpha = texture.outputs[1]
     if color_value:
         tint = nodes.new("ShaderNodeRGB")
         tint.location = (-500, -250)
@@ -403,6 +411,18 @@ def build_effect_material(target_slot, material_data, kind):
         links.new(nodes.new("ShaderNodeBsdfTransparent").outputs[0], add.inputs[0])
         links.new(emission.outputs[0], add.inputs[1])
         links.new(add.outputs[0], output.inputs["Surface"])
+    elif kind == "overlay":
+        # the texture's colour where its alpha is (nothing where it's transparent)
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.location = (100, 0)
+        bsdf.inputs["Roughness"].default_value = 0.4
+        if color is not None:
+            links.new(color, bsdf.inputs["Base Color"])
+        if alpha is not None:
+            links.new(alpha, bsdf.inputs["Alpha"])
+        else:
+            bsdf.inputs["Alpha"].default_value = 0.0
+        links.new(bsdf.outputs[0], output.inputs["Surface"])
     else:  # glass
         bsdf = nodes.new("ShaderNodeBsdfPrincipled")
         bsdf.location = (100, 0)
@@ -630,6 +650,12 @@ def watch_selection():
             selection_socket.sendto(("VP_SELECT|" + tag).encode("utf-8"), ("localhost", SELECTION_PORT))
             selection_state["ticks"] = 0
         selection_state["tag"] = tag
+        # every ~2 s: this add-on's version, so the app can tell when Blender runs an older add-on than the app
+        selection_state["hello"] = selection_state.get("hello", 0) + 1
+        if selection_state["hello"] >= 7:
+            version = ".".join(str(v) for v in bl_info["version"])
+            selection_socket.sendto(("VP_HELLO|" + version).encode("utf-8"), ("localhost", SELECTION_PORT))
+            selection_state["hello"] = 0
     except Exception:
         pass
     return 0.3
@@ -1246,6 +1272,14 @@ def import_response(response):
         return
     if (response.get("Data") or {}).get("Type") == "Map":
         import_map(response.get("Data"), response.get("AssetsRoot") or "")
+        return
+    if (response.get("Data") or {}).get("Parts") is None:
+        # something a newer app sends that this add-on doesn't know
+        kind = (response.get("Data") or {}).get("Type") or "unknown"
+        Log.error(f"Unsupported message from Valorant Porting ({kind})")
+        show_message("This add-on is older than the Valorant Porting app. Install the add-on from the app's "
+                     "\"Blender Add-ons\" folder (Edit > Preferences > Add-ons > Install from Disk), then restart Blender.",
+                     icon='ERROR')
         return
 
     # whatever was selected before the import: a gun is attached to a selected agent, a buddy to a selected gun

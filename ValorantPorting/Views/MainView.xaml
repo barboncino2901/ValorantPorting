@@ -38,6 +38,12 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <Border Grid.Row="2" VerticalAlignment="Top" Visibility="{Binding AddonWarningVisibility}" Background="#8C5A2D" Padding="10 6" Panel.ZIndex="1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="OK" Command="{Binding DismissAddonWarningCommand}" />
+                <TextBlock Text="{Binding AddonWarningText}" VerticalAlignment="Center" Foreground="White" TextWrapping="Wrap" />
+            </DockPanel>
+        </Border>
         <Border Grid.Row="2" Visibility="{Binding SceneVisibility}" Background="#3A3F4B" Padding="10 6">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearSceneCommand}" />

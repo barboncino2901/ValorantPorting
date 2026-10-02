@@ -435,6 +435,7 @@ public partial class MainViewModel : ObservableObject
             Application.Current.Dispatcher.Invoke(() =>
             {
                 SelectedAnimationFilter = AnimationFilters[0];
+                BlenderSelectionListener.AddonVersionSeen += OnAddonVersionSeen;
                 BlenderSelectionListener.Start(OnBlenderSelection);
             });
 
@@ -564,6 +565,24 @@ public partial class MainViewModel : ObservableObject
     }
 
     // Called with the tag of the armature selected in Blender.
+    // Blender running an older add-on than this app: new things (scenes, ...) fail there, so say how to update it
+    [ObservableProperty] private Visibility addonWarningVisibility = Visibility.Collapsed;
+    [ObservableProperty] private string addonWarningText = "";
+
+    private void OnAddonVersionSeen(string version)
+    {
+        var app = UpdateService.CurrentVersion;
+        var expected = new Version(app.Major, app.Minor, Math.Max(0, app.Build));
+        if (System.Version.TryParse(version, out var addon) && addon >= expected) return;
+        AddonWarningText = $"Blender is using an older Valorant Porting add-on ({version}) than this app ({expected.ToString(3)}). " +
+                           "In Blender: Edit > Preferences > Add-ons > Install from Disk > the zip in the app's \"Blender Add-ons\" folder, then restart Blender.";
+        AddonWarningVisibility = Visibility.Visible;
+        AppLog.Warning(AddonWarningText);
+    }
+
+    [RelayCommand]
+    public void DismissAddonWarning() => AddonWarningVisibility = Visibility.Collapsed;
+
     public void OnBlenderSelection(string key)
     {
         if (AnimationFilterOption.Parse(key) is null) return;

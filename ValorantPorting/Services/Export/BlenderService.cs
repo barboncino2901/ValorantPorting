@@ -1,8 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using Newtonsoft.Json;
+using ValorantPorting.AppUtils;
 using ValorantPorting.Export;
 using ValorantPorting.Export.Blender;
 using ValorantPorting.Services.Export;
@@ -73,6 +75,10 @@ public class BlenderService : SocketServiceBase
 
     private static void SendMessage(string message)
     {
+        if (DateTime.Now - BlenderSelectionListener.LastHeard > TimeSpan.FromSeconds(10))
+            AppLog.Warning("No sign of the Blender add-on: is Blender open with the Valorant Porting add-on enabled? " +
+                           "If you just updated the app, install the add-on from the \"Blender Add-ons\" folder again and restart Blender.");
+
         var messageBytes = Encoding.ASCII.GetBytes(message);
         SendSpliced(Client, messageBytes, Globals.BUFFER_SIZE);
         Client.Send(Encoding.ASCII.GetBytes("MessageFinished"));
