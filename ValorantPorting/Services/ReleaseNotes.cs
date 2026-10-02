@@ -39,9 +39,10 @@ public static class ReleaseNotes
         return text.Length > 0 ? text : null;
     }
 
-    // Markdown notes as plain, readable text: bullets as "•", no ** or `
+    // Markdown notes as plain, readable text: bullets as "•", no heading marks, no ** or `
     private static string Readable(string notes) =>
-        Regex.Replace(Regex.Replace(notes.Replace("\r", ""), @"^\s*[-*] ", "•  ", RegexOptions.Multiline), @"\*\*|`", "");
+        Regex.Replace(Regex.Replace(Regex.Replace(notes.Replace("\r", ""), @"^\s*[-*] ", "•  ", RegexOptions.Multiline),
+            @"^#+\s*", "", RegexOptions.Multiline), @"\*\*|`", "");
 
     // A window with the notes; linkUrl adds an "Open on GitHub" button
     public static void Show(string title, string heading, string notes, string? linkUrl = null)
