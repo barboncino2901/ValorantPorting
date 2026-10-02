@@ -278,7 +278,7 @@
                     </TabItem>
                     <TabItem Style="{StaticResource TabItemEqualSize}">
                         <TabItem.Header>
-                            <controls:TextWithIcon Label="Animation Presets"
+                            <controls:TextWithIcon Label="Presets" ToolTip="Animation presets: saved scenes to send to Blender again in one click"
                                                    ImageSource="/ValorantPorting;component/Resources/Backpack.png" />
                         </TabItem.Header>
                         <Grid>
