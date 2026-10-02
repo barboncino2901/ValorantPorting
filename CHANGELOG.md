@@ -7,7 +7,7 @@ running the release workflow with that version.
 ## 1.11.0
 
 - **Animation presets**: fill the scene bar (agent, gun skin, animations), click **Save as preset...** and give it
-  a name. It's then in the new **Animation Presets** tab: double-click (or **Send to Blender**) brings the whole
+  a name. It's then in the new **Presets** tab: double-click (or **Send to Blender**) brings the whole
   thing in with one click; you can also load it back into the scene bar to change it, rename it or delete it. Search
   works there too, and presets stay after restarts and updates.
 - **Rename animations**: right-click an animation > **Rename...** to give it your own name (any language, or a short
