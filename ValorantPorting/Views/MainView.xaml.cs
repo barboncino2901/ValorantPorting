@@ -74,6 +74,9 @@ public partial class MainView
     private async void OnAssetTabSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is not TabControl tabControl) return;
+        // a list's selection inside a tab bubbles up here too: only react to the tab itself changing (on the presets tab,
+        // reacting to its list re-filled the list, which changed its selection again... until the app crashed)
+        if (!ReferenceEquals(e.OriginalSource, tabControl)) return;
         if (AppVM.AssetHandlerVM is null) return;
 
         var assetType = (EAssetType)tabControl.SelectedIndex;
