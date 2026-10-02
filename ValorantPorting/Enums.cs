@@ -24,6 +24,7 @@ public enum EAssetType
     [Description("Abilities")] Ability,
     [Description("Animations")] Animation, // must stay in tab order (tab index == enum value)
     [Description("Maps")] Map,
+    [Description("Animation Presets")] Scene, // saved scenes (animation presets)
     [Description("Mesh")] Mesh
 }
 

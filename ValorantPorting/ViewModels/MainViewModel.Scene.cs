@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
@@ -107,23 +108,65 @@ public partial class MainViewModel
         AppLog.Information($"Scene: animation {animation.Name} added.");
     }
 
-    // ---- saved scenes (presets): the scene bar's contents under a name, sent again in one click
+    // ---- saved scenes (presets): the scene bar's contents under a name, sent again in one click (Scenes tab)
+
+    [ObservableProperty] private ObservableCollection<SavedSceneRow> savedSceneList = new();
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedSavedSceneVisibility), nameof(NoSavedSceneSelectedVisibility))]
+    private SavedSceneRow? selectedSavedScene;
+    public Visibility SelectedSavedSceneVisibility => SelectedSavedScene != null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NoSavedSceneSelectedVisibility => SelectedSavedScene == null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NoSavedScenesVisibility => SavedSceneList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    public event Action? SavedScenesChanged;
+
+    public void RefreshSavedScenes()
+    {
+        var selected = SelectedSavedScene?.Name;
+        SavedSceneList = new ObservableCollection<SavedSceneRow>(SavedScenes.All.Select(s => new SavedSceneRow(s)));
+        SelectedSavedScene = SavedSceneList.FirstOrDefault(r => r.Name.Equals(selected ?? "", StringComparison.OrdinalIgnoreCase));
+        OnPropertyChanged(nameof(NoSavedScenesVisibility));
+        SavedScenesChanged?.Invoke();
+    }
+
+    [RelayCommand]
+    public async Task SendSelectedSavedScene()
+    {
+        if (SelectedSavedScene is { } row) await SendSavedScene(row.Scene);
+    }
+
+    [RelayCommand]
+    public void LoadSelectedSavedScene()
+    {
+        if (SelectedSavedScene is { } row && LoadSavedScene(row.Scene))
+            AppLog.Information($"\"{row.Name}\" is in the scene bar: change it, then send it or save it again.");
+    }
+
+    [RelayCommand]
+    public void RenameSelectedSavedScene()
+    {
+        if (SelectedSavedScene is { } row) RenameSavedScene(row.Scene);
+    }
+
+    [RelayCommand]
+    public void DeleteSelectedSavedScene()
+    {
+        if (SelectedSavedScene is { } row) DeleteSavedScene(row.Scene);
+    }
 
     [RelayCommand]
     public void SaveCurrentScene()
     {
         if (SceneVisibility != Visibility.Visible)
         {
-            MessageBox.Show("The scene is empty: add an agent, a gun skin or animations with \"Add to scene\" first.", "Save scene",
+            MessageBox.Show("The scene is empty: add an agent, a gun skin or animations with \"Add to scene\" first.", "Save as preset",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         var suggestion = string.Join(" + ", new[] { SceneAgent?.Name, SceneGun?.Name, SceneAgentAnimation?.Name }.Where(n => n != null));
-        var name = InputDialog.Ask("Save scene", "Name of this scene (it's kept in the Scenes menu):", suggestion)?.Trim();
+        var name = InputDialog.Ask("Save as preset", "Name of this animation preset (it's kept in the Animation Presets tab):", suggestion)?.Trim();
         if (string.IsNullOrEmpty(name)) return;
         if (SavedScenes.Exists(name) &&
-            MessageBox.Show($"There's already a scene called \"{name}\". Replace it?", "Save scene", MessageBoxButton.YesNo,
+            MessageBox.Show($"There's already a preset called \"{name}\". Replace it?", "Save as preset", MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
@@ -138,7 +181,8 @@ public partial class MainViewModel
 
         SavedScenes.Save(new SavedScenes.SavedScene(name, DateTime.Now, Saved(SceneAgent), Saved(SceneGun),
             SavedAnimation(SceneAgentAnimation), SavedAnimation(SceneGunAnimation)));
-        AppLog.Information($"Scene saved as \"{name}\" (Scenes menu).");
+        RefreshSavedScenes();
+        AppLog.Information($"Saved as the animation preset \"{name}\" (Animation Presets tab).");
     }
 
     // puts a saved scene in the scene bar; false (with a message) if something in it isn't in the game files anymore
@@ -187,7 +231,7 @@ public partial class MainViewModel
         SceneGunAnimation = Animation(saved.GunAnimation);
         if (missing.Count == 0) return true;
         MessageBox.Show($"Some of \"{saved.Name}\" isn't in the game files anymore (a game update may have changed it), so it was left out:\n\n" +
-                        string.Join("\n", missing), "Saved scene", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        string.Join("\n", missing), "Animation preset", MessageBoxButton.OK, MessageBoxImage.Warning);
         return false;
     }
 
@@ -199,20 +243,24 @@ public partial class MainViewModel
 
     public void RenameSavedScene(SavedScenes.SavedScene saved)
     {
-        var name = InputDialog.Ask("Rename scene", $"New name for \"{saved.Name}\":", saved.Name)?.Trim();
+        var name = InputDialog.Ask("Rename preset", $"New name for \"{saved.Name}\":", saved.Name)?.Trim();
         if (string.IsNullOrEmpty(name) || name == saved.Name) return;
         if (SavedScenes.Exists(name) &&
-            MessageBox.Show($"There's already a scene called \"{name}\". Replace it?", "Rename scene", MessageBoxButton.YesNo,
+            MessageBox.Show($"There's already a preset called \"{name}\". Replace it?", "Rename preset", MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         SavedScenes.Rename(saved, name);
+        RefreshSavedScenes();
+        SelectedSavedScene = SavedSceneList.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
     public void DeleteSavedScene(SavedScenes.SavedScene saved)
     {
-        if (MessageBox.Show($"Delete the saved scene \"{saved.Name}\"? (Only the preset; nothing in Blender is touched.)", "Delete scene",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-            SavedScenes.Delete(saved);
+        if (MessageBox.Show($"Delete the animation preset \"{saved.Name}\"? (Only the preset; nothing in Blender is touched.)", "Delete preset",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        SavedScenes.Delete(saved);
+        RefreshSavedScenes();
     }
 
     [RelayCommand]

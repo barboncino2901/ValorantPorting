@@ -26,6 +26,7 @@ public partial class MainView
         AppLog.Logger = LoggerRtb;
         AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
         AppVM.MainVM.AbilitiesLoaded += () => ApplySearchFilter(AbilityList, SearchText);
+        AppVM.MainVM.SavedScenesChanged += () => ApplySearchFilter(SceneList, SearchText);
         AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
         // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
         UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>
@@ -78,6 +79,18 @@ public partial class MainView
         var assetType = (EAssetType)tabControl.SelectedIndex;
         var handlers = AppVM.AssetHandlerVM.Handlers;
         AppVM.MainVM.ActiveTab = assetType; // the right column follows the tab
+
+        if (assetType == EAssetType.Scene)
+        {
+            foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
+            AppVM.MainVM.CurrentAsset = null;
+            AppVM.MainVM.Styles.Clear();
+            AppVM.MainVM.RefreshSavedScenes();
+            ApplySearchFilter(SceneList, SearchText);
+            DiscordService.Update(assetType);
+            AppVM.MainVM.CurrentAssetType = assetType;
+            return;
+        }
 
         if (assetType == EAssetType.Map)
         {
@@ -168,6 +181,7 @@ public partial class MainView
                                            (library != ELibraryFilter.All || AppVM.MainVM.MatchesAnimationContext(animation)),
                 MapItem map => !hasText || map.Match(text),
                 AbilityItem ability => !hasText || ability.Match(text),
+                SavedSceneRow scene => !hasText || scene.Match(text),
                 _ => true
             };
         };
@@ -259,40 +273,6 @@ public partial class MainView
         ApplySearchFilter(AnimationList, SearchText);
     }
 
-    // The Scenes menu: save the scene bar as a preset; each saved one can be sent, loaded, renamed or deleted
-    private void OnScenesMenuOpened(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MenuItem menu || !ReferenceEquals(e.OriginalSource, menu)) return;
-        var vm = AppVM.MainVM;
-        menu.Items.Clear();
-        var save = new MenuItem { Header = "Save the current scene...", IsEnabled = vm.SceneVisibility == Visibility.Visible };
-        save.Click += (_, _) => vm.SaveCurrentScene();
-        menu.Items.Add(save);
-        menu.Items.Add(new Separator());
-
-        var saved = SavedScenes.All;
-        if (saved.Count == 0)
-            menu.Items.Add(new MenuItem { Header = "No saved scenes yet: fill the scene bar, then Save", IsEnabled = false });
-        foreach (var scene in saved)
-        {
-            var entry = new MenuItem { Header = scene.Name.Replace("_", "__") };
-            var send = new MenuItem { Header = "Send to Blender", FontWeight = FontWeights.SemiBold };
-            send.Click += async (_, _) => await vm.SendSavedScene(scene);
-            var load = new MenuItem { Header = "Load into the scene bar (to change it)" };
-            load.Click += (_, _) => vm.LoadSavedScene(scene);
-            var rename = new MenuItem { Header = "Rename..." };
-            rename.Click += (_, _) => vm.RenameSavedScene(scene);
-            var delete = new MenuItem { Header = "Delete" };
-            delete.Click += (_, _) => vm.DeleteSavedScene(scene);
-            entry.Items.Add(send);
-            entry.Items.Add(load);
-            entry.Items.Add(new Separator());
-            entry.Items.Add(rename);
-            entry.Items.Add(delete);
-            menu.Items.Add(entry);
-        }
-    }
-
     private void OnUseAsUpperBodyClick(object sender, RoutedEventArgs e)
     {
         if (sender is MenuItem { Parent: ContextMenu menu } && LibraryItemOf(menu) is AnimationItem item)
@@ -303,6 +283,12 @@ public partial class MainView
     {
         if (sender is MenuItem { Parent: ContextMenu menu } && LibraryItemOf(menu) is AnimationItem item)
             AppVM.MainVM.LowerBodyPick = item;
+    }
+
+    private void OnSavedSceneDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (AppVM.MainVM.SelectedSavedScene is not null)
+            AppVM.MainVM.SendSelectedSavedSceneCommand.Execute(null);
     }
 
     private void OnAbilityDoubleClick(object sender, MouseButtonEventArgs e)

@@ -411,8 +411,10 @@ public partial class MainViewModel : ObservableObject
 
     // The right column: the picked agent/skin's options, or the panel of the Animations / Abilities / Maps tab
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(AnimationPanelVisibility), nameof(AbilityPanelVisibility), nameof(MapPanelVisibility), nameof(AssetHintVisibility))]
+    [NotifyPropertyChangedFor(nameof(AnimationPanelVisibility), nameof(AbilityPanelVisibility), nameof(MapPanelVisibility),
+        nameof(ScenePanelVisibility), nameof(AssetHintVisibility))]
     private EAssetType activeTab;
+    public Visibility ScenePanelVisibility => ActiveTab == EAssetType.Scene ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AnimationPanelVisibility => ActiveTab == EAssetType.Animation ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AbilityPanelVisibility => ActiveTab == EAssetType.Ability ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MapPanelVisibility => ActiveTab == EAssetType.Map ? Visibility.Visible : Visibility.Collapsed;

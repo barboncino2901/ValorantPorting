@@ -6,9 +6,10 @@ running the release workflow with that version.
 
 ## 1.11.0
 
-- **Saved scenes (presets)**: fill the scene bar (agent, gun skin, animations), click **Save...** and give it a name.
-  It's then in the new **Scenes** menu: **Send to Blender** brings the whole thing in with one click, or load it
-  back into the scene bar to change it, rename it or delete it. Saved scenes stay after restarts and updates.
+- **Animation presets**: fill the scene bar (agent, gun skin, animations), click **Save as preset...** and give it
+  a name. It's then in the new **Animation Presets** tab: double-click (or **Send to Blender**) brings the whole
+  thing in with one click; you can also load it back into the scene bar to change it, rename it or delete it. Search
+  works there too, and presets stay after restarts and updates.
 - **Rename animations**: right-click an animation > **Rename...** to give it your own name (any language, or a short
   one that's quick to search). The original name and Riot's file name stay underneath, and search finds all of
   them. **Reset name** brings the original back.
