@@ -11,6 +11,7 @@ using ValorantPorting.AppUtils;
 using ValorantPorting.Export;
 using ValorantPorting.Export.Blender;
 using ValorantPorting.Services;
+using ValorantPorting.Views;
 using ValorantPorting.Views.Controls;
 
 namespace ValorantPorting.ViewModels;
@@ -104,6 +105,114 @@ public partial class MainViewModel
         }
 
         AppLog.Information($"Scene: animation {animation.Name} added.");
+    }
+
+    // ---- saved scenes (presets): the scene bar's contents under a name, sent again in one click
+
+    [RelayCommand]
+    public void SaveCurrentScene()
+    {
+        if (SceneVisibility != Visibility.Visible)
+        {
+            MessageBox.Show("The scene is empty: add an agent, a gun skin or animations with \"Add to scene\" first.", "Save scene",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var suggestion = string.Join(" + ", new[] { SceneAgent?.Name, SceneGun?.Name, SceneAgentAnimation?.Name }.Where(n => n != null));
+        var name = InputDialog.Ask("Save scene", "Name of this scene (it's kept in the Scenes menu):", suggestion)?.Trim();
+        if (string.IsNullOrEmpty(name)) return;
+        if (SavedScenes.Exists(name) &&
+            MessageBox.Show($"There's already a scene called \"{name}\". Replace it?", "Save scene", MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        static SavedScenes.Asset? Saved(SceneAsset? asset) => asset is null
+            ? null
+            : new SavedScenes.Asset(asset.Item switch { AssetSelectorItem tile => tile.ObjectPath, SavedSceneItem saved => saved.ObjectPath, _ => "" },
+                asset.Item.PackagePath, asset.Type, asset.Item.DisplayName, asset.Name, asset.Style?.GetPathName(),
+                asset.Choices.WeaponLevel, asset.Choices.Models);
+        static SavedScenes.Animation? SavedAnimation(SceneAnimation? animation) => animation is null
+            ? null
+            : new SavedScenes.Animation(animation.Name, animation.Item?.LibraryId, animation.Upper?.LibraryId, animation.Lower?.LibraryId, animation.Repeat);
+
+        SavedScenes.Save(new SavedScenes.SavedScene(name, DateTime.Now, Saved(SceneAgent), Saved(SceneGun),
+            SavedAnimation(SceneAgentAnimation), SavedAnimation(SceneGunAnimation)));
+        AppLog.Information($"Scene saved as \"{name}\" (Scenes menu).");
+    }
+
+    // puts a saved scene in the scene bar; false (with a message) if something in it isn't in the game files anymore
+    public bool LoadSavedScene(SavedScenes.SavedScene saved)
+    {
+        LoadAnimations(); // the saved animations are looked up in the list
+        var missing = new List<string>();
+
+        SceneAsset? Asset(SavedScenes.Asset? asset)
+        {
+            if (asset is null) return null;
+            if (asset.ObjectPath.Length == 0)
+            {
+                missing.Add(asset.Name);
+                return null;
+            }
+
+            UObject? style = null;
+            if (asset.StylePath != null)
+                try { style = AppVM.CUE4ParseVM.Provider.LoadPackageObject(asset.StylePath); }
+                catch (Exception) { missing.Add($"{asset.Name} (its variant)"); }
+            return new SceneAsset(new SavedSceneItem(asset.ObjectPath, asset.PackagePath, asset.Type, asset.DisplayName), asset.Type, style,
+                new ExportChoices(asset.WeaponLevel, asset.Models), asset.Name);
+        }
+
+        AnimationItem? Find(string? id) => id is null ? null : Animations.FirstOrDefault(a => a.LibraryId == id);
+
+        SceneAnimation? Animation(SavedScenes.Animation? animation)
+        {
+            if (animation is null) return null;
+            var item = Find(animation.ItemId);
+            var upper = Find(animation.UpperId);
+            var lower = Find(animation.LowerId);
+            if (item is null && (upper is null || lower is null))
+            {
+                missing.Add(animation.Name);
+                return null;
+            }
+
+            return new SceneAnimation(animation.Name, item, item is null ? upper : null, item is null ? lower : null, animation.Repeat);
+        }
+
+        SceneAgent = Asset(saved.Agent);
+        SceneGun = Asset(saved.Gun);
+        SceneAgentAnimation = Animation(saved.AgentAnimation);
+        SceneGunAnimation = Animation(saved.GunAnimation);
+        if (missing.Count == 0) return true;
+        MessageBox.Show($"Some of \"{saved.Name}\" isn't in the game files anymore (a game update may have changed it), so it was left out:\n\n" +
+                        string.Join("\n", missing), "Saved scene", MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
+    }
+
+    public async Task SendSavedScene(SavedScenes.SavedScene saved)
+    {
+        LoadSavedScene(saved);
+        await SendScene();
+    }
+
+    public void RenameSavedScene(SavedScenes.SavedScene saved)
+    {
+        var name = InputDialog.Ask("Rename scene", $"New name for \"{saved.Name}\":", saved.Name)?.Trim();
+        if (string.IsNullOrEmpty(name) || name == saved.Name) return;
+        if (SavedScenes.Exists(name) &&
+            MessageBox.Show($"There's already a scene called \"{name}\". Replace it?", "Rename scene", MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        SavedScenes.Rename(saved, name);
+    }
+
+    public void DeleteSavedScene(SavedScenes.SavedScene saved)
+    {
+        if (MessageBox.Show($"Delete the saved scene \"{saved.Name}\"? (Only the preset; nothing in Blender is touched.)", "Delete scene",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            SavedScenes.Delete(saved);
     }
 
     [RelayCommand]

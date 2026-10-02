@@ -22,6 +22,9 @@
         <ContextMenu x:Key="AnimationItemMenu" x:Shared="False" Opened="OnLibraryMenuOpened">
             <MenuItem Header="Add to favorites" Click="OnToggleFavoriteClick" />
             <Separator />
+            <MenuItem Header="Rename..." Click="OnRenameAnimationClick" />
+            <MenuItem Header="Reset name" Click="OnResetAnimationNameClick" />
+            <Separator />
             <MenuItem Header="Use as upper body (mix two)" Click="OnUseAsUpperBodyClick" />
             <MenuItem Header="Use as legs (mix two)" Click="OnUseAsLowerBodyClick" />
         </ContextMenu>
@@ -49,6 +52,8 @@
         <Border Grid.Row="2" Visibility="{Binding SceneVisibility}" Background="#3A3F4B" Padding="10 6">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearSceneCommand}" />
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Save..." Command="{Binding SaveCurrentSceneCommand}"
+                        ToolTip="Keep this scene as a preset: it's then in the Scenes menu, to send again in one click." />
                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Command="{Binding SendSceneCommand}"
                         ToolTip="Imports the agent, puts the gun in their hand and plays the animations on each, in one go.">
                     <StackPanel Orientation="Horizontal">
@@ -86,6 +91,9 @@
                           CommandParameter="File_Restart" />
                 <MenuItem Header="Quit" InputGestureText="Alt+F4" Command="{Binding MenuCommand}"
                           CommandParameter="File_Quit" />
+            </MenuItem>
+            <MenuItem Header="Scenes" SubmenuOpened="OnScenesMenuOpened">
+                <MenuItem Header="(loading)" />
             </MenuItem>
             <MenuItem Header="Settings">
                 <MenuItem Header="Options" Command="{Binding MenuCommand}" CommandParameter="Settings_Options" />

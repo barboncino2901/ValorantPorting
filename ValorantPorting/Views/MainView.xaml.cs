@@ -228,6 +228,9 @@ public partial class MainView
         var item = LibraryItemOf(menu);
         entry.IsEnabled = item is not null;
         entry.Header = item?.IsFavorite == true ? "Remove from favorites" : "Add to favorites";
+        // animations: "Reset name" only for renamed ones
+        foreach (var reset in menu.Items.OfType<MenuItem>().Where(m => (m.Header as string) == "Reset name"))
+            reset.IsEnabled = item is AnimationItem { IsRenamed: true };
     }
 
     private void OnToggleFavoriteClick(object sender, RoutedEventArgs e)
@@ -237,6 +240,58 @@ public partial class MainView
         item.IsFavorite = UserLibrary.ToggleFavorite(item.LibraryId);
     }
 
+
+    // your own name for an animation (shown in the list and searchable; the original stays underneath)
+    private void OnRenameAnimationClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Parent: ContextMenu menu } || LibraryItemOf(menu) is not AnimationItem item) return;
+        var name = InputDialog.Ask("Rename animation",
+            $"A name of your own for \"{item.OriginalTitle}\". Searching still finds it by its original name too.", item.Title);
+        if (name is null) return;
+        item.Rename(name.Trim() == item.OriginalTitle ? null : name);
+        ApplySearchFilter(AnimationList, SearchText);
+    }
+
+    private void OnResetAnimationNameClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Parent: ContextMenu menu } || LibraryItemOf(menu) is not AnimationItem item) return;
+        item.Rename(null);
+        ApplySearchFilter(AnimationList, SearchText);
+    }
+
+    // The Scenes menu: save the scene bar as a preset; each saved one can be sent, loaded, renamed or deleted
+    private void OnScenesMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menu || !ReferenceEquals(e.OriginalSource, menu)) return;
+        var vm = AppVM.MainVM;
+        menu.Items.Clear();
+        var save = new MenuItem { Header = "Save the current scene...", IsEnabled = vm.SceneVisibility == Visibility.Visible };
+        save.Click += (_, _) => vm.SaveCurrentScene();
+        menu.Items.Add(save);
+        menu.Items.Add(new Separator());
+
+        var saved = SavedScenes.All;
+        if (saved.Count == 0)
+            menu.Items.Add(new MenuItem { Header = "No saved scenes yet: fill the scene bar, then Save", IsEnabled = false });
+        foreach (var scene in saved)
+        {
+            var entry = new MenuItem { Header = scene.Name.Replace("_", "__") };
+            var send = new MenuItem { Header = "Send to Blender", FontWeight = FontWeights.SemiBold };
+            send.Click += async (_, _) => await vm.SendSavedScene(scene);
+            var load = new MenuItem { Header = "Load into the scene bar (to change it)" };
+            load.Click += (_, _) => vm.LoadSavedScene(scene);
+            var rename = new MenuItem { Header = "Rename..." };
+            rename.Click += (_, _) => vm.RenameSavedScene(scene);
+            var delete = new MenuItem { Header = "Delete" };
+            delete.Click += (_, _) => vm.DeleteSavedScene(scene);
+            entry.Items.Add(send);
+            entry.Items.Add(load);
+            entry.Items.Add(new Separator());
+            entry.Items.Add(rename);
+            entry.Items.Add(delete);
+            menu.Items.Add(entry);
+        }
+    }
 
     private void OnUseAsUpperBodyClick(object sender, RoutedEventArgs e)
     {

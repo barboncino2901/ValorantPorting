@@ -4,6 +4,15 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.11.0
+
+- **Saved scenes (presets)**: fill the scene bar (agent, gun skin, animations), click **Save...** and give it a name.
+  It's then in the new **Scenes** menu: **Send to Blender** brings the whole thing in with one click, or load it
+  back into the scene bar to change it, rename it or delete it. Saved scenes stay after restarts and updates.
+- **Rename animations**: right-click an animation > **Rename...** to give it your own name (any language, or a short
+  one that's quick to search). The original name and Riot's file name stay underneath, and search finds all of
+  them. **Reset name** brings the original back.
+
 ## 1.10.1
 
 **After this update: close Blender and open it again.** The app now updates the Blender add-on by itself, and

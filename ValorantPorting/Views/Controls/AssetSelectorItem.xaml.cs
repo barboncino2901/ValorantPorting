@@ -71,6 +71,7 @@ public partial class AssetSelectorItem : IExportableAsset, ILibraryItem
     public void ReleaseGameData() => resolved = null;
 
     public string PackagePath { get; }
+    public string ObjectPath { get; init; } = ""; // the asset it's loaded from (kept in saved scenes)
 
     public static readonly DependencyProperty IsFavoriteProperty =
         DependencyProperty.Register(nameof(IsFavorite), typeof(bool), typeof(AssetSelectorItem));

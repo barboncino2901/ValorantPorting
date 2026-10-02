@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,7 +13,8 @@ public enum ELibraryFilter
     Recent
 }
 
-// The user's favorites and recently sent items (skins, agents, buddies, animations, maps), saved in .data\library.json.
+// The user's favorites, recently sent items (skins, agents, buddies, animations, maps) and own names for animations,
+// saved in .data\library.json.
 // Items are identified by their game path, e.g. "anim:/Game/.../TP_Core_AK_S0_Reload_UB.TP_Core_AK_S0_Reload_UB".
 public static class UserLibrary
 {
@@ -26,6 +27,26 @@ public static class UserLibrary
     {
         public List<string> Favorites = new();
         public List<string> Recent = new(); // newest first
+        public Dictionary<string, string> Names = new(); // id -> the user's own name for it
+    }
+
+    // the user's own name for an item (renamed animations), or null
+    public static string? CustomName(string id)
+    {
+        lock (Lock) return data.Names.GetValueOrDefault(id);
+    }
+
+    // null or blank: back to the original name
+    public static void SetCustomName(string id, string? name)
+    {
+        lock (Lock)
+        {
+            if (string.IsNullOrWhiteSpace(name)) data.Names.Remove(id);
+            else data.Names[id] = name.Trim();
+            Save();
+        }
+
+        Changed?.Invoke();
     }
 
     public static event Action? Changed;
@@ -89,6 +110,7 @@ public static class UserLibrary
                 if (loaded is not null)
                 {
                     loaded.Favorites = loaded.Favorites.Distinct().ToList();
+                    loaded.Names ??= new Dictionary<string, string>(); // files from before names existed
                     return loaded;
                 }
             }

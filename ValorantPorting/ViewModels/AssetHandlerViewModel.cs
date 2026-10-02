@@ -292,11 +292,14 @@ public class AssetHandlerData
         var uiAsset = resolved.UiAsset;
         var resolver = CreateResolver(firstTag);
         await Application.Current.Dispatcher.InvokeAsync(
-            () => TargetCollection.Add(new AssetSelectorItem(packagePath, uiAsset, previewImage, random, resolver)),
+            () => TargetCollection.Add(new AssetSelectorItem(packagePath, uiAsset, previewImage, random, resolver) { ObjectPath = firstTag }),
             DispatcherPriority.Background);
     }
 
     // Built in its own method so the delegate captures only the path. A lambda written inside DoLoad would share
     // DoLoad's closure and keep the full-size icon texture and UI data of every tile alive.
     private Func<ResolvedAsset?> CreateResolver(string objectPath) => () => Resolve(objectPath, log: false);
+
+    // an item by the path it's loaded from (a saved scene's agent or skin)
+    public ResolvedAsset? ResolveItem(string objectPath) => Resolve(objectPath, log: true);
 }

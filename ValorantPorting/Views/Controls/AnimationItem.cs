@@ -30,9 +30,9 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         else if (folder.StartsWith("ShooterGame/Content/")) folder = folder["ShooterGame/Content/".Length..];
         Folder = folder;
 
-        (Title, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
-        Details = View.Length > 0 ? $"{View}  ·  {Name}" : Name;
+        (OriginalTitle, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
         IsFavorite = UserLibrary.IsFavorite(LibraryId);
+        CustomName = UserLibrary.CustomName(LibraryId);
         // "Sprinter" is Neon's internal name, not a sprint
         var motion = assetName.Replace("Sprinter", "", StringComparison.OrdinalIgnoreCase);
         IsLoop = LoopingName.IsMatch(motion) && !OneShotName.IsMatch(motion);
@@ -66,11 +66,31 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
 
     private void AddToTitle(string text)
     {
-        Title += text;
-        searchTitle = searchText = null;
-        titleWords = allWords = null;
-        OnPropertyChanged(nameof(Title));
+        OriginalTitle += text;
+        NameChanged();
     }
+
+    // The user's own name (right-click > Rename): shown instead of the generated title, which stays on the second line
+    // and stays searchable, like Riot's file name.
+    public string? CustomName { get; private set; }
+
+    public void Rename(string? name)
+    {
+        UserLibrary.SetCustomName(LibraryId, name);
+        CustomName = UserLibrary.CustomName(LibraryId);
+        NameChanged();
+    }
+
+    private void NameChanged()
+    {
+        searchTitle = searchText = null;
+        titleWords = nameWords = allWords = null;
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(Details));
+        OnPropertyChanged(nameof(IsRenamed));
+    }
+
+    public bool IsRenamed => CustomName != null;
 
     // Which model an animation is for, from its name's first part; shown as a tag in the list
     private static readonly Dictionary<string, string> ModelTags = new(StringComparer.OrdinalIgnoreCase)
@@ -95,9 +115,10 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
     private string? searchTitle, searchText;
     private HashSet<string>? titleWords, nameWords, allWords;
     public string SearchTitle => searchTitle ??= AnimationSearch.Normalize(Title);
-    public string SearchText => searchText ??= AnimationSearch.Normalize($"{Title} {Name} {View} {Folder}");
+    public string SearchText => searchText ??= AnimationSearch.Normalize($"{Title} {OriginalTitle} {Name} {View} {Folder}");
     public HashSet<string> TitleWords => titleWords ??= [..SearchTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries)];
-    public HashSet<string> NameWords => nameWords ??= [..SplitName(Name).Concat(SplitName(Folder))];
+    public HashSet<string> NameWords => nameWords ??=
+        [..SplitName(Name).Concat(SplitName(Folder)).Concat(CustomName != null ? AnimationSearch.Normalize(OriginalTitle).Split(' ', StringSplitOptions.RemoveEmptyEntries) : [])];
     public HashSet<string> AllWords => allWords ??= [..TitleWords.Concat(NameWords)];
     public bool IsShared => View.Contains("shared", StringComparison.OrdinalIgnoreCase) || Folder.Contains("_Core", StringComparison.OrdinalIgnoreCase);
     public double SearchScore { get; set; } // of the current search, for sorting
@@ -110,9 +131,13 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
     public string LibraryId => "anim:" + ObjectPath;
     public int RecentRank => UserLibrary.RecentRank(LibraryId);
 
-    public string Title { get; private set; } // e.g. "Jett · Tailwind (E): Dash East"
+    public string Title => CustomName ?? OriginalTitle; // e.g. "Jett · Tailwind (E): Dash East", or the user's name for it
+    public string OriginalTitle { get; private set; }   // the generated title
     public string View { get; }      // e.g. "3rd person"
-    public string Details { get; }   // second line in the list: view + original file name
+    // second line in the list: view + original file name (+ the generated title when renamed)
+    public string Details => CustomName != null
+        ? $"{OriginalTitle}  ·  {(View.Length > 0 ? View + "  ·  " : "")}{Name}"
+        : View.Length > 0 ? $"{View}  ·  {Name}" : Name;
     public string Name { get; }
     public string Folder { get; }
     public string ObjectPath { get; }
@@ -124,6 +149,7 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         {
             if (!Name.Contains(word, StringComparison.OrdinalIgnoreCase) &&
                 !Title.Contains(word, StringComparison.OrdinalIgnoreCase) &&
+                !OriginalTitle.Contains(word, StringComparison.OrdinalIgnoreCase) &&
                 !View.Contains(word, StringComparison.OrdinalIgnoreCase) &&
                 !Folder.Contains(word, StringComparison.OrdinalIgnoreCase))
                 return false;

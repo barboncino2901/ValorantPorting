@@ -17,6 +17,8 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
   Guns have their own animations too (reload, equip, inspect), in sync with the agent's.
 - **Scenes**: "Add to scene" an agent, a gun skin and animations (one for the agent, one for the gun), then
   "Send scene to Blender": the agent comes in with the gun in their hand and both animated, in one go (3rd or 1st person).
+- **Saved scenes**: save the scene bar as a preset and send it again from the Scenes menu in one click.
+- **Rename animations**: give any animation your own name (right-click > Rename); search still finds the original.
 - **1st person camera**: exporting an agent's 1st person arms can add a camera at the player's eyes, with Valorant's
   field of view, that follows the animations.
 - **Maps tab** (experimental): exports a whole map (USD) and imports it into Blender with Valorant's environment
