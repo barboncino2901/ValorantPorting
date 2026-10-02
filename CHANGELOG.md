@@ -6,26 +6,33 @@ running the release workflow with that version.
 
 ## 1.10.1
 
-- **Fix**: agents' eyes no longer get a white film over them (the eye shadow layer was drawn as white glass).
-- **Fix (animations)**: animations now play at their real speed, so an agent's animation and the gun's stay in sync
-  (Valorant stores them at different frame rates: about 30 fps for 3rd person, 43-50 for 1st person, 60 for guns;
-  before, each was stretched to one keyframe per Blender frame and the gun's equip lagged behind by about a second).
-- Gun animations are labelled "Gun 1st person" / "Gun 3rd person"; a scene warns when the agent's and the gun's
-  animation are for different views (they're different animations that won't line up exactly).
-- **Fix (scenes)**: gun animations in a scene always land on the gun, and each step goes to the right model without
-  depending on what's selected in Blender.
-- **Fix**: "Object reference not set to an instance of an object" when sending things quickly one after another, or
+**After this update: close Blender and open it again.** The app now updates the Blender add-on by itself, and
+Blender only loads add-ons when it starts.
+
+### Updates and install
+- **The Blender add-on updates itself**: the app carries the add-on and puts it into Blender 5 for you whenever the
+  app updates (the old one goes to the Recycle Bin). If Blender is still running an older add-on, a bar in the app
+  says so. (An outdated add-on was why some people got errors with scenes, or animations arriving as empty
+  collections.)
+- **One download**: `CUE4Parse-Natives.dll` is built into the app now; `ValorantPorting.exe` is all you need.
+- **First install of the add-on**: Help > Install / update the Blender add-on, then tick it in Blender's add-on list.
+
+### Fixes
+- **Animations play at their real speed**, so an agent's animation and the gun's stay in sync. Valorant stores them
+  at different frame rates (about 30 fps for 3rd person, 43-50 for 1st person, 60 for guns); before, the gun's
+  equip lagged behind by about a second.
+- **Maps**: no more white "Albedo" placeholder texture on map surfaces (very visible on Corrode, present on every
+  map). Corrode's "overlay" walls now get their grime texture as in game.
+- **Agents' eyes** no longer get a white film over them.
+- **"Object reference not set to an instance of an object"** when sending things quickly one after another, or
   clicking another item while an export was still running: exports now take turns and remember what you clicked.
-- Scenes explain it clearly when a gun has no 3rd person animation for what you picked (in game the gun then just
-  follows the hands), list the guns that do, and offer to send the scene without it.
-- **Fix (maps)**: no more white "Albedo" placeholder texture on map surfaces (very visible on Corrode, present on
-  every map). Corrode's "overlay" walls now get their grime texture as in game.
-- **The Blender add-on updates itself**: the app now carries the add-on and puts it into Blender 5 for you, every
-  time the app updates (the old one goes to the Recycle Bin). **After an update, close Blender and open it again**:
-  Blender only loads add-ons when it starts. If Blender still runs an older add-on, the app shows a bar saying so.
-  (An outdated add-on was why some people got errors with scenes, or animations arriving as empty collections.)
-- **One download**: `CUE4Parse-Natives.dll` is now built into the app; `ValorantPorting.exe` is all you need.
-- **First install of the add-on**: Help > Install / update the Blender add-on.
+
+### Scenes and gun animations
+- Gun animations in a scene always land on the gun, and each step goes to the right model without depending on
+  what's selected in Blender.
+- Gun animations are labelled **"Gun 1st person"** / **"Gun 3rd person"**.
+- If a gun has no 3rd person animation for what you picked, the scene explains it (in game the gun then just
+  follows the hands), lists the guns that do have one, and offers to send the scene without it.
 
 ## 1.10.0
 
