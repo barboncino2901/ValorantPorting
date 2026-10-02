@@ -7,6 +7,8 @@ running the release workflow with that version.
 ## 1.10.1
 
 - **Fix**: agents' eyes no longer get a white film over them (the eye shadow layer was drawn as white glass).
+- **Fix (maps)**: no more white "Albedo" placeholder texture on map surfaces (very visible on Corrode, present on
+  every map). Corrode's "overlay" walls now get their grime texture as in game.
 - **The Blender add-on updates itself**: the app now carries the add-on and puts it into Blender 5 for you, every
   time the app updates (the old one goes to the Recycle Bin). **After an update, close Blender and open it again**:
   Blender only loads add-ons when it starts. If Blender still runs an older add-on, the app shows a bar saying so.

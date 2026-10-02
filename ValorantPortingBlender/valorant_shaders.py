@@ -301,9 +301,24 @@ def _find(mapping, names):
     return None
 
 
+# Riot's stand-in textures: what a base material shows when a material doesn't set that texture ("Default_Base",
+# "Albedo_DF" with "Albedo" written on it, "MRA_MRA", "Normal_NM", ...). Never real surfaces.
+PLACEHOLDER_FOLDERS = ("/LayeredEnv/_Textures_Base/", "/Environment/Materials/BaseMats/EnvBaseMat/")
+
+
 def _is_placeholder(relative_path):
-    """Riot's layered-material stand-in textures ("Default_Base", "Default_NM", ...)."""
-    return "/LayeredEnv/_Textures_Base/" in relative_path.replace("\\", "/")
+    path = relative_path.replace("\\", "/")
+    return any(folder in path for folder in PLACEHOLDER_FOLDERS)
+
+
+def _find_texture(textures, names):
+    """The first of these texture parameters that is a real texture (not a placeholder)."""
+    lowered = {k.lower(): v for k, v in (textures or {}).items()}
+    for name in names:
+        value = lowered.get(name.lower())
+        if value and not _is_placeholder(value):
+            return value
+    return None
 
 
 def _image(assets_root, relative_path, non_color):
@@ -354,7 +369,7 @@ def _build_radianite(material, info, assets_root):
     bsdf.inputs['Emission Strength'].default_value = 0.2
     bsdf.inputs['Metallic'].default_value = 0.0
     bsdf.inputs['Roughness'].default_value = 0.6
-    relative = _find(textures, TEXTURE_SLOTS["NM"])
+    relative = _find_texture(textures, TEXTURE_SLOTS["NM"])
     image = _image(assets_root, relative, True) if relative else None
     if image is not None:
         uv = nodes.new('ShaderNodeUVMap')
@@ -380,8 +395,16 @@ def _is_blend(info, master):
     switches = info.get("Switches") or {}
     colors = info.get("Colors") or {}
     textures = info.get("Textures") or {}
+    if _is_overlay(master):
+        return False  # one layer, with an overlay texture on top (see rebuild_material)
     return ("blend" in master.lower() or switches.get("Use 2 Diffuse Maps") or "Layer B Tint" in colors
-            or _find(textures, TEXTURE_SLOTS["DF B"]) is not None)
+            or _find_texture(textures, TEXTURE_SLOTS["DF B"]) is not None)
+
+
+def _is_overlay(master):
+    """BaseEnv_MAT_V4_Overlay (Corrode's walls): one layer, plus a grime texture blended over it in "overlay" mode
+    (mid grey changes nothing) and a skirt texture on a third UV map; no second layer."""
+    return re.search(r"_overlay$", master or "", re.IGNORECASE) is not None
 
 
 def rebuild_material(material, info, assets_root):
@@ -400,16 +423,15 @@ def rebuild_material(material, info, assets_root):
     switches = info.get("Switches") or {}
 
     # Summit's wet ground variants: no diffuse of their own (a placeholder), their pattern is the "Custom Texture"
-    diffuse = _find(textures, TEXTURE_SLOTS["DF"])
-    custom = _find(textures, ["Custom Texture"])
-    if (diffuse is None or _is_placeholder(diffuse)) and custom and not _is_placeholder(custom) \
-            and _find(switches, ["Use Custom Texture"]):
+    diffuse = _find_texture(textures, TEXTURE_SLOTS["DF"])
+    custom = _find_texture(textures, ["Custom Texture"])
+    if diffuse is None and custom and _find(switches, ["Use Custom Texture"]):
         textures = {k: v for k, v in textures.items() if k not in TEXTURE_SLOTS["DF"]}
         textures["Diffuse"] = custom
 
     images = {}
     for slot, names in TEXTURE_SLOTS.items():
-        relative = _find(textures, names)
+        relative = _find_texture(textures, names)  # placeholders count as no texture
         if relative:
             images[slot] = _image(assets_root, relative, slot in NON_COLOR_SLOTS)
     if images.get("DF") is None and not any(k.startswith("Color A") for k in colors) and "DiffuseColor" not in colors:
@@ -435,6 +457,29 @@ def rebuild_material(material, info, assets_root):
         links.new(tex.outputs['Color'], shader.inputs[slot])
         if slot in ("DF", "DF B") and f"{slot} Alpha" in shader.inputs:
             links.new(tex.outputs['Alpha'], shader.inputs[f"{slot} Alpha"])
+
+    # Overlay materials: the grime texture over the base color, in "overlay" mode, as strong as "Overlay Amount"
+    overlay_path = _find_texture(textures, ["Overlay Texture"]) if _is_overlay(master) else None
+    if overlay_path and shader.inputs["DF"].links and (overlay_image := _image(assets_root, overlay_path, False)):
+        base_color = shader.inputs["DF"].links[0].from_socket
+        overlay_tex = nodes.new('ShaderNodeTexImage')
+        overlay_tex.image = overlay_image
+        scale_x = _find(scalars, ["Overlay UV - X"]) or 1.0
+        scale_y = _find(scalars, ["Overlay UV - Y"]) or 1.0
+        if (scale_x, scale_y) != (1.0, 1.0):
+            mapping = nodes.new('ShaderNodeMapping')
+            mapping.inputs['Scale'].default_value = (scale_x, scale_y, 1.0)
+            links.new(uv.outputs['UV'], mapping.inputs['Vector'])
+            links.new(mapping.outputs['Vector'], overlay_tex.inputs['Vector'])
+        else:
+            links.new(uv.outputs['UV'], overlay_tex.inputs['Vector'])
+        mix = nodes.new('ShaderNodeMix')
+        mix.data_type = 'RGBA'
+        mix.blend_type = 'OVERLAY'
+        mix.inputs[0].default_value = max(0.0, min(1.0, _find(scalars, ["Overlay Amount (Layer 1)"]) or 1.0))
+        links.new(base_color, mix.inputs[6])
+        links.new(overlay_tex.outputs['Color'], mix.inputs[7])
+        links.new(mix.outputs[2], shader.inputs["DF"])
 
     # Color-only materials (no diffuse texture): average of the A colors as a flat albedo.
     if images.get("DF") is None:
