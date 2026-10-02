@@ -745,7 +745,7 @@ def import_animation(data):
         Log.error(message)
         show_message(message, icon='ERROR')
 
-    psaimport(disk_path(path), context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
+    psaimport(disk_path(path), context=bpy.context, oArmature=armature, bKeepProportions=True, bRealTime=True, bUpdateTimelineRange=True,
               error_callback=on_error)
     lower_action = armature.animation_data.action if armature.animation_data else None
     # montages that play several clips in a row (e.g. a character select intro, then its idle): the app sends every
@@ -753,7 +753,7 @@ def import_animation(data):
     if len(clips := data.get("SequencePaths") or []) > 1 and lower_action:
         actions = [lower_action]
         for clip in clips[1:]:
-            psaimport(disk_path(clip), context=bpy.context, oArmature=armature, bKeepProportions=True, bUpdateTimelineRange=True,
+            psaimport(disk_path(clip), context=bpy.context, oArmature=armature, bKeepProportions=True, bRealTime=True, bUpdateTimelineRange=True,
                       error_callback=on_error)
             if armature.animation_data and armature.animation_data.action not in actions:
                 actions.append(armature.animation_data.action)
@@ -770,7 +770,7 @@ def import_animation(data):
 
     # upper + lower body: legs from the first animation, everything else from this one (Riot's "_UB"/"_LB" halves,
     # or any two the user combines, e.g. an equip over a run)
-    psaimport(disk_path(upper_path), context=bpy.context, oArmature=armature, bKeepProportions=True,
+    psaimport(disk_path(upper_path), context=bpy.context, oArmature=armature, bKeepProportions=True, bRealTime=True,
               bUpdateTimelineRange=True, error_callback=on_error)
     upper_action = armature.animation_data.action if armature.animation_data else None
     if not (lower_action and upper_action and lower_action != upper_action):

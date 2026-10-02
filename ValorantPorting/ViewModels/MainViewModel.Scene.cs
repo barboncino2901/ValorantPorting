@@ -94,7 +94,7 @@ public partial class MainViewModel
             case "TP" or "FP" or "CS":
                 SceneAgentAnimation = animation;
                 break;
-            case "GN":
+            case "GN" or "GNTP": // the gun's 1st / 3rd person animations
                 SceneGunAnimation = animation;
                 break;
             default:
@@ -128,6 +128,12 @@ public partial class MainViewModel
         var rig = SceneAgentAnimation?.Model ??
                   (agentModels.HasFlag(ECharacterModels.ThirdPerson) ? "TP" : agentModels.HasFlag(ECharacterModels.FirstPerson) ? "FP" : "CS");
         var warnings = new List<string>();
+        // a gun animation made for the other view: a different animation, with its own timing
+        if (SceneAgentAnimation is { } agentPick && SceneGunAnimation is { } gunPick &&
+            (agentPick.Model == "FP") != (gunPick.Model == "GN"))
+            warnings.Add($"The agent animation is {(agentPick.Model == "FP" ? "1st" : "3rd")} person but the gun animation is the " +
+                         $"{(gunPick.Model == "GN" ? "1st" : "3rd")} person one: they're different animations, so they won't line up exactly. " +
+                         "Pick the gun animation for the same view (\"Gun 1st person\" / \"Gun 3rd person\"; not every gun has a 3rd person one).");
         var needed = rig switch { "TP" => ECharacterModels.ThirdPerson, "FP" => ECharacterModels.FirstPerson, _ => ECharacterModels.CharacterSelect };
         if (SceneAgent != null && !agentModels.HasFlag(needed))
             warnings.Add($"The agent animation is for the {ModelOptions.First(o => o.Key == needed).Value} model, which isn't in the agent's " +

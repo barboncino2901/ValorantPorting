@@ -75,7 +75,7 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
     // Which model an animation is for, from its name's first part; shown as a tag in the list
     private static readonly Dictionary<string, string> ModelTags = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["TP"] = "3rd person", ["FP"] = "1st person", ["CS"] = "Char select", ["GN"] = "Gun", ["GNTP"] = "Gun 3rd person",
+        ["TP"] = "3rd person", ["FP"] = "1st person", ["CS"] = "Char select", ["GN"] = "Gun 1st person", ["GNTP"] = "Gun 3rd person",
         ["AB"] = "Ability prop", ["ABTP"] = "Ability prop", ["ABCS"] = "Ability prop", ["EQ"] = "Melee"
     };
 

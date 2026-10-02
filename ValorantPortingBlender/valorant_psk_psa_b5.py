@@ -1,3 +1,4 @@
+import math
 # ##### BEGIN GPL LICENSE BLOCK #####
 #
 #  This program is free software; you can redistribute it and/or
@@ -1382,11 +1383,17 @@ def psaimport(filepath,
         bKeepProportions = True,
         fcurve_interpolation = 'LINEAR',
         # error_callback = __pass
-        error_callback = print
+        error_callback = print,
+        bRealTime = False
         ):
     """Import animation data from 'filepath' using 'oArmature'
     
     Args:
+        bRealTime:
+            Place keyframes in real time (sample * scene fps / the animation's own rate) instead of one per frame.
+            Valorant's animations each have their own rate (3rd person ~30 fps, 1st person 43-50, guns 60): one per
+            frame plays them at different speeds, out of sync with each other (an agent's equip vs. the gun's).
+
         first_frames: (0 - import all)
             Import only 'first_frames' from each action
           
@@ -1618,7 +1625,7 @@ def psaimport(filepath,
         group_name = util_bytes_to_str( group_name_raw  )
 
         Raw_Key_Nums += Totalbones * NumRawFrames
-        Action_List[counter] = ( action_name, group_name, Totalbones, NumRawFrames)
+        Action_List[counter] = ( action_name, group_name, Totalbones, NumRawFrames, AnimRate)
 
     #==============================================================================================
     # Raw keys (VQuatAnimKey) 3f vec, 4f quat, 1f time
@@ -1703,8 +1710,14 @@ def psaimport(filepath,
     is_first_action = True
     first_action = None
 
-    for counter, (Name, Group, Totalbones, NumRawFrames) in enumerate(Action_List):
+    scene_fps = util_get_scene(context).render.fps / util_get_scene(context).render.fps_base
+
+    def frame_scale_of(rate):
+        return scene_fps / rate if bRealTime and rate and rate > 0 else 1.0
+
+    for counter, (Name, Group, Totalbones, NumRawFrames, AnimRate) in enumerate(Action_List):
         ref_time = time.process_time()
+        frame_scale = frame_scale_of(AnimRate)
 
         if Group != 'None':
             Name = "(%s) %s" % (Group,Name)
@@ -1905,10 +1918,10 @@ def psaimport(filepath,
                 # loc = psa_bone.post_quat.conjugated() * (p_pos - psa_bone.orig_loc)
 
 
-                psa_bone.fcurve_quat_w.keyframe_points[i].co = i, quat.w
-                psa_bone.fcurve_quat_x.keyframe_points[i].co = i, quat.x
-                psa_bone.fcurve_quat_y.keyframe_points[i].co = i, quat.y
-                psa_bone.fcurve_quat_z.keyframe_points[i].co = i, quat.z
+                psa_bone.fcurve_quat_w.keyframe_points[i].co = i * frame_scale, quat.w
+                psa_bone.fcurve_quat_x.keyframe_points[i].co = i * frame_scale, quat.x
+                psa_bone.fcurve_quat_y.keyframe_points[i].co = i * frame_scale, quat.y
+                psa_bone.fcurve_quat_z.keyframe_points[i].co = i * frame_scale, quat.z
 
                 psa_bone.fcurve_quat_w.keyframe_points[i].interpolation = fcurve_interpolation
                 psa_bone.fcurve_quat_x.keyframe_points[i].interpolation = fcurve_interpolation
@@ -1917,9 +1930,9 @@ def psaimport(filepath,
 
 
                 if not bRotationOnly:
-                    psa_bone.fcurve_loc_x.keyframe_points[i].co = i, loc.x
-                    psa_bone.fcurve_loc_y.keyframe_points[i].co = i, loc.y
-                    psa_bone.fcurve_loc_z.keyframe_points[i].co = i, loc.z
+                    psa_bone.fcurve_loc_x.keyframe_points[i].co = i * frame_scale, loc.x
+                    psa_bone.fcurve_loc_y.keyframe_points[i].co = i * frame_scale, loc.y
+                    psa_bone.fcurve_loc_z.keyframe_points[i].co = i * frame_scale, loc.z
 
                     psa_bone.fcurve_loc_x.keyframe_points[i].interpolation = fcurve_interpolation
                     psa_bone.fcurve_loc_y.keyframe_points[i].interpolation = fcurve_interpolation
@@ -1928,9 +1941,9 @@ def psaimport(filepath,
                 if Raw_ScaleKey_List:
                     scale = Raw_ScaleKey_List[raw_key_index]
 
-                    psa_bone.fcurve_scale_x.keyframe_points[i].co = i, scale.x
-                    psa_bone.fcurve_scale_y.keyframe_points[i].co = i, scale.y
-                    psa_bone.fcurve_scale_z.keyframe_points[i].co = i, scale.z
+                    psa_bone.fcurve_scale_x.keyframe_points[i].co = i * frame_scale, scale.x
+                    psa_bone.fcurve_scale_y.keyframe_points[i].co = i * frame_scale, scale.y
+                    psa_bone.fcurve_scale_z.keyframe_points[i].co = i * frame_scale, scale.z
 
                     psa_bone.fcurve_scale_x.keyframe_points[i].interpolation = fcurve_interpolation
                     psa_bone.fcurve_scale_y.keyframe_points[i].interpolation = fcurve_interpolation
@@ -1963,7 +1976,7 @@ def psaimport(filepath,
             # Do not pollute track. Makes other tracks 'visible' through 'empty space'.
             strip.extrapolation = 'NOTHING'
 
-            nla_track_last_frame += NumRawFrames
+            nla_track_last_frame += NumRawFrames * frame_scale
 
         if is_first_action:
             first_action = action
@@ -1987,9 +2000,9 @@ def psaimport(filepath,
         scene.frame_start = 0
 
         if bActionsToTrack:
-            scene.frame_end = sum(frames for _, _, _, frames in Action_List) - 1
+            scene.frame_end = math.ceil(sum((frames - 1) * frame_scale_of(rate) for _, _, _, frames, rate in Action_List))
         else:
-            scene.frame_end = max(frames for _, _, _, frames in Action_List) - 1
+            scene.frame_end = math.ceil(max((frames - 1) * frame_scale_of(rate) for _, _, _, frames, rate in Action_List))
 
 
     util_select_all(False)

@@ -7,6 +7,11 @@ running the release workflow with that version.
 ## 1.10.1
 
 - **Fix**: agents' eyes no longer get a white film over them (the eye shadow layer was drawn as white glass).
+- **Fix (animations)**: animations now play at their real speed, so an agent's animation and the gun's stay in sync
+  (Valorant stores them at different frame rates: about 30 fps for 3rd person, 43-50 for 1st person, 60 for guns;
+  before, each was stretched to one keyframe per Blender frame and the gun's equip lagged behind by about a second).
+- Gun animations are labelled "Gun 1st person" / "Gun 3rd person"; a scene warns when the agent's and the gun's
+  animation are for different views (they're different animations that won't line up exactly).
 - **Fix (maps)**: no more white "Albedo" placeholder texture on map surfaces (very visible on Corrode, present on
   every map). Corrode's "overlay" walls now get their grime texture as in game.
 - **The Blender add-on updates itself**: the app now carries the add-on and puts it into Blender 5 for you, every
