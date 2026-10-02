@@ -27,6 +27,7 @@ public class ExportData
         UObject? mainAsset = null)
     {
         choices ??= new ExportChoices();
+        await ExportHelpers.ExportLock.WaitAsync();
         ExportHelpers.MainAssetOverride = mainAsset;
         try
         {
@@ -35,6 +36,7 @@ public class ExportData
         finally
         {
             ExportHelpers.MainAssetOverride = null;
+            ExportHelpers.ExportLock.Release();
         }
     }
 

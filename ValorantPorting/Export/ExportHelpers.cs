@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CUE4Parse_Conversion;
 using CUE4Parse_Conversion.Dto;
@@ -28,6 +29,9 @@ namespace ValorantPorting.Export;
 public static class ExportHelpers
 {
     public static readonly List<Task> Tasks = new();
+    // one export at a time: they share Tasks (the files being written) and MainAssetOverride; two at once (sending a
+    // gun while the agent was still exporting) could clear each other's list and fail with a null reference
+    public static readonly SemaphoreSlim ExportLock = new(1, 1);
 
     private static readonly ExportOptions ExportOptions = new(
         meshFormat: EMeshFormat.ActorX,
@@ -347,7 +351,7 @@ public static class ExportHelpers
         UMaterialInstanceConstant[] highestMagMaterialUsed = { };
         UStaticMesh highestMagMeshUsed = null;
         //
-        mainAsset.TryGetValue(out UBlueprintGeneratedClass[] levels, "Levels");
+        var levels = mainAsset.GetOrDefault("Levels", Array.Empty<UBlueprintGeneratedClass>());
         for (var i = 0; i < levels.Length && (upToLevel is null || i <= upToLevel); i++)
         {
             var activeO = levels[i];

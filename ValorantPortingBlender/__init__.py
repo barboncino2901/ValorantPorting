@@ -730,10 +730,11 @@ def show_message(message, title="Valorant Porting", icon='INFO'):
         pass
 
 
-def import_animation(data):
+def import_animation(data, armature=None):
+    """armature: where it goes (a scene says so); otherwise the selected armature"""
     name = data.get("Name")
     path = data.get("AnimationPath")
-    armature = find_selected_armature()
+    armature = armature or find_selected_armature()
     if armature is None:
         Log.error(f"No armature selected for animation {name}")
         show_message("Select the agent or gun armature first, then apply the animation again.", icon='ERROR')
@@ -1224,6 +1225,9 @@ def import_map(data, assets_root=""):
     Log.information(f"Imported map {name} ({', '.join(timings)})")
 
 
+last_import_main = None  # the main body of the latest import (a gun's body, not its magazine or scope)
+
+
 def select_only(obj):
     """Makes obj the only selected and the active object (None: nothing selected), like clicking it."""
     for other in list(bpy.context.selected_objects):
@@ -1248,22 +1252,30 @@ def import_scene(data):
             if what == "animation":
                 show_message(f"The scene's agent has no armature for this animation ({target}); it was skipped.", icon='ERROR')
                 continue
-        select_only(rigs.get(target))
+        select_only(rigs.get(target))  # what the user sees selected; the steps get their target directly
         if target and target.startswith("agent:") and target in rigs:
             focus = rigs[target]
         before = set(bpy.data.objects)
-        import_response(step)
+        if (step.get("Data") or {}).get("Type") == "Animation":
+            if target and target in rigs:
+                import_animation(step.get("Data"), armature=rigs[target])
+            else:
+                import_animation(step.get("Data"))
+        else:
+            import_response(step, holder=rigs.get(target) if target else None, use_selection=False)
         new_rigs = [o for o in bpy.data.objects if o not in before and o.type == 'ARMATURE']
         if role == "agent":
             for rig in new_rigs:
                 rigs.setdefault("agent:" + rig.name.split("_")[0].upper(), rig)
         elif role == "gun" and new_rigs:
-            rigs["gun"] = next((r for r in new_rigs if r.name.upper().startswith("GN_")), new_rigs[0])
+            # the gun's body (its magazine and scope are armatures too, and come first by name for some skins)
+            rigs["gun"] = last_import_main if last_import_main in new_rigs else                 next((r for r in new_rigs if r.name.upper().startswith("GN_")), new_rigs[0])
     select_only(focus or rigs.get("agent:TP") or next(iter(rigs.values()), None))
     Log.information(f"Imported scene {data.get('Name')} ({len(data.get('Steps') or [])} steps)")
 
 
-def import_response(response):
+def import_response(response, holder=None, use_selection=True):
+    """holder: the armature a gun/buddy goes on (a scene says so); otherwise (use_selection) the selected armature"""
     if (response.get("Data") or {}).get("Type") == "Scene":
         import_scene(response.get("Data"))
         return
@@ -1283,7 +1295,7 @@ def import_response(response):
         return
 
     # whatever was selected before the import: a gun is attached to a selected agent, a buddy to a selected gun
-    holder = find_selected_armature()
+    holder = holder or (find_selected_armature() if use_selection else None)
 
     import_shaders("VALORANT_Weapon.blend")
     import_shaders("VALORANT_Agent.blend")
@@ -1396,10 +1408,12 @@ def import_response(response):
         if new_collection not in parent_obj.users_collection:
             new_collection.objects.link(parent_obj)
 
-    if imported_parts and holder is not None:
-        # the main body: the first part that isn't itself attached to another part (scopes, magazines, ...)
-        main = next((p["Parent"] for p in imported_parts
-                     if not [c for c in p["Parent"].constraints if c.type == 'CHILD_OF']), imported_parts[0]["Parent"])
+    # the main body: the first part that isn't itself attached to another part (scopes, magazines, ...)
+    main = next((p["Parent"] for p in imported_parts
+                 if not [c for c in p["Parent"].constraints if c.type == 'CHILD_OF']), imported_parts[0]["Parent"]) if imported_parts else None
+    global last_import_main
+    last_import_main = main
+    if main is not None and holder is not None:
         if import_type == "Weapon":
             attach_to_bone(main, holder, WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION, "hand")
         elif import_type == "GunBuddy":

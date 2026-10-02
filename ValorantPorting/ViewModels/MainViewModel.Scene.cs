@@ -128,22 +128,23 @@ public partial class MainViewModel
         var rig = SceneAgentAnimation?.Model ??
                   (agentModels.HasFlag(ECharacterModels.ThirdPerson) ? "TP" : agentModels.HasFlag(ECharacterModels.FirstPerson) ? "FP" : "CS");
         var warnings = new List<string>();
-        // a gun animation made for the other view: a different animation, with its own timing. Riot only made 3rd person
-        // gun animations where the gun visibly moves by itself in 3rd person (an Operator's bolt): a Vandal equip has
-        // none, the gun just moves with the hands.
+        var sendGunAnimation = true;
+        // a gun animation made for the other view (1st / 3rd person): a different animation, with its own timing.
+        // Riot only made 3rd person gun animations where the gun's parts visibly move in 3rd person (an Operator's
+        // bolt); a Vandal equip has none: in game the gun just moves with the hands.
         if (SceneAgentAnimation is { } agentPick && SceneGunAnimation is { Item: { } gunItem } gunPick &&
             (agentPick.Model == "FP") != (gunPick.Model == "GN"))
         {
-            var otherName = gunPick.Model == "GN" ? "GNTP_" + gunItem.Name["GN_".Length..] : "GN_" + gunItem.Name["GNTP_".Length..];
-            var other = Animations.FirstOrDefault(a => a.Name.Equals(otherName, StringComparison.OrdinalIgnoreCase));
-            var agentView = agentPick.Model == "FP" ? "1st" : "3rd";
-            warnings.Add($"The agent animation is {agentView} person but the gun animation \"{gunItem.Title}\" is the " +
-                         $"{(gunPick.Model == "GN" ? "1st" : "3rd")} person one: a different animation that won't line up. " +
-                         (other != null
-                             ? $"Use \"{other.Title}\" ({other.ModelTag}) instead."
-                             : agentPick.Model == "FP"
-                                 ? "This gun has no 1st person version of it."
-                                 : "In 3rd person the game plays no gun animation for this (the gun just moves with the hands): leave the gun animation out."));
+            switch (AskAboutGunView(agentPick, gunItem, gunPick.Model))
+            {
+                case MessageBoxResult.Yes:
+                    sendGunAnimation = false;
+                    break;
+                case MessageBoxResult.No:
+                    break;
+                default:
+                    return;
+            }
         }
 
         var needed = rig switch { "TP" => ECharacterModels.ThirdPerson, "FP" => ECharacterModels.FirstPerson, _ => ECharacterModels.CharacterSelect };
@@ -169,7 +170,7 @@ public partial class MainViewModel
                 steps.Add(BlenderService.ExportMessage(await ExportSceneAsset(gun), SceneSettings(gun, "gun", SceneAgent != null ? $"agent:{rig}" : null)));
             if (SceneAgentAnimation is { } agentAnimation && await AnimationMessage(agentAnimation, SceneAgent != null ? $"agent:{rig}" : null) is { } a)
                 steps.Add(a);
-            if (SceneGunAnimation is { } gunAnimation && await AnimationMessage(gunAnimation, SceneGun != null ? "gun" : null) is { } g)
+            if (sendGunAnimation && SceneGunAnimation is { } gunAnimation && await AnimationMessage(gunAnimation, SceneGun != null ? "gun" : null) is { } g)
                 steps.Add(g);
             if (steps.Count == 0) return;
 
@@ -182,6 +183,7 @@ public partial class MainViewModel
         catch (Exception e)
         {
             AppLog.Error($"Scene export failed: {e.Message}");
+            AppLog.Error(e.ToString()); // where it failed, for a bug report
         }
         finally
         {
@@ -189,9 +191,59 @@ public partial class MainViewModel
         }
     }
 
+    // The scene's agent animation is 3rd person and the gun's 1st person (or the reverse): explains what that means
+    // and asks. Yes = send without the gun animation, No = send it anyway, Cancel = go back.
+    private MessageBoxResult AskAboutGunView(SceneAnimation agentPick, AnimationItem gunItem, string gunModel)
+    {
+        var agentView = agentPick.Model == "FP" ? "1st" : "3rd";
+        var gunView = gunModel == "GN" ? "1st" : "3rd";
+        var action = gunItem.Name.Split('_').Last(); // Equip, Reload, Inspect, ...
+        var otherName = gunModel == "GN" ? "GNTP_" + gunItem.Name["GN_".Length..] : "GN_" + gunItem.Name["GNTP_".Length..];
+        var other = Animations.FirstOrDefault(a => a.Name.Equals(otherName, StringComparison.OrdinalIgnoreCase));
+
+        string text;
+        if (other != null)
+        {
+            text = $"The agent animation is {agentView} person, but \"{gunItem.Title}\" is the gun's {gunView} person animation: it's timed " +
+                   $"for the {gunView} person view, so it won't line up.\n\nThis gun has the right one: \"{other.Title}\" ({other.ModelTag}). " +
+                   "Add that one to the scene instead (Animations tab > Add to scene).";
+        }
+        else if (agentPick.Model != "FP")
+        {
+            // which guns have a 3rd person gun animation for this action, from the game files
+            var guns = Animations.Where(a => a.Name.StartsWith("GNTP_", StringComparison.OrdinalIgnoreCase) &&
+                                             a.Name.EndsWith("_" + action, StringComparison.OrdinalIgnoreCase))
+                .Select(a => a.Title.Split(':')[0].Trim()).Where(n => n.Length > 0).Distinct().OrderBy(n => n).ToList();
+            text = $"Nothing is wrong, just good to know: this gun has no 3rd person {action.ToLowerInvariant()} animation of its own in the game files.\n\n" +
+                   "In 3rd person the game doesn't animate the gun here: it simply moves with the agent's hands. " +
+                   $"\"{gunItem.Title}\" is the 1st person version, timed for the 1st person arms, so on a 3rd person agent it won't line up." +
+                   (guns.Count > 0 ? $"\n\nGuns that do have a 3rd person {action.ToLowerInvariant()}: {string.Join(", ", guns)}." : "");
+        }
+        else
+        {
+            text = $"The agent animation is 1st person, but \"{gunItem.Title}\" is the gun's 3rd person animation, and this gun has no " +
+                   "1st person version of it: it won't line up with the arms.";
+        }
+
+        return MessageBox.Show(text + "\n\nYes: send the scene without the gun animation (the gun follows the hands, like in game)\n" +
+                               "No: send it with this gun animation anyway\nCancel: go back",
+            "About the gun animation", MessageBoxButton.YesNoCancel, MessageBoxImage.Information);
+    }
+
     private static async Task<ExportData> ExportSceneAsset(SceneAsset asset)
     {
-        var data = await ExportData.Create(asset.Item.Asset, asset.Type, asset.Style!, asset.Choices, asset.Item.MainAsset);
+        // the item's game data is loaded again when needed (tiles free it when another one is clicked); a load can
+        // fail while the game files are busy, so try again before giving up
+        UObject? main = null;
+        for (var attempt = 0; attempt < 5 && (main is null || main.Properties.Count == 0); attempt++)
+        {
+            if (attempt > 0) await Task.Delay(300);
+            main = asset.Item.MainAsset;
+        }
+
+        if (main is null || main.Properties.Count == 0)
+            throw new InvalidOperationException($"{asset.Name} couldn't be read from the game files; click it once in its tab and send the scene again.");
+        var data = await ExportData.Create(asset.Item.Asset, asset.Type, asset.Style!, asset.Choices, main);
         data.Name = asset.Name;
         return data;
     }

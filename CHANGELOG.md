@@ -12,6 +12,12 @@ running the release workflow with that version.
   before, each was stretched to one keyframe per Blender frame and the gun's equip lagged behind by about a second).
 - Gun animations are labelled "Gun 1st person" / "Gun 3rd person"; a scene warns when the agent's and the gun's
   animation are for different views (they're different animations that won't line up exactly).
+- **Fix (scenes)**: gun animations in a scene always land on the gun, and each step goes to the right model without
+  depending on what's selected in Blender.
+- **Fix**: "Object reference not set to an instance of an object" when sending things quickly one after another, or
+  clicking another item while an export was still running: exports now take turns and remember what you clicked.
+- Scenes explain it clearly when a gun has no 3rd person animation for what you picked (in game the gun then just
+  follows the hands), list the guns that do, and offer to send the scene without it.
 - **Fix (maps)**: no more white "Albedo" placeholder texture on map surfaces (very visible on Corrode, present on
   every map). Corrode's "overlay" walls now get their grime texture as in game.
 - **The Blender add-on updates itself**: the app now carries the add-on and puts it into Blender 5 for you, every

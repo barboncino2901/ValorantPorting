@@ -263,13 +263,22 @@ public partial class MainViewModel : ObservableObject
         {
             var timer = Stopwatch.StartNew();
             var data = new ExportData { Name = item.Title, Type = "Ability" };
+            await ExportHelpers.ExportLock.WaitAsync(); // one export at a time (they share ExportHelpers.Tasks)
+            try
+            {
             await Task.Run(() =>
             {
                 // parts of one model come in together, placed as in game; a rig with the models on its bones
                 data.Parts.AddRange(AbilityResolver.ExportParts(AppVM.CUE4ParseVM.Provider, item));
             });
-            await Task.WhenAll(ExportHelpers.Tasks);
+            await Task.WhenAll(ExportHelpers.Tasks.ToArray());
             ExportHelpers.Tasks.Clear();
+            }
+            finally
+            {
+                ExportHelpers.ExportLock.Release();
+            }
+
             if (data.Parts.Count == 0)
             {
                 AppLog.Warning($"{item.Title}: the model could not be read.");
@@ -508,13 +517,18 @@ public partial class MainViewModel : ObservableObject
         var loadTimez = new Stopwatch();
         loadTimez.Start();
 
+        if (CurrentAsset is not { } sending) return;
+        var sendingType = CurrentAssetType;
+        var sendingStyle = GetSelectedStyles();
+        var sendingChoices = GetExportChoices();
+        var sendingMain = sending.MainAsset; // captured now: clicking another tile meanwhile must not change the export
         const int maxAttempts = 5;
         Export.ExportData data = null;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             try
             {
-                data = await ExportData.Create(CurrentAsset.Asset, CurrentAssetType, GetSelectedStyles(), GetExportChoices());
+                data = await ExportData.Create(sending.Asset, sendingType, sendingStyle, sendingChoices, sendingMain);
                 break;
             }
             catch (Exception ex) when (attempt < maxAttempts && ex.ToString().Contains("being used by another process"))
