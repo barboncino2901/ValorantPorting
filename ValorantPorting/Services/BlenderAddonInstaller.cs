@@ -97,13 +97,43 @@ public static class BlenderAddonInstaller
         return found.OrderBy(i => i.Blender).ToList();
     }
 
-    // The Blender versions whose Valorant Porting add-on is older than the built-in one get the built-in one.
+    // Needs the built-in add-on: an older version, or the same version with different files (a re-released build);
+    // a newer add-on (installed by hand from a newer release) is left alone.
+    private static bool NeedsUpdate(Install install, Version builtIn) =>
+        install.AddonVersion is { } installed && (installed < builtIn || installed == builtIn && !SameFiles(install.AddonsFolder));
+
+    // whether the installed add-on's files are the built-in ones
+    private static bool SameFiles(string addonsFolder)
+    {
+        try
+        {
+            if (AddonZip is not { } zip) return true;
+            using var archive = new ZipArchive(new MemoryStream(zip));
+            foreach (var entry in archive.Entries.Where(e => !e.FullName.EndsWith('/') && !e.FullName.EndsWith('\\')))
+            {
+                var installed = Path.Combine(addonsFolder, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(installed) || new FileInfo(installed).Length != entry.Length) return false;
+                using var stream = entry.Open();
+                using var memory = new MemoryStream();
+                stream.CopyTo(memory);
+                if (!SHA256.HashData(memory.ToArray()).SequenceEqual(SHA256.HashData(File.ReadAllBytes(installed)))) return false;
+            }
+
+            return true;
+        }
+        catch (Exception)
+        {
+            return true; // can't tell: don't replace it
+        }
+    }
+
+    // The Blender versions whose Valorant Porting add-on isn't the built-in one (older, or different files) get it.
     // Returns the ones updated ("5.2"); errors are logged.
     public static List<string> UpdateInstalledAddons()
     {
         var updated = new List<string>();
         if (BuiltInVersion is not { } builtIn) return updated;
-        foreach (var install in FindBlenders().Where(i => i.AddonVersion is { } v && v < builtIn))
+        foreach (var install in FindBlenders().Where(i => NeedsUpdate(i, builtIn)))
         {
             try
             {
@@ -129,9 +159,9 @@ public static class BlenderAddonInstaller
         return newest.Blender.ToString(2);
     }
 
-    // whether every Blender 5+ that has the add-on has the built-in version (or newer)
+    // whether every Blender 5+ that has the add-on has the built-in one (or a newer version)
     public static bool InstalledAddonsUpToDate() =>
-        BuiltInVersion is not { } builtIn || FindBlenders().All(i => i.AddonVersion is null || i.AddonVersion >= builtIn);
+        BuiltInVersion is not { } builtIn || FindBlenders().All(i => !NeedsUpdate(i, builtIn));
 
     private static void InstallInto(string addonsFolder)
     {
