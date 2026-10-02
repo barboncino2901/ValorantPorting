@@ -9,6 +9,19 @@
         <RootNamespace>ValorantPorting</RootNamespace>
         <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     </PropertyGroup>
+    <!-- The Blender add-on, zipped from ..\ValorantPortingBlender on every build and built into the app: the app keeps
+         Blender's copy up to date (BlenderAddonInstaller) -->
+    <Target Name="PackBlenderAddon" BeforeTargets="PrepareForBuild">
+        <ItemGroup>
+            <BlenderAddonFile Include="..\ValorantPortingBlender\**\*" Exclude="..\ValorantPortingBlender\**\__pycache__\**;..\ValorantPortingBlender\**\*.pyc" />
+        </ItemGroup>
+        <RemoveDir Directories="$(IntermediateOutputPath)blender-addon" />
+        <Copy SourceFiles="@(BlenderAddonFile)" DestinationFiles="@(BlenderAddonFile->'$(IntermediateOutputPath)blender-addon\ValorantPortingBlender\%(RecursiveDir)%(Filename)%(Extension)')" />
+        <ZipDirectory SourceDirectory="$(IntermediateOutputPath)blender-addon" DestinationFile="$(IntermediateOutputPath)ValorantPortingBlender.zip" Overwrite="true" />
+        <ItemGroup>
+            <EmbeddedResource Include="$(IntermediateOutputPath)ValorantPortingBlender.zip" LogicalName="ValorantPortingBlender.zip" />
+        </ItemGroup>
+    </Target>
     <ItemGroup>
         <PackageReference Include="AdonisUI" Version="1.17.1"/>
         <PackageReference Include="AdonisUI.ClassicTheme" Version="1.17.1"/>
@@ -27,6 +40,9 @@
     </ItemGroup>
     <ItemGroup>
         <EmbeddedResource Include="..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
+        <!-- CUE4Parse-Natives.dll (animation decompression), built from CUE4Parse/CUE4Parse-Natives (see the workflow);
+             the app unpacks it next to itself, so it isn't a separate download -->
+        <EmbeddedResource Include="Natives\CUE4Parse-Natives.dll" LogicalName="CUE4Parse-Natives.dll" Condition="Exists('Natives\CUE4Parse-Natives.dll')" />
         <Resource Include="Resources\Backpack.png"/>
         <Resource Include="Resources\Dance.png"/>
         <Resource Include="Resources\Glider.png"/>

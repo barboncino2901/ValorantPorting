@@ -7,9 +7,12 @@ running the release workflow with that version.
 ## 1.10.1
 
 - **Fix**: agents' eyes no longer get a white film over them (the eye shadow layer was drawn as white glass).
-- **Add-on check**: if Blender still runs an older Valorant Porting add-on than the app, the app now says so and how to
-  update it (an old add-on can't import scenes and may turn animations into empty collections). Reinstall the add-on
-  from the "Blender Add-ons" folder after every app update, then restart Blender.
+- **The Blender add-on updates itself**: the app now carries the add-on and puts it into Blender 5 for you, every
+  time the app updates (the old one goes to the Recycle Bin). **After an update, close Blender and open it again**:
+  Blender only loads add-ons when it starts. If Blender still runs an older add-on, the app shows a bar saying so.
+  (An outdated add-on was why some people got errors with scenes, or animations arriving as empty collections.)
+- **One download**: `CUE4Parse-Natives.dll` is now built into the app; `ValorantPorting.exe` is all you need.
+- **First install of the add-on**: Help > Install / update the Blender add-on.
 
 ## 1.10.0
 

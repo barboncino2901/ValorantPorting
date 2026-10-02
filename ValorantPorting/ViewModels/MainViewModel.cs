@@ -490,6 +490,9 @@ public partial class MainViewModel : ObservableObject
             case "Help_Update":
                 _ = CheckForUpdates(manual: true);
                 break;
+            case "Help_Addon":
+                UpdateAddonInBlender();
+                break;
             case "Help_About":
                 // TODO
                 break;
@@ -567,17 +570,74 @@ public partial class MainViewModel : ObservableObject
     // Called with the tag of the armature selected in Blender.
     // Blender running an older add-on than this app: new things (scenes, ...) fail there, so say how to update it
     [ObservableProperty] private Visibility addonWarningVisibility = Visibility.Collapsed;
+    [ObservableProperty] private Visibility addonUpdateButtonVisibility = Visibility.Collapsed;
     [ObservableProperty] private string addonWarningText = "";
 
     private void OnAddonVersionSeen(string version)
     {
-        var app = UpdateService.CurrentVersion;
-        var expected = new Version(app.Major, app.Minor, Math.Max(0, app.Build));
-        if (System.Version.TryParse(version, out var addon) && addon >= expected) return;
-        AddonWarningText = $"Blender is using an older Valorant Porting add-on ({version}) than this app ({expected.ToString(3)}). " +
-                           "In Blender: Edit > Preferences > Add-ons > Install from Disk > the zip in the app's \"Blender Add-ons\" folder, then restart Blender.";
+        var expected = BlenderAddonInstaller.BuiltInVersion ?? UpdateService.CurrentVersion;
+        if (System.Version.TryParse(version, out var addon) && addon >= new Version(expected.Major, expected.Minor, Math.Max(0, expected.Build))) return;
+        if (BlenderAddonInstaller.InstalledAddonsUpToDate() && BlenderAddonInstaller.FindBlenders().Any(b => b.AddonVersion != null))
+        {
+            // the new add-on is installed, Blender just hasn't loaded it yet
+            AddonWarningText = $"Blender is still running the old Valorant Porting add-on ({version}). The new one ({expected.ToString(3)}) is " +
+                               "already installed: close Blender and open it again.";
+            AddonUpdateButtonVisibility = Visibility.Collapsed;
+        }
+        else
+        {
+            AddonWarningText = $"Blender is running an older Valorant Porting add-on ({version}) than this app ({expected.ToString(3)}). " +
+                               "Click \"Update add-on in Blender\", then close Blender and open it again.";
+            AddonUpdateButtonVisibility = Visibility.Visible;
+        }
+
         AddonWarningVisibility = Visibility.Visible;
         AppLog.Warning(AddonWarningText);
+    }
+
+    // Help menu / banner: puts the built-in add-on into Blender 5+ (updates older copies; a first install goes into
+    // the newest Blender and has to be ticked there once)
+    [RelayCommand]
+    public void UpdateAddonInBlender()
+    {
+        const string title = "Blender add-on";
+        var version = BlenderAddonInstaller.BuiltInVersion?.ToString(3) ?? "?";
+        try
+        {
+            var updated = BlenderAddonInstaller.UpdateInstalledAddons();
+            var blenders = BlenderAddonInstaller.FindBlenders();
+            if (updated.Count > 0)
+            {
+                AddonWarningText = $"The add-on was updated to {version} in Blender {string.Join(", ", updated)}: close Blender and open it again.";
+                AddonUpdateButtonVisibility = Visibility.Collapsed;
+                MessageBox.Show($"The Valorant Porting add-on was updated to {version} in Blender {string.Join(", ", updated)}.\n\n" +
+                                "If Blender is open, close it and open it again: Blender only loads add-ons when it starts.",
+                    title, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else if (blenders.Any(b => b.AddonVersion != null))
+            {
+                MessageBox.Show($"The add-on in Blender {string.Join(", ", blenders.Where(b => b.AddonVersion != null).Select(b => b.Blender.ToString(2)))} " +
+                                $"is already version {version} or newer.\n\nIf Blender still uses an old one, close Blender and open it again.",
+                    title, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else if (BlenderAddonInstaller.InstallIntoNewestBlender() is { } blender)
+            {
+                MessageBox.Show($"The Valorant Porting add-on {version} was copied into Blender {blender}.\n\nOne last step, in Blender:\n" +
+                                "1. If Blender is open, close it and open it again.\n2. Edit > Preferences > Add-ons, search \"Valorant\".\n3. Tick the box next to Valorant Porting.",
+                    title, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show("No Blender 5 was found for this Windows user. Install the add-on by hand: in Blender, Edit > Preferences > Add-ons > " +
+                                "Install from Disk > the zip in the app's \"Blender Add-ons\" folder.",
+                    title, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"The add-on couldn't be put into Blender ({ex.Message}).\n\nInstall it by hand: in Blender, Edit > Preferences > Add-ons > " +
+                            "Install from Disk > the zip in the app's \"Blender Add-ons\" folder.", title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     [RelayCommand]

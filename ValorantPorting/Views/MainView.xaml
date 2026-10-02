@@ -41,6 +41,8 @@
         <Border Grid.Row="2" VerticalAlignment="Top" Visibility="{Binding AddonWarningVisibility}" Background="#8C5A2D" Padding="10 6" Panel.ZIndex="1">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="OK" Command="{Binding DismissAddonWarningCommand}" />
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Update add-on in Blender" Command="{Binding UpdateAddonInBlenderCommand}"
+                        Visibility="{Binding AddonUpdateButtonVisibility}" />
                 <TextBlock Text="{Binding AddonWarningText}" VerticalAlignment="Center" Foreground="White" TextWrapping="Wrap" />
             </DockPanel>
         </Border>
@@ -95,6 +97,7 @@
             <MenuItem Header="Help">
                 <MenuItem Header="Discord Server" Command="{Binding MenuCommand}" CommandParameter="Help_Discord" />
                 <MenuItem Header="GitHub Repo" Command="{Binding MenuCommand}" CommandParameter="Help_GitHub" />
+                <MenuItem Header="Install / update the Blender add-on" Command="{Binding MenuCommand}" CommandParameter="Help_Addon" />
                 <MenuItem Header="Check for updates" Command="{Binding MenuCommand}" CommandParameter="Help_Update" />
             </MenuItem>
         </Menu>

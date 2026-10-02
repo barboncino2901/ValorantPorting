@@ -36,17 +36,29 @@ public partial class MainView
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // the Blender add-on follows the app: Blender 5+ copies older than the built-in one are replaced
+        var updatedBlenders = BlenderAddonInstaller.UpdateInstalledAddons();
+        var addonNote = updatedBlenders.Count > 0
+            ? $"Blender add-on: updated to {BlenderAddonInstaller.BuiltInVersion?.ToString(3)} in Blender {string.Join(", ", updatedBlenders)}.\n" +
+              "If Blender is open, close it and open it again: Blender only loads add-ons when it starts."
+            : null;
+
         if (App.StartedAfterUpdate)
         {
             UpdateService.ConfirmStarted();
-            const string addonNote = "The Blender add-on was updated too (in the \"Blender Add-ons\" folder). Install it in Blender: " +
-                                     "Edit > Preferences > Add-ons > Install from Disk, then restart Blender.";
             var version = UpdateService.CurrentVersion.ToString(3);
+            var addonLine = addonNote ?? (BlenderAddonInstaller.FindBlenders().Any(b => b.AddonVersion != null)
+                ? "Blender add-on: already up to date."
+                : "Blender add-on: not found in Blender 5. Install it once with Help > Install / update the Blender add-on.");
+            var heading = $"Valorant Porting was updated to version {version}.\n\n{addonLine}";
             if (ReleaseNotes.ForThisVersion() is { } notes)
-                ReleaseNotes.Show("Update installed", $"Valorant Porting was updated to version {version}.\n\n{addonNote}\n\nWhat's new:", notes);
+                ReleaseNotes.Show("Update installed", heading + "\n\nWhat's new:", notes);
             else
-                MessageBox.Show($"Valorant Porting was updated to version {version}.\n\n{addonNote}",
-                    "Update installed", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(heading, "Update installed", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        else if (addonNote != null)
+        {
+            MessageBox.Show(addonNote, "Blender add-on updated", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         if (string.IsNullOrWhiteSpace(AppSettings.Current.ArchivePath))

@@ -57,17 +57,21 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
 * A local Valorant installation
 
 ### ValorantPorting (the app)
-1. Download `ValorantPorting.exe` and `CUE4Parse-Natives.dll` from the latest [release](../../releases) and put them
-   in the same folder, somewhere programs can write to (not Program Files). `CUE4Parse-Natives.dll` is needed for
-   animations.
+1. Download `ValorantPorting.exe` from the latest [release](../../releases) and put it in its own folder, somewhere
+   programs can write to (not Program Files). Everything else it needs is built in. (The release also lists
+   `CUE4Parse-Natives.dll`: that's only for older versions' updaters, you don't need it.)
 2. Run `ValorantPorting.exe` and point it to your Valorant folder
    (usually `C:\Riot Games\VALORANT\live\ShooterGame\Content\Paks`). Close Valorant while you use the app.
 
 ### Blender add-on
-1. Download `ValorantPortingBlender.zip` from the same release. **Don't extract it.**
-2. In Blender: **Edit > Preferences > Add-ons > Install from Disk**, pick the zip, and make sure the add-on's
-   checkbox is ticked (reinstalling an add-on can untick it).
-3. Restart Blender. The add-on listens for the app in the background.
+Once: **Help > Install / update the Blender add-on** in the app copies it into Blender 5; then in Blender, Edit >
+Preferences > Add-ons, search "Valorant" and tick it. (Or by hand: download `ValorantPortingBlender.zip` from the
+release, **don't extract it**, and in Blender use Edit > Preferences > Add-ons > Install from Disk.)
+
+### Updates
+The app tells you when a new version is out and updates itself in one click. It also updates the add-on in Blender
+by itself: **after an update, close Blender and open it again** (Blender only loads add-ons when it starts). If
+Blender is still running an older add-on, the app shows a bar saying so.
 
 `valorant_psk_psa_b5.py` (optional, also in the release) is a standalone importer for .psk/.psa files by hand
 (File > Import > Valorant PSA/PSK [Blender 5]). The add-on already contains it.

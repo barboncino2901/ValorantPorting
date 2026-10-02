@@ -40,6 +40,10 @@ public partial class App
         ExportsFolder.Create();
         DataFolder.Create();
 
+        // the files this app brings built in: the animation DLL next to it, the add-on zip for installing by hand
+        Services.BlenderAddonInstaller.EnsureNatives();
+        Services.BlenderAddonInstaller.WriteManualZip();
+
         AppSettings.DirectoryPath.Create();
         AppSettings.Load();
 

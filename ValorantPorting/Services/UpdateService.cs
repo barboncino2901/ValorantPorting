@@ -13,17 +13,19 @@ using ValorantPorting.AppUtils;
 
 namespace ValorantPorting.Services;
 
-// Updates from this project's GitHub releases: finds a newer release, downloads the app, CUE4Parse-Natives.dll and the
-// Blender add-on (checked against GitHub's SHA-256 checksums), swaps them in and restarts. The replaced files are only
-// kept until the new version has started; if it doesn't start, they are put back.
+// Updates from this project's GitHub releases: finds a newer release, downloads the app (checked against GitHub's
+// SHA-256 checksum), swaps it in and restarts. The new app brings CUE4Parse-Natives.dll and the Blender add-on built in
+// and puts them in place itself (BlenderAddonInstaller). The replaced file is only kept until the new version has
+// started; if it doesn't start, it's put back.
 public static class UpdateService
 {
     private const string Repository = "barboncino2901/ValorantPorting";
     private const string LatestReleaseApi = $"https://api.github.com/repos/{Repository}/releases/latest";
     public const string ReleasesPage = $"https://github.com/{Repository}/releases/latest";
     private const string AfterUpdateArgument = "--after-update";
-    private const string AddonAsset = "ValorantPortingBlender.zip";
-    private static readonly string[] AppAssets = ["ValorantPorting.exe", "CUE4Parse-Natives.dll"];
+    private static readonly string[] AppAssets = ["ValorantPorting.exe"];
+    // left by updaters before 1.10.1, which also swapped the DLL
+    private static readonly string[] LeftoverAssets = ["ValorantPorting.exe", "CUE4Parse-Natives.dll"];
 
     public record Asset(string Name, string Url, string? Sha256);
     public record Release(Version Version, string Tag, string PageUrl, string Notes, List<Asset> Assets);
@@ -87,7 +89,7 @@ public static class UpdateService
         {
             Directory.CreateDirectory(UpdateFolder);
             var downloads = new Dictionary<string, string>();
-            foreach (var asset in release.Assets.Where(a => AppAssets.Contains(a.Name) || a.Name == AddonAsset))
+            foreach (var asset in release.Assets.Where(a => AppAssets.Contains(a.Name)))
             {
                 status.Report($"Downloading {asset.Name}...");
                 var file = Path.Combine(UpdateFolder, asset.Name);
@@ -122,13 +124,7 @@ public static class UpdateService
                 { WorkingDirectory = Directory.GetCurrentDirectory(), UseShellExecute = false });
             for (var waited = 0; waited < 60; waited++)
             {
-                if (File.Exists(StartedMarker))
-                {
-                    // only now that the new version runs: replace the add-on zip too
-                    if (downloads.TryGetValue(AddonAsset, out var addon))
-                        try { InstallAddonZip(addon, release.Version); } catch (Exception ex) { AppLog.Warning($"Could not place the new Blender add-on: {ex.Message}"); }
-                    return true;
-                }
+                if (File.Exists(StartedMarker)) return true;
                 if (started is null || started.HasExited) break;
                 await Task.Delay(1000);
             }
@@ -157,17 +153,6 @@ public static class UpdateService
         }
     }
 
-    // The add-on zip goes where the old one was ("Blender Add-ons" next to the app) and replaces it; Blender still
-    // needs it installed (Install from Disk), which the new version reminds about.
-    private static void InstallAddonZip(string zip, Version version)
-    {
-        var folder = Path.Combine(AppFolder, "Blender Add-ons");
-        if (!Directory.Exists(folder)) folder = AppFolder;
-        foreach (var old in Directory.GetFiles(folder, "*ValorantPortingBlender*.zip"))
-            try { File.Delete(old); } catch { }
-        File.Copy(zip, Path.Combine(folder, $"1 - ValorantPortingBlender-{version.ToString(3)}.zip"), overwrite: true);
-    }
-
     private static string Sha256Of(string file)
     {
         using var stream = File.OpenRead(file);
@@ -191,7 +176,7 @@ public static class UpdateService
         {
             for (var attempt = 0; attempt < 60; attempt++)
             {
-                var left = AppAssets.Select(name => Path.Combine(AppFolder, name + ".old")).Where(File.Exists).ToList();
+                var left = LeftoverAssets.Select(name => Path.Combine(AppFolder, name + ".old")).Where(File.Exists).ToList();
                 foreach (var file in left)
                     try { File.Delete(file); } catch { }
                 if (left.All(f => !File.Exists(f))) break;

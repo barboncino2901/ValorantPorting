@@ -29,14 +29,19 @@ jobs:
       - name: .NET Restore
         run: dotnet restore ValorantPorting
 
-      - name: .NET Publish
-        run: dotnet publish ValorantPorting -c Release --no-self-contained -r win-x64 -f net10.0-windows -o "./ValorantPorting/bin/Publish/" -p:PublishReadyToRun=false -p:PublishSingleFile=true -p:DebugType=None -p:GenerateDocumentationFile=false -p:DebugSymbols=false -p:AssemblyVersion=${{ github.event.inputs.appVersion }} -p:FileVersion=${{ github.event.inputs.appVersion }}
-
-      - name: CUE4Parse-Natives (animation decompression)
+      - name: CUE4Parse-Natives (animation decompression; built into the app)
         run: |
           cmake -S CUE4Parse/CUE4Parse-Natives -B natives-build -A x64
           cmake --build natives-build --config Release
+          New-Item -ItemType Directory -Force ./ValorantPorting/Natives | Out-Null
+          # built into the app (it unpacks it next to itself) ...
+          Copy-Item natives-build/Release/CUE4Parse-Natives.dll ./ValorantPorting/Natives/
+          # ... and still uploaded for the updaters of 1.8 - 1.10.0, which only accept a release that has it
+          New-Item -ItemType Directory -Force ./ValorantPorting/bin/Publish | Out-Null
           Copy-Item natives-build/Release/CUE4Parse-Natives.dll ./ValorantPorting/bin/Publish/
+
+      - name: .NET Publish
+        run: dotnet publish ValorantPorting -c Release --no-self-contained -r win-x64 -f net10.0-windows -o "./ValorantPorting/bin/Publish/" -p:PublishReadyToRun=false -p:PublishSingleFile=true -p:DebugType=None -p:GenerateDocumentationFile=false -p:DebugSymbols=false -p:AssemblyVersion=${{ github.event.inputs.appVersion }} -p:FileVersion=${{ github.event.inputs.appVersion }}
 
       - name: Blender add-on ZIP
         # the add-on folder itself goes into the zip, which is what Blender's "Install from Disk" expects
