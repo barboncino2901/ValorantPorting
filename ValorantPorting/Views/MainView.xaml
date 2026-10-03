@@ -323,39 +323,27 @@
                                           Visibility="{Binding SoundGroupVisibility}"
                                           ToolTip="One gun skin, ability, agent or map of this category" />
                             </Grid>
-                            <ListBox Grid.Row="1" x:Name="SoundList" ItemsSource="{Binding Sounds}"
-                                     SelectedItem="{Binding SelectedSound, Mode=TwoWay}"
+                            <ListBox Grid.Row="1" x:Name="SoundList" ItemsSource="{Binding SoundRows}"
+                                     SelectedItem="{Binding SelectedSoundRow, Mode=TwoWay}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                                     VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                                      MouseDoubleClick="OnSoundDoubleClick" ItemContainerStyle="{StaticResource LibraryItemContainer}">
-                                <ListBox.GroupStyle>
-                                    <GroupStyle>
-                                        <GroupStyle.HeaderTemplate>
-                                            <DataTemplate>
-                                                <Border Background="#262B35" CornerRadius="3" Padding="8 4" Margin="0 8 0 2">
-                                                    <TextBlock>
-                                                        <Run Text="{Binding Name.Name, Mode=OneWay}" FontWeight="Bold" FontSize="13" />
-                                                        <Run Text="{Binding Name.Category, Mode=OneWay, StringFormat='   {0}'}" FontSize="11"
-                                                             Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
-                                                        <Run Text="{Binding ItemCount, Mode=OneWay, StringFormat='   ({0})'}" FontSize="11"
-                                                             Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
-                                                    </TextBlock>
-                                                </Border>
-                                            </DataTemplate>
-                                        </GroupStyle.HeaderTemplate>
-                                    </GroupStyle>
-                                </ListBox.GroupStyle>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Margin="10 1 2 1" ToolTip="{Binding Details}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
-                                                           Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
-                                                <TextBlock Text="{Binding Short}" />
-                                            </StackPanel>
+                                <ListBox.Resources>
+                                    <DataTemplate DataType="{x:Type controls:SoundHeader}">
+                                        <Border Background="#262B35" CornerRadius="3" Padding="8 4" Margin="0 6 0 1" IsHitTestVisible="False">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" FontSize="11" Opacity="0.55" VerticalAlignment="Center" Margin="10 0 0 0" />
+                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                    <DataTemplate DataType="{x:Type controls:SoundItem}">
+                                        <StackPanel Orientation="Horizontal" Margin="10 1 2 1" ToolTip="{Binding Details}">
+                                            <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
+                                                       Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
+                                            <TextBlock Text="{Binding Short}" />
                                         </StackPanel>
                                     </DataTemplate>
-                                </ListBox.ItemTemplate>
+                                </ListBox.Resources>
                             </ListBox>
                         </Grid>
                     </TabItem>

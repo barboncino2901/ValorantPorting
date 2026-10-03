@@ -27,13 +27,6 @@ public partial class MainView
         AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
         AppVM.MainVM.AbilitiesLoaded += () => ApplySearchFilter(AbilityList, SearchText);
         AppVM.MainVM.SavedScenesChanged += () => ApplySearchFilter(SceneList, SearchText);
-        AppVM.MainVM.SoundsChanged += () =>
-        {
-            // under headings: one per gun skin, ability, map, ... (the list is sorted so a group's sounds are together)
-            if (System.Windows.Data.CollectionViewSource.GetDefaultView(SoundList.ItemsSource) is { } view && view.GroupDescriptions.Count == 0)
-                view.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(SoundItem.Group)));
-            ApplySearchFilter(SoundList, SearchText);
-        };
         AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
         // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
         UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>
@@ -108,7 +101,7 @@ public partial class MainView
             AppVM.MainVM.CurrentAsset = null;
             AppVM.MainVM.Styles.Clear();
             AppVM.MainVM.LoadSounds();
-            ApplySearchFilter(SoundList, SearchText);
+            AppVM.MainVM.SetSoundSearch(SearchText);
             DiscordService.Update(assetType);
             AppVM.MainVM.CurrentAssetType = assetType;
             return;
@@ -181,10 +174,13 @@ public partial class MainView
 
     private void RefreshListFilters()
     {
+        // the Sounds list filters itself (headings and ~21,000 sounds: a CollectionView filter is too slow)
+        AppVM.MainVM.SetSoundSearch(SearchText);
+        if (AppVM.MainVM.ActiveTab == EAssetType.Sound && AppVM.MainVM.LibraryFilter != ELibraryFilter.All) AppVM.MainVM.FilterSounds();
         foreach (var tab in AssetControls.Items.OfType<TabItem>())
         {
             var listBox = tab.Content as ListBox ?? (tab.Content as Grid)?.Children.OfType<ListBox>().FirstOrDefault();
-            if (listBox is null) continue;
+            if (listBox is null || listBox == SoundList) continue;
             ApplySearchFilter(listBox, SearchText);
         }
     }
@@ -206,7 +202,6 @@ public partial class MainView
                 MapItem map => !hasText || map.Match(text),
                 AbilityItem ability => !hasText || ability.Match(text),
                 SavedSceneRow scene => !hasText || scene.Match(text),
-                SoundItem sound => AppVM.MainVM.MatchesSoundCategory(sound) && (!hasText || sound.Match(text)),
                 _ => true
             };
         };

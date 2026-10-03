@@ -32,7 +32,11 @@ public partial class MainViewModel
     private const string AllSounds = "All sounds", AllGroups = "All";
     public string[] SoundCategories { get; } = [AllSounds, .. SoundNamer.Categories];
     [ObservableProperty] private string soundCategory = AllSounds;
-    public event Action? SoundsChanged;
+
+    // what the list shows: headings (SoundHeader) and the sounds under them, rebuilt by FilterSounds
+    [ObservableProperty] private List<object> soundRows = [];
+    [ObservableProperty] private object? selectedSoundRow;
+    private string soundSearch = "";
 
     // second filter: one gun skin, ability, map, ... of the category ("Vandal · RGX 11z Pro", "Raze · Boom Bot (C)")
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(SoundGroupVisibility))] private List<string> soundGroups = [AllGroups];
@@ -45,10 +49,47 @@ public partial class MainViewModel
             ? [AllGroups]
             : [AllGroups, .. Sounds.Where(s => s.Category == value).Select(s => s.Group.Name).Distinct()];
         if (SoundGroup != AllGroups) SoundGroup = AllGroups; // (filters again)
-        else SoundsChanged?.Invoke();
+        else FilterSounds();
     }
 
-    partial void OnSoundGroupChanged(string value) => SoundsChanged?.Invoke();
+    partial void OnSoundGroupChanged(string value) => FilterSounds();
+
+    partial void OnSelectedSoundRowChanged(object? value)
+    {
+        if (value is SoundItem sound) SelectedSound = sound;
+    }
+
+    // the search box (shared by all tabs)
+    public void SetSoundSearch(string text)
+    {
+        if (text == soundSearch) return;
+        soundSearch = text;
+        FilterSounds();
+    }
+
+    // the list for the category, heading, search and Show: (favorites/recent) picked; a few ms for all ~21,000
+    public void FilterSounds()
+    {
+        var library = LibraryFilter;
+        var search = soundSearch.Trim();
+        var matches = Sounds.Where(s => MatchesSoundCategory(s) && UserLibrary.Matches(s.LibraryId, library) &&
+                                        (search.Length == 0 || s.Match(search)));
+        if (library == ELibraryFilter.Recent) matches = matches.OrderBy(s => s.RecentRank);
+
+        var rows = new List<object>();
+        var list = matches.ToList();
+        for (var i = 0; i < list.Count;)
+        {
+            var group = list[i].Group;
+            var end = i;
+            while (end < list.Count && list[end].Group == group) end++;
+            rows.Add(new SoundHeader(group.Name, group.Category, end - i));
+            for (var j = i; j < end; j++) rows.Add(list[j]);
+            i = end;
+        }
+
+        SoundRows = rows;
+    }
 
     public Visibility SoundPanelVisibility => ActiveTab == EAssetType.Sound ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SelectedSoundVisibility => SelectedSound is null ? Visibility.Collapsed : Visibility.Visible;
@@ -90,7 +131,7 @@ public partial class MainViewModel
             Application.Current.Dispatcher.Invoke(() =>
             {
                 Sounds = new ObservableCollection<SoundItem>(items);
-                OnSoundCategoryChanged(SoundCategory);
+                OnSoundCategoryChanged(SoundCategory); // (and the list)
                 AppLog.Information($"Sound list loaded: {items.Count} sounds.");
             });
         });

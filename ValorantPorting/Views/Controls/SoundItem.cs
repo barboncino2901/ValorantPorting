@@ -16,6 +16,13 @@ public record SoundGroup(string Category, string Name)
     public override string ToString() => Name;
 }
 
+// A heading row in the Sounds list, above its group's sounds (the list is flat: WPF's own grouping is far too slow
+// for ~21,000 sounds)
+public record SoundHeader(string Name, string Category, int Count)
+{
+    public string CountText => $"{Category}  ·  {Count}";
+}
+
 // One sound in the Sounds tab, e.g. "Charging handle back (1st person)" under "Vandal · RGX 11z Pro"; found by
 // its full readable name or Riot's.
 public partial class SoundItem : ObservableObject, ILibraryItem
