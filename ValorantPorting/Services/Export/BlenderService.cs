@@ -44,13 +44,16 @@ public class BlenderService : SocketServiceBase
     // upperPsaPath: the upper-body half of an upper/lower body pair; Blender merges it with psaPath (the lower body)
     // repeat: how many times looping animations (runs, idles) play in a row; lowerLoops/upperLoops: which ones loop
     // sequencePaths: all clips of a montage that plays several in a row (psaPath is the first), joined in Blender
+    // sounds: the game's sounds for it, each placed at its moment (the add-on adds them to the Video Sequencer)
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
-        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null) =>
-        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths)));
+        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null,
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null) =>
+        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths, sounds: sounds)));
 
     // sceneTarget: in a scene, which armature it goes on ("agent:TP", "agent:FP", "agent:CS" or "gun")
     public static object AnimationMessage(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
-        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null) => new
+        bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null,
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null) => new
     {
         AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
         SceneTarget = sceneTarget,
@@ -59,7 +62,8 @@ public class BlenderService : SocketServiceBase
             Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
             UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
             Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
-            SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList()
+            SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList(),
+            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name }).ToList()
         }
     };
 
@@ -70,6 +74,16 @@ public class BlenderService : SocketServiceBase
         {
             AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
             Data = new { Name = name, Type = "Map", MapPath = usdPath.Replace("\\", "/"), MaterialsPath = materialsPath?.Replace("\\", "/") }
+        }));
+    }
+
+    // a sound from the Sounds tab, added at Blender's current frame
+    public static void SendSound(string name, IReadOnlyList<string> wavPaths)
+    {
+        SendMessage(JsonConvert.SerializeObject(new
+        {
+            AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
+            Data = new { Name = name, Type = "Sound", Paths = wavPaths.Select(p => p.Replace("\\", "/")).ToList() }
         }));
     }
 

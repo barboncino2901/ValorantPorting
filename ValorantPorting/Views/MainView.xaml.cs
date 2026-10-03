@@ -27,6 +27,7 @@ public partial class MainView
         AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
         AppVM.MainVM.AbilitiesLoaded += () => ApplySearchFilter(AbilityList, SearchText);
         AppVM.MainVM.SavedScenesChanged += () => ApplySearchFilter(SceneList, SearchText);
+        AppVM.MainVM.SoundsChanged += () => ApplySearchFilter(SoundList, SearchText);
         AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
         // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
         UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>
@@ -90,6 +91,18 @@ public partial class MainView
             AppVM.MainVM.Styles.Clear();
             AppVM.MainVM.RefreshSavedScenes();
             ApplySearchFilter(SceneList, SearchText);
+            DiscordService.Update(assetType);
+            AppVM.MainVM.CurrentAssetType = assetType;
+            return;
+        }
+
+        if (assetType == EAssetType.Sound)
+        {
+            foreach (var handlerData in handlers.Values) handlerData.PauseState.Pause();
+            AppVM.MainVM.CurrentAsset = null;
+            AppVM.MainVM.Styles.Clear();
+            AppVM.MainVM.LoadSounds();
+            ApplySearchFilter(SoundList, SearchText);
             DiscordService.Update(assetType);
             AppVM.MainVM.CurrentAssetType = assetType;
             return;
@@ -187,6 +200,7 @@ public partial class MainView
                 MapItem map => !hasText || map.Match(text),
                 AbilityItem ability => !hasText || ability.Match(text),
                 SavedSceneRow scene => !hasText || scene.Match(text),
+                SoundItem sound => AppVM.MainVM.MatchesSoundCategory(sound) && (!hasText || sound.Match(text)),
                 _ => true
             };
         };
@@ -294,6 +308,18 @@ public partial class MainView
     {
         if (AppVM.MainVM.SelectedSavedScene is not null)
             AppVM.MainVM.SendSelectedSavedSceneCommand.Execute(null);
+    }
+
+    private void OnSoundVariantDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (AppVM.MainVM.SelectedSoundVariant is not null)
+            AppVM.MainVM.PlaySoundCommand.Execute(null);
+    }
+
+    private void OnSoundDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (AppVM.MainVM.SelectedSound is not null)
+            AppVM.MainVM.SendSoundToBlenderCommand.Execute(null);
     }
 
     private void OnAbilityDoubleClick(object sender, MouseButtonEventArgs e)

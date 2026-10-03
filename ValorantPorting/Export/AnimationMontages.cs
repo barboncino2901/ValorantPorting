@@ -14,7 +14,9 @@ namespace ValorantPorting.Export;
 // few hundred play several animations in a row (character select intro -> idle), which stay as "(sequence)" entries.
 public static class AnimationMontages
 {
-    public record Result(HashSet<AnimationItem> Hidden, Dictionary<AnimationItem, List<AnimationItem>> Sequences);
+    // Wrappers: the hidden montage that plays each animation (its sound cues are on the montage)
+    public record Result(HashSet<AnimationItem> Hidden, Dictionary<AnimationItem, List<AnimationItem>> Sequences,
+        Dictionary<AnimationItem, AnimationItem> Wrappers);
 
     // "(full body)" entries for every _UB/_LB pair in the same folder
     public static List<AnimationItem> FullBodyPairs(IReadOnlyList<AnimationItem> items)
@@ -43,8 +45,10 @@ public static class AnimationMontages
         {
             var hidden = cached.Hidden.Select(p => byPath.GetValueOrDefault(p)).ToList();
             var sequences = cached.Sequences.ToDictionary(s => byPath.GetValueOrDefault(s.Key)!, s => s.Value.Select(p => byPath.GetValueOrDefault(p)!).ToList());
-            if (hidden.All(h => h != null) && sequences.All(s => s.Key != null && s.Value.All(c => c != null)))
-                return new Result(hidden.ToHashSet()!, sequences);
+            var wrappers = (cached.Wrappers ?? []).Select(w => (Clip: byPath.GetValueOrDefault(w.Key), Montage: byPath.GetValueOrDefault(w.Value)))
+                .Where(w => w.Clip != null && w.Montage != null).ToDictionary(w => w.Clip!, w => w.Montage!);
+            if (cached.Wrappers != null && hidden.All(h => h != null) && sequences.All(s => s.Key != null && s.Value.All(c => c != null)))
+                return new Result(hidden.ToHashSet()!, sequences, wrappers);
         }
 
         var result = Classify(provider, items);
@@ -54,7 +58,8 @@ public static class AnimationMontages
             {
                 App.DataFolder.Create();
                 File.WriteAllText(file, JsonConvert.SerializeObject(new CacheFile(stamp, result.Hidden.Select(h => h.ObjectPath).ToList(),
-                    result.Sequences.ToDictionary(s => s.Key.ObjectPath, s => s.Value.Select(c => c.ObjectPath).ToList()))));
+                    result.Sequences.ToDictionary(s => s.Key.ObjectPath, s => s.Value.Select(c => c.ObjectPath).ToList()),
+                    result.Wrappers.ToDictionary(w => w.Key.ObjectPath, w => w.Value.ObjectPath))));
             }
             catch (Exception)
             {
@@ -65,7 +70,8 @@ public static class AnimationMontages
         return result;
     }
 
-    private record CacheFile(string Stamp, List<string> Hidden, Dictionary<string, List<string>> Sequences);
+    private record CacheFile(string Stamp, List<string> Hidden, Dictionary<string, List<string>> Sequences,
+        Dictionary<string, string>? Wrappers); // null in caches from before sounds: sorted again
 
     private static CacheFile? Read(string file)
     {
@@ -88,6 +94,7 @@ public static class AnimationMontages
 
         var hidden = new HashSet<AnimationItem>();
         var sequences = new Dictionary<AnimationItem, List<AnimationItem>>();
+        var wrappers = new Dictionary<AnimationItem, AnimationItem>();
         foreach (var montageItem in items.Where(i => i.Kind == EAnimationKind.Single && MontageName.IsMatch(i.Name)))
         {
             try
@@ -107,6 +114,10 @@ public static class AnimationMontages
                     distinct.Any(c => c!.Name.EndsWith("_LB")) && distinct.Count == 2)
                 {
                     hidden.Add(montageItem);
+                    // "…_Montage" over "…_Montage2" when several play the same animation
+                    foreach (var clip in distinct)
+                        if (!wrappers.TryGetValue(clip!, out var known) || montageItem.Name.Length < known.Name.Length)
+                            wrappers[clip!] = montageItem;
                     continue;
                 }
 
@@ -120,7 +131,7 @@ public static class AnimationMontages
             }
         }
 
-        return new Result(hidden, sequences);
+        return new Result(hidden, sequences, wrappers);
     }
 
     private static readonly System.Text.RegularExpressions.Regex MontageName =

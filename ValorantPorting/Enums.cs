@@ -25,6 +25,7 @@ public enum EAssetType
     [Description("Animations")] Animation, // must stay in tab order (tab index == enum value)
     [Description("Maps")] Map,
     [Description("Animation Presets")] Scene, // saved scenes (animation presets)
+    [Description("Sounds")] Sound, // the game's sound effects and voice lines
     [Description("Mesh")] Mesh
 }
 

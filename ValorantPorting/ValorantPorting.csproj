@@ -5,7 +5,7 @@
         <Nullable>enable</Nullable>
         <UseWPF>true</UseWPF>
         <ApplicationIcon>ValorantPorting.ico</ApplicationIcon>
-        <Version>1.11.1</Version>
+        <Version>1.12.0</Version>
         <RootNamespace>ValorantPorting</RootNamespace>
         <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     </PropertyGroup>
@@ -43,6 +43,9 @@
         <!-- CUE4Parse-Natives.dll (animation decompression), built from CUE4Parse/CUE4Parse-Natives (see the workflow);
              the app unpacks it next to itself, so it isn't a separate download -->
         <EmbeddedResource Include="Natives\CUE4Parse-Natives.dll" LogicalName="CUE4Parse-Natives.dll" Condition="Exists('Natives\CUE4Parse-Natives.dll')" />
+        <!-- vgmstream (github.com/vgmstream/vgmstream, ISC license): turns the game's Wwise sounds into .wav; the release
+             workflow downloads a pinned build, the app unpacks it into .data the first time a sound is used -->
+        <EmbeddedResource Include="Natives\vgmstream-win64.zip" LogicalName="vgmstream.zip" Condition="Exists('Natives\vgmstream-win64.zip')" />
         <Resource Include="Resources\Backpack.png"/>
         <Resource Include="Resources\Dance.png"/>
         <Resource Include="Resources\Glider.png"/>

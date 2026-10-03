@@ -63,6 +63,8 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
     public AnimationItem? UpperHalf { get; private set; }
     public AnimationItem? LowerHalf { get; private set; }
     public IReadOnlyList<AnimationItem> Clips { get; private set; } = [];
+    // the (hidden) montage that plays this animation in game: its sound cues are usually there
+    public AnimationItem? Wrapper { get; set; }
 
     private void AddToTitle(string text)
     {

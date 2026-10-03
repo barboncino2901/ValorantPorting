@@ -40,6 +40,13 @@ jobs:
           New-Item -ItemType Directory -Force ./ValorantPorting/bin/Publish | Out-Null
           Copy-Item natives-build/Release/CUE4Parse-Natives.dll ./ValorantPorting/bin/Publish/
 
+      - name: vgmstream (game sounds to .wav; built into the app)
+        run: |
+          # a fixed release, checked against its known SHA-256 so a changed download can't slip into the app
+          Invoke-WebRequest "https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip" -OutFile ./ValorantPorting/Natives/vgmstream-win64.zip
+          $hash = (Get-FileHash ./ValorantPorting/Natives/vgmstream-win64.zip -Algorithm SHA256).Hash
+          if ($hash -ne "6C4A8A3813864FEFED081BBD337DBC0AD93BF88E0B92F5DB98D7AB258B22DC6C") { throw "vgmstream download doesn't match: $hash" }
+
       - name: .NET Publish
         run: dotnet publish ValorantPorting -c Release --no-self-contained -r win-x64 -f net10.0-windows -o "./ValorantPorting/bin/Publish/" -p:PublishReadyToRun=false -p:PublishSingleFile=true -p:DebugType=None -p:GenerateDocumentationFile=false -p:DebugSymbols=false -p:AssemblyVersion=${{ github.event.inputs.appVersion }} -p:FileVersion=${{ github.event.inputs.appVersion }}
 

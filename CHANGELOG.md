@@ -4,6 +4,23 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.12.0
+
+**After this update: close Blender and open it again** (the add-on gets sounds support).
+
+- **Sounds tab**: every sound effect and voice line in the game (about 21,000), with names you can read and search
+  in plain words: "vandal reload", "jett dash", "spike defuse", "sage resurrection". Click one to listen, pick
+  one of its versions (the game plays one of a few at random, some are 1st or 3rd person), **Save as .wav** for
+  any video editor, or **Send to Blender** to put it on the timeline at the current frame. Voice lines come in the
+  language your game is installed in.
+- **Animations come with their sounds**: animations that make sounds in game (equips, reloads, inspects, ability
+  casts, mostly 1st person) bring them along, each at its exact moment, in Blender's Video Sequencer. Works in scenes
+  and presets too. "Include game sounds" in the Animations tab turns it off. Footsteps aren't included: the game
+  adds them while playing, they aren't part of the animations.
+- To hear sounds in a render: Output Properties > Encoding, pick an audio codec.
+- Light on memory: sounds are only read when you use them (the sound system starts in about 0.3 s and lets go
+  of its memory after 2 minutes without sounds).
+
 ## 1.11.1
 
 - **Fix**: a gun skin added to the scene right after opening the Weapon Skins tab could land in the scene's Agent

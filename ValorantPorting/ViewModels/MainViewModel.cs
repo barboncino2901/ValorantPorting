@@ -164,7 +164,8 @@ public partial class MainViewModel : ObservableObject
             var upperPath = await Task.Run(() => AnimationExport.ExportPsa(upper));
             if (lowerPath is null || upperPath is null) return;
 
-            BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop);
+            var sounds = await SoundsFor(upper, lower);
+            BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop, sounds: sounds);
             UserLibrary.AddRecent(upper.LibraryId);
             UserLibrary.AddRecent(lower.LibraryId);
             AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
@@ -334,6 +335,30 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    // the game's sounds (gun handling, ability casts, ...) come with animations that have them
+    public bool IncludeAnimationSounds
+    {
+        get => !AppSettings.Current.SkipAnimationSounds;
+        set
+        {
+            AppSettings.Current.SkipAnimationSounds = !value;
+            OnPropertyChanged();
+        }
+    }
+
+    // the .wav files and moments of an animation's sounds (none when switched off, or it has none)
+    // (a mix: the upper body's sounds first, else the legs')
+    public async Task<List<AnimationSounds.Placed>?> SoundsFor(AnimationItem item, AnimationItem? lower = null)
+    {
+        if (!IncludeAnimationSounds) return null;
+        var provider = AppVM.CUE4ParseVM.Provider;
+        var sources = AnimationSounds.SourcesOf(item);
+        if (lower is not null) sources.AddRange(AnimationSounds.SourcesOf(lower));
+        var sounds = await Task.Run(() => AnimationSounds.Prepare(provider, sources, AnimationSounds.IsFirstPerson(item)));
+        if (sounds.Count > 0) AppLog.Information($"{item.Title}: {sounds.Count} game sound(s) included (Blender: Video Sequencer).");
+        return sounds.Count > 0 ? sounds : null;
+    }
+
     public Visibility FirstPersonCameraVisibility =>
         ModelVisibility == Visibility.Visible && SelectedModels.HasFlag(ECharacterModels.FirstPerson) ? Visibility.Visible : Visibility.Collapsed;
 
@@ -412,7 +437,7 @@ public partial class MainViewModel : ObservableObject
     // The right column: the picked agent/skin's options, or the panel of the Animations / Abilities / Maps tab
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(AnimationPanelVisibility), nameof(AbilityPanelVisibility), nameof(MapPanelVisibility),
-        nameof(ScenePanelVisibility), nameof(AssetHintVisibility))]
+        nameof(ScenePanelVisibility), nameof(SoundPanelVisibility), nameof(AssetHintVisibility))]
     private EAssetType activeTab;
     public Visibility ScenePanelVisibility => ActiveTab == EAssetType.Scene ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AnimationPanelVisibility => ActiveTab == EAssetType.Animation ? Visibility.Visible : Visibility.Collapsed;
@@ -848,6 +873,7 @@ public partial class MainViewModel : ObservableObject
             Application.Current.Dispatcher.Invoke(() =>
             {
                 foreach (var (montage, clips) in result.Sequences) montage.MakeSequence(clips);
+                foreach (var (clip, montage) in result.Wrappers) clip.Wrapper = montage;
                 Animations = new ObservableCollection<AnimationItem>(items.Where(i => !result.Hidden.Contains(i)));
                 AnimationFilterChanged?.Invoke();
                 AppLog.Information($"Animation list: {result.Hidden.Count} duplicate montages hidden, {result.Sequences.Count} sequences.");
@@ -887,8 +913,9 @@ public partial class MainViewModel : ObservableObject
                 paths.Add(path);
             }
 
+            var sounds = await SoundsFor(item);
             BlenderService.SendAnimation(item.Name, paths[0], repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop,
-                sequencePaths: paths.Count > 1 ? paths : null);
+                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds);
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));

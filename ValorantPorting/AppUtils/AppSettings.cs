@@ -28,6 +28,8 @@ public partial class AppSettings : ObservableObject
 
     [ObservableProperty] private bool firstPersonCamera; // add a camera on the 1st person arms' "Camera" bone
 
+    [ObservableProperty] private bool skipAnimationSounds; // don't send the game's sounds with animations (on by default)
+
     public static void Load()
     {
         if (File.Exists(FilePath.FullName))

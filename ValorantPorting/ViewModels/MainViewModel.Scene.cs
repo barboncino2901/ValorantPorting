@@ -429,7 +429,8 @@ public partial class MainViewModel
             var lowerPath = await Task.Run(() => AnimationExport.ExportPsa(lower!));
             var upperPath = await Task.Run(() => AnimationExport.ExportPsa(upper));
             if (lowerPath is null || upperPath is null) return null;
-            return BlenderService.AnimationMessage(animation.Name, lowerPath, upperPath, animation.Repeat, lower!.IsLoop, upper.IsLoop, sceneTarget: target);
+            return BlenderService.AnimationMessage(animation.Name, lowerPath, upperPath, animation.Repeat, lower!.IsLoop, upper.IsLoop, sceneTarget: target,
+                sounds: await AppVM.MainVM.SoundsFor(upper, lower));
         }
 
         var item = animation.Item!;
@@ -441,6 +442,6 @@ public partial class MainViewModel
         }
 
         return BlenderService.AnimationMessage(item.Name, paths[0], repeat: animation.Repeat, lowerLoops: item.IsLoop,
-            sequencePaths: paths.Count > 1 ? paths : null, sceneTarget: target);
+            sequencePaths: paths.Count > 1 ? paths : null, sceneTarget: target, sounds: await AppVM.MainVM.SoundsFor(item));
     }
 }

@@ -19,7 +19,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 10, 1),
+    "version": (1, 11, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -732,9 +732,74 @@ def show_message(message, title="Valorant Porting", icon='INFO'):
 
 def import_animation(data, armature=None):
     """armature: where it goes (a scene says so); otherwise the selected armature"""
+    armature = armature or find_selected_armature()
+    _apply_animation(data, armature)
+    if armature is not None and armature.animation_data and armature.animation_data.action:
+        add_animation_sounds(data, armature.animation_data.action)
+
+
+def add_animation_sounds(data, action):
+    """The game's sounds for this animation (gun handling, ability casts, ...) as sound strips in the Video Sequencer,
+    each at its moment of the animation; they play with the timeline and go into renders with audio."""
+    sounds = data.get("Sounds") or []
+    if not sounds:
+        return
+    scene = bpy.context.scene
+    editor = scene.sequence_editor or scene.sequence_editor_create()
+    strips = getattr(editor, "strips", None)
+    if strips is None:
+        strips = editor.sequences  # Blender before 4.4
+    fps = scene.render.fps / scene.render.fps_base
+    start = action.frame_range[0]
+
+    # the same sound at the same moment only once (1st person arms and the gun often share a cue)
+    def key(path, frame):
+        return os.path.normcase(os.path.abspath(path.replace(LONG_PATH_PREFIX, ""))), int(frame)
+    existing = {key(bpy.path.abspath(s.sound.filepath), s.frame_start) for s in strips if s.type == 'SOUND' and s.sound}
+
+    added = 0
+    for sound in sounds:
+        path = disk_path(sound.get("Path") or "")
+        if not path or not os.path.exists(path):
+            continue
+        frame = int(round(start + float(sound.get("Time") or 0) * fps))
+        if key(path, frame) in existing:
+            continue
+        existing.add(key(path, frame))
+        try:
+            strip = strips.new_sound(name=sound.get("Name") or os.path.basename(path), filepath=path, channel=1, frame_start=frame)
+        except Exception as e:
+            Log.error(f"Could not add the sound {path}: {e}")
+            continue
+        # a free channel: sounds that overlap go on the rows above
+        def taken(row):  # (this module has its own any())
+            return next((o for o in strips if o != strip and o.channel == row and o.frame_final_start < strip.frame_final_end
+                         and strip.frame_final_start < o.frame_final_end), None) is not None
+        channel = 1
+        while taken(channel):
+            channel += 1
+        strip.channel = channel
+        added += 1
+    if added:
+        Log.information(f"Added {added} sound(s) for {data.get('Name')} (Video Sequencer)")
+
+
+def import_sound(data):
+    """A sound from the app's Sounds tab: a sound strip at the current frame of the timeline."""
+    scene = bpy.context.scene
+    sounds = [{"Path": p, "Name": data.get("Name"), "Time": 0} for p in (data.get("Paths") or [])]
+    if not sounds:
+        return
+
+    class Here:  # add_animation_sounds places sounds from an action's first frame: here, the current frame
+        frame_range = (scene.frame_current, scene.frame_current)
+    add_animation_sounds({"Name": data.get("Name"), "Sounds": sounds}, Here)
+    show_message(f"{data.get('Name')}: added to the Video Sequencer at frame {scene.frame_current}.", icon='INFO')
+
+
+def _apply_animation(data, armature):
     name = data.get("Name")
     path = data.get("AnimationPath")
-    armature = armature or find_selected_armature()
     if armature is None:
         Log.error(f"No armature selected for animation {name}")
         show_message("Select the agent or gun armature first, then apply the animation again.", icon='ERROR')
@@ -1284,6 +1349,9 @@ def import_response(response, holder=None, use_selection=True):
         return
     if (response.get("Data") or {}).get("Type") == "Map":
         import_map(response.get("Data"), response.get("AssetsRoot") or "")
+        return
+    if (response.get("Data") or {}).get("Type") == "Sound":
+        import_sound(response.get("Data"))
         return
     if (response.get("Data") or {}).get("Parts") is None:
         # something a newer app sends that this add-on doesn't know

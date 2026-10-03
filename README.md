@@ -19,6 +19,10 @@ This is a community-updated fork of [Ka1serM/ValorantPorting](https://github.com
   "Send scene to Blender": the agent comes in with the gun in their hand and both animated, in one go (3rd or 1st person).
 - **Animation presets**: save the scene bar as a preset (Presets tab) and send it again in one click.
 - **Rename animations**: give any animation your own name (right-click > Rename); search still finds the original.
+- **Sounds tab**: the game's ~21,000 sound effects and voice lines with readable, searchable names ("vandal reload",
+  "jett dash"): listen, save as .wav, or put them on Blender's timeline.
+- **Animation sounds**: animations that make sounds in game (equips, reloads, inspects, ability casts) bring them into
+  Blender's Video Sequencer, each at its moment.
 - **1st person camera**: exporting an agent's 1st person arms can add a camera at the player's eyes, with Valorant's
   field of view, that follows the animations.
 - **Maps tab** (experimental): exports a whole map (USD) and imports it into Blender with Valorant's environment
@@ -89,6 +93,8 @@ Blender is still running an older add-on, the app shows a bar saying so.
 - **Maps**: pick a map and export it. The first export of a map takes a while and a few GB of disk space;
   Blender is busy for 10-30 seconds while it imports.
 - **Favorites**: right-click > Add to favorites; use the "Show:" dropdown next to Search.
+- **Sounds**: search, click to listen, then Save as .wav or Send to Blender (it goes in the Video Sequencer at the
+  current frame). To hear sounds in a render, pick an audio codec in Output Properties > Encoding.
 
 ## Building from source
 Clone the repository with its submodules:
@@ -122,5 +128,6 @@ The GitHub Actions workflow ("ValorantPorting Builder", run manually) builds all
 * PSK/PSA importer based on [blender3d_import_psk_psa](https://github.com/Befzz/blender3d_import_psk_psa)
   by Darknet, flufy3d, camg188 and befzz (GPL 2.0 or later)
 * Game data names from [valorant-api.com](https://valorant-api.com); mappings from [uedb.dev](https://uedb.dev)
+* Sound conversion by [vgmstream](https://github.com/vgmstream/vgmstream) (ISC license), built into the app
 
 Valorant and all its assets belong to Riot Games. This project isn't affiliated with or endorsed by Riot Games.
