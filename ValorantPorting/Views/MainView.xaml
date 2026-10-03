@@ -309,23 +309,50 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <DockPanel Grid.Row="0" Margin="{adonisUi:Space 1}">
-                                <TextBlock DockPanel.Dock="Left" Text="Show:" VerticalAlignment="Center" Margin="0 0 8 0" />
-                                <ComboBox ItemsSource="{Binding SoundCategories}" SelectedItem="{Binding SoundCategory, Mode=TwoWay}" />
-                            </DockPanel>
+                            <Grid Grid.Row="0" Margin="{adonisUi:Space 1}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="1.4*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Show:" VerticalAlignment="Center" Margin="0 0 8 0" />
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding SoundCategories}" SelectedItem="{Binding SoundCategory, Mode=TwoWay}" />
+                                <TextBlock Grid.Column="2" Text="Only:" VerticalAlignment="Center" Margin="12 0 8 0" Visibility="{Binding SoundGroupVisibility}" />
+                                <ComboBox Grid.Column="3" ItemsSource="{Binding SoundGroups}" SelectedItem="{Binding SoundGroup, Mode=TwoWay}"
+                                          Visibility="{Binding SoundGroupVisibility}"
+                                          ToolTip="One gun skin, ability, agent or map of this category" />
+                            </Grid>
                             <ListBox Grid.Row="1" x:Name="SoundList" ItemsSource="{Binding Sounds}"
                                      SelectedItem="{Binding SelectedSound, Mode=TwoWay}"
                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                     VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                                      MouseDoubleClick="OnSoundDoubleClick" ItemContainerStyle="{StaticResource LibraryItemContainer}">
+                                <ListBox.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate>
+                                                <Border Background="#262B35" CornerRadius="3" Padding="8 4" Margin="0 8 0 2">
+                                                    <TextBlock>
+                                                        <Run Text="{Binding Name.Name, Mode=OneWay}" FontWeight="Bold" FontSize="13" />
+                                                        <Run Text="{Binding Name.Category, Mode=OneWay, StringFormat='   {0}'}" FontSize="11"
+                                                             Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
+                                                        <Run Text="{Binding ItemCount, Mode=OneWay, StringFormat='   ({0})'}" FontSize="11"
+                                                             Foreground="{DynamicResource {x:Static adonisUi:Brushes.DisabledForegroundBrush}}" />
+                                                    </TextBlock>
+                                                </Border>
+                                            </DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </ListBox.GroupStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Margin="2">
+                                        <StackPanel Margin="10 1 2 1" ToolTip="{Binding Details}">
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="★ " Foreground="Gold" FontWeight="SemiBold"
                                                            Visibility="{Binding IsFavorite, Converter={StaticResource FavoriteVisibility}}" />
-                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Short}" />
                                             </StackPanel>
-                                            <TextBlock Text="{Binding Details}" FontSize="11" Opacity="0.6" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>

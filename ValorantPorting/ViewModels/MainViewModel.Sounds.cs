@@ -29,10 +29,26 @@ public partial class MainViewModel
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(SoundLanguageVisibility))] private string? soundLanguage;
     [ObservableProperty] private string soundStatus = "";
 
-    public string[] SoundCategories { get; } = ["All sounds", "Weapons", "Agents", "Voice lines", "Maps", "Interface", "Game modes", "Music", "Other"];
-    [ObservableProperty] private string soundCategory = "All sounds";
+    private const string AllSounds = "All sounds", AllGroups = "All";
+    public string[] SoundCategories { get; } = [AllSounds, .. SoundNamer.Categories];
+    [ObservableProperty] private string soundCategory = AllSounds;
     public event Action? SoundsChanged;
-    partial void OnSoundCategoryChanged(string value) => SoundsChanged?.Invoke();
+
+    // second filter: one gun skin, ability, map, ... of the category ("Vandal · RGX 11z Pro", "Raze · Boom Bot (C)")
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SoundGroupVisibility))] private List<string> soundGroups = [AllGroups];
+    [ObservableProperty] private string soundGroup = AllGroups;
+    public Visibility SoundGroupVisibility => SoundGroups.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+
+    partial void OnSoundCategoryChanged(string value)
+    {
+        SoundGroups = value == AllSounds
+            ? [AllGroups]
+            : [AllGroups, .. Sounds.Where(s => s.Category == value).Select(s => s.Group.Name).Distinct()];
+        if (SoundGroup != AllGroups) SoundGroup = AllGroups; // (filters again)
+        else SoundsChanged?.Invoke();
+    }
+
+    partial void OnSoundGroupChanged(string value) => SoundsChanged?.Invoke();
 
     public Visibility SoundPanelVisibility => ActiveTab == EAssetType.Sound ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SelectedSoundVisibility => SelectedSound is null ? Visibility.Collapsed : Visibility.Visible;
@@ -44,8 +60,8 @@ public partial class MainViewModel
     private readonly MediaPlayer player = new();
     private int soundSelection; // picks made while an earlier one still loads are what count
 
-    public bool MatchesSoundCategory(SoundItem item) => SoundCategory == "All sounds" || item.Category == SoundCategory ||
-        SoundCategory == "Other" && !SoundCategories.Contains(item.Category);
+    public bool MatchesSoundCategory(SoundItem item) =>
+        (SoundCategory == AllSounds || item.Category == SoundCategory) && (SoundGroup == AllGroups || item.Group.Name == SoundGroup);
 
     public void LoadSounds()
     {
@@ -65,13 +81,16 @@ public partial class MainViewModel
                 AppLog.Warning($"Sounds: ability names unavailable ({ex.Message}).");
             }
 
-            var maps = Export.SoundNamer.MapCodenames(ValorantNames.Maps.Select(m => (m.Name, m.MapUrl)));
+            var maps = SoundNamer.MapCodenames(ValorantNames.Maps.Select(m => (m.Name, m.MapUrl)));
+            // a group's sounds together, groups in category order ("Default" first among kill sounds and skins)
             var items = GameSounds.List(provider).Select(e => new SoundItem(e, abilities, maps))
-                .OrderBy(i => i.Category == "Other").ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase).ToList();
+                .OrderBy(i => i.CategoryRank)
+                .ThenBy(i => i.Group.Name is "Default" ? "" : i.Group.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(i => i.Short, StringComparer.OrdinalIgnoreCase).ToList();
             Application.Current.Dispatcher.Invoke(() =>
             {
                 Sounds = new ObservableCollection<SoundItem>(items);
-                SoundsChanged?.Invoke();
+                OnSoundCategoryChanged(SoundCategory);
                 AppLog.Information($"Sound list loaded: {items.Count} sounds.");
             });
         });

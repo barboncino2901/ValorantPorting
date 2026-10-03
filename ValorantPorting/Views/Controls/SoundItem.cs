@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ValorantPorting.AppUtils;
@@ -8,18 +9,31 @@ using ValorantPorting.Services.Endpoints;
 
 namespace ValorantPorting.Views.Controls;
 
-// One sound in the Sounds tab: "Vandal: Charging handle back (1st person)", found by its readable name or Riot's.
+// A heading of the Sounds list: one gun skin, one ability, one map, ... (a record: equal by value, so the list
+// groups by it)
+public record SoundGroup(string Category, string Name)
+{
+    public override string ToString() => Name;
+}
+
+// One sound in the Sounds tab, e.g. "Charging handle back (1st person)" under "Vandal · RGX 11z Pro"; found by
+// its full readable name or Riot's.
 public partial class SoundItem : ObservableObject, ILibraryItem
 {
     // abilities / maps: see SoundNamer.Describe
-    public SoundItem(GameSounds.Entry entry, SoundAbilities? abilities = null, System.Collections.Generic.IReadOnlyDictionary<string, string>? maps = null)
+    public SoundItem(GameSounds.Entry entry, SoundAbilities? abilities = null, IReadOnlyDictionary<string, string>? maps = null)
     {
         EventPath = entry.EventPath;
         EventName = entry.EventName;
-        (Title, Category) = SoundNamer.Describe(entry.EventName, entry.Folder, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins,
+        var name = SoundNamer.Describe(entry.EventName, entry.Folder, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins,
             abilities, maps);
-        Details = $"{Category}  ·  {EventName}";
-        searchText = $"{Title} {EventName} {Category} {entry.Folder}".Replace('_', ' ');
+        Title = name.Title;
+        Short = name.Short;
+        Category = name.Category;
+        Group = new SoundGroup(name.Category, name.Group);
+        CategoryRank = Array.IndexOf(SoundNamer.Categories, Category) is var rank and >= 0 ? rank : SoundNamer.Categories.Length;
+        Details = $"{Category}  ·  {name.Group}  ·  {EventName}";
+        searchText = $"{Title} {name.Group} {EventName} {Category} {entry.Folder}".Replace('_', ' ');
         isFavorite = UserLibrary.IsFavorite(LibraryId);
     }
 
@@ -27,15 +41,18 @@ public partial class SoundItem : ObservableObject, ILibraryItem
 
     public string EventPath { get; } // "ShooterGame/Content/WwiseAudio/Events/.../Play_X"
     public string EventName { get; } // "Play_Wp_AK47_Chg_Hndl_Back_FP"
-    public string Title { get; }
-    public string Category { get; }
+    public string Title { get; }     // "Vandal · RGX 11z Pro: Charging handle back (1st person)"
+    public string Short { get; }     // "Charging handle back (1st person)"
+    public string Category { get; }  // "Weapons"
+    public SoundGroup Group { get; } // Weapons / "Vandal · RGX 11z Pro"
+    public int CategoryRank { get; }
     public string Details { get; }
 
     [ObservableProperty] private bool isFavorite;
     public string LibraryId => "sound:" + EventPath;
     public int RecentRank => UserLibrary.RecentRank(LibraryId);
 
-    // every search word in the name, Riot's name or the folder: "vandal reload", "jett dash", "spike defuse"
+    // every search word in the name, its group, Riot's name or the folder: "vandal reload", "raze boom bot", "kill 5"
     public bool Match(string filter) =>
         filter.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .All(word => searchText.Contains(word, StringComparison.OrdinalIgnoreCase));

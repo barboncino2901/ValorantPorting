@@ -27,7 +27,13 @@ public partial class MainView
         AppVM.MainVM.AnimationFilterChanged += () => ApplySearchFilter(AnimationList, SearchText);
         AppVM.MainVM.AbilitiesLoaded += () => ApplySearchFilter(AbilityList, SearchText);
         AppVM.MainVM.SavedScenesChanged += () => ApplySearchFilter(SceneList, SearchText);
-        AppVM.MainVM.SoundsChanged += () => ApplySearchFilter(SoundList, SearchText);
+        AppVM.MainVM.SoundsChanged += () =>
+        {
+            // under headings: one per gun skin, ability, map, ... (the list is sorted so a group's sounds are together)
+            if (System.Windows.Data.CollectionViewSource.GetDefaultView(SoundList.ItemsSource) is { } view && view.GroupDescriptions.Count == 0)
+                view.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(SoundItem.Group)));
+            ApplySearchFilter(SoundList, SearchText);
+        };
         AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
         // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
         UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>
