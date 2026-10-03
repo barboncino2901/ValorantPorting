@@ -4,6 +4,12 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.11.1
+
+- **Fix**: a gun skin added to the scene right after opening the Weapon Skins tab could land in the scene's Agent
+  slot (the agent then had nothing to play the animation on). The upgrade level and model pickers could also show
+  the wrong options while a tab was still loading.
+
 ## 1.11.0
 
 - **Animation presets**: fill the scene bar (agent, gun skin, animations), click **Save as preset...** and give it

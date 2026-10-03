@@ -59,10 +59,15 @@ public partial class MainViewModel
     [RelayCommand]
     public void AddAssetToScene()
     {
-        if (currentAsset is null || CurrentAssetType is not (EAssetType.Character or EAssetType.Weapon)) return;
-        var asset = new SceneAsset(currentAsset, CurrentAssetType, GetSelectedStyles(), GetExportChoices(),
+        if (currentAsset is null) return;
+        // agent or gun skin: from the list the item is in (not the tab state, which can lag while a tab loads)
+        EAssetType? type = currentAsset is AssetSelectorItem tile
+            ? Outfits.Contains(tile) ? EAssetType.Character : Weapons.Contains(tile) ? EAssetType.Weapon : null
+            : CurrentAssetType is EAssetType.Character or EAssetType.Weapon ? CurrentAssetType : null;
+        if (type is not { } kind) return;
+        var asset = new SceneAsset(currentAsset, kind, GetSelectedStyles(), GetExportChoices(),
             currentAsset.DisplayName + ExportNameSuffix());
-        if (CurrentAssetType == EAssetType.Character) SceneAgent = asset;
+        if (kind == EAssetType.Character) SceneAgent = asset;
         else SceneGun = asset;
         AppLog.Information($"Scene: {asset.Name} added.");
     }

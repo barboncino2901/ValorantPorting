@@ -131,6 +131,11 @@ public partial class MainView
             return;
         }
 
+        // set right away: the tab's first load takes a while, and a tile clicked meanwhile must already count as this
+        // tab's (a skin added to the scene as the agent, the wrong pickers shown)
+        AppVM.MainVM.CurrentAssetType = assetType;
+        DiscordService.Update(assetType);
+
         foreach (var (handlerType, handlerData) in handlers)
             if (handlerType == assetType)
                 handlerData.PauseState.Unpause();
@@ -138,9 +143,6 @@ public partial class MainView
                 handlerData.PauseState.Pause();
 
         if (!handlers[assetType].HasStarted) await handlers[assetType].Execute();
-
-        DiscordService.Update(assetType);
-        AppVM.MainVM.CurrentAssetType = assetType;
     }
 
     private async void OnStyleSelectionChanged(object sender, SelectionChangedEventArgs e)
