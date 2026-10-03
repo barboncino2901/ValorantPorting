@@ -30,6 +30,20 @@ running the release workflow with that version.
   shots (with the reload cycle at its exact moments).
 - Walks, runs and aims only get the held ability's loop; footsteps aren't included (the game adds them while
   playing, except for Skye's wolf, whose run sounds come along).
+- **Voice lines where the game says them**: one-step ultimates on the equip (Jett, Neon, Chamber), two-step ones on
+  the second step (Breach as he fires, Yoru as he activates), Raze's equip line on the equip and her cast line on
+  the fire; never on re-equips. Applying a new animation removes the previous one's sounds from that model.
+- **Abilities in the hands**: select an agent in Blender before sending an ability model and it goes where the agent
+  holds it, like guns: Chamber's Headhunter and Tour De Force, Raze's launcher, KAY/O's knife in the hand, Jett's
+  Blade Storm knives on her (1st and 3rd person).
+- **Fix**: searching an agent no longer finds another's animations ("astra ultimate" showed Yoru's Dimensional
+  Drift, because Astra's codename is "Rift").
+- **Fix**: the Kuronami Operator's animations show as Kuronami (Riot's files spell it "Ninjia") and are found by
+  searching "kuronami".
+- **Fix**: Astra's 1st person arms no longer turn into a rainbow gradient.
+- **Fix**: empty montages (their animation was removed from the game files) aren't listed, instead of failing with
+  "Format produced no files".
+- Blender now says when textures weren't found (they show purple) instead of only printing it to the console.
 - **Fix**: ability animations show the ability's current key. Some agents' files still use old keybinds, so e.g.
   Raze's Boom Bot animations said (E) instead of (C) and her Paint Shells (C) instead of (E).
 - To hear sounds in a render: Output Properties > Encoding, pick an audio codec.

@@ -34,7 +34,7 @@ public static class AnimationNamer
     private static readonly Dictionary<string, string> Words = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ADS"] = "aiming", ["Aimsoffset"] = "aim offset", ["Unequip"] = "unequip", ["Lp"] = "loop",
-        ["Loop"] = "loop", ["Cosmetic"] = "cosmetic", ["Add"] = "additive"
+        ["Loop"] = "loop", ["Cosmetic"] = "cosmetic", ["Add"] = "additive", ["Reldod"] = "reload"
     };
 
     private static readonly Regex WordWithDirection = new("^(.*[a-z])(NE|NW|SE|SW|N|S|E|W)$", RegexOptions.Compiled);
@@ -77,7 +77,12 @@ public static class AnimationNamer
             if (gunName is null && guns.TryGetValue(token, out var foundGun)) { gunName = foundGun; continue; }
             if (Regex.IsMatch(token, "^S[0-9]$")) { previousWasSkin = true; continue; } // S0 = default skin
             // skin lines only apply to weapons, melee and finishers, never to an agent's own animations
-            if (agent is null && skinName is null && skins.TryGetValue(token, out var foundSkin)) { skinName = foundSkin; previousWasSkin = true; continue; }
+            if (agent is null && skinName is null && (skins.TryGetValue(token, out var foundSkin) || (foundSkin = SkinWithTypo(token, skins)) != null))
+            {
+                skinName = foundSkin;
+                previousWasSkin = true;
+                continue;
+            }
 
             // Ability slot right after the skin token: Q, E, C (stored as "4" in file names) or X
             if (agent is not null && ability is null && afterSkin && token is "Q" or "E" or "C" or "X" or "4")
@@ -107,6 +112,36 @@ public static class AnimationNamer
         if (string.IsNullOrWhiteSpace(title)) title = name;
         if (shared && view.Length > 0) view += ", shared";
         return (title, view);
+    }
+
+    // Riot's own typos in file names ("Ninjia2" for the Kuronami folder "Ninja2"): a skin codename one letter off
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string?> typoSkins = new(StringComparer.OrdinalIgnoreCase);
+    private static IReadOnlyDictionary<string, string>? typoSkinsFor;
+
+    private static string? SkinWithTypo(string token, IReadOnlyDictionary<string, string> skins)
+    {
+        if (token.Length < 5 || !token.Any(char.IsLetter)) return null;
+        if (!ReferenceEquals(typoSkinsFor, skins)) { typoSkins.Clear(); typoSkinsFor = skins; }
+        return typoSkins.GetOrAdd(token, t =>
+        {
+            var close = skins.Keys.Where(k => k.Length >= 5 && OneEditApart(t.ToLowerInvariant(), k.ToLowerInvariant())).Select(k => skins[k]).Distinct().ToList();
+            return close.Count == 1 ? close[0] : null;
+        });
+    }
+
+    private static bool OneEditApart(string a, string b)
+    {
+        if (Math.Abs(a.Length - b.Length) > 1 || a == b) return false;
+        int i = 0, j = 0, edits = 0;
+        while (i < a.Length && j < b.Length)
+        {
+            if (a[i] == b[j]) { i++; j++; continue; }
+            if (++edits > 1) return false;
+            if (a.Length > b.Length) i++;
+            else if (a.Length < b.Length) j++;
+            else { i++; j++; }
+        }
+        return edits + (a.Length - i) + (b.Length - j) <= 1;
     }
 
     // Some ability names come in ALL CAPS ("GATECRASH") -> "Gatecrash"

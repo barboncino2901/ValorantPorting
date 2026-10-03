@@ -254,9 +254,19 @@ public static class AnimationSounds
         // voice lines only with the first use (not re-equipping it after a gun, quick / fast equips)
         if (Regex.IsMatch(name, "(Re_?Equip|Quick_?Equip|Fast_?Equip)", RegexOptions.IgnoreCase)) voice = [];
 
+        // an equip's own line when the VO table has one (Raze: "Equip" as the launcher comes out, "Cast" as he fires)
+        else if (voice.Count == 0 && words.Contains("equip") &&
+                 Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } equipFolder &&
+                 AbilityVoiceLine(provider, equipFolder.Groups[1].Value, "Equip", exact: true) is { Count: > 0 } equipLine)
+            voice = equipLine;
+
         // the voice line an ability says when it's used ("Cast" in its VO table): equips, casts, activations
         else if (voice.Count == 0 && words.Any(w => w is "equip" or "cast" or "activate") &&
-            Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } folder)
+                 Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } folder &&
+                 // an ability used in two steps (Yoru's ultimate: equip, then activate) says it on the second
+                 !(words.Contains("equip") && HasCastStep(provider, folder.Groups[1].Value)) &&
+                 // an effect of the ability says it (Breach's ultimate: when he fires): only that effect's animation
+                 !CastLineHasEffect(provider, links, folder.Groups[1].Value))
             voice = AbilityVoiceLine(provider, folder.Groups[1].Value, "Cast");
 
         // not another agent's sounds (effects shared between modes), nor re-equip sounds on anything but a re-equip
@@ -278,8 +288,35 @@ public static class AnimationSounds
     // the sounds of an ability ending (out of ammo, expiring, timing out) don't belong at the start of its animations
     private static readonly Regex Ending = new(@"(Ammo_?Out|Expire|Timeout|Time_Out|_End(_|$)|Deactivate|Destroyed|NoFuel|Stop)", RegexOptions.IgnoreCase);
 
+    // whether one of the ability's effects says its "Cast" voice line itself (then that effect's animation has it)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> castLineEffects = new(StringComparer.OrdinalIgnoreCase);
+    private static bool CastLineHasEffect(IFileProvider provider, Links links, string abilityFolder) =>
+        castLineEffects.GetOrAdd(abilityFolder, folder =>
+        {
+            var line = AbilityVoiceLine(provider, folder, "Cast").FirstOrDefault();
+            if (line is null) return false;
+            var prefix = $"ShooterGame/Content/{folder}/";
+            var table = provider.Files.Keys.FirstOrDefault(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                                                                k.IndexOf('/', prefix.Length) < 0 && k.EndsWith("VOLines.uasset", StringComparison.OrdinalIgnoreCase));
+            if (table is null) return false;
+            // (only effects that play an animation: Raze's ultimate says it from an effect without one)
+            return links.FilesUsing(PackageOf(table)).Where(IsEffect)
+                .Where(effect => links.FilesUsedBy(effect).Any(f => IsMontage(f) || Regex.IsMatch(FileName(f), "^(FP|TP|AB|ABTP)_", RegexOptions.IgnoreCase)))
+                .Any(effect => EffectSounds(provider, effect, true).Any(c => c.Voice && c.EventPath.Equals(line.EventPath, StringComparison.OrdinalIgnoreCase)));
+        });
+
+    // whether the ability folder has animations for using it after equipping it (Cast / Activate)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> castSteps = new(StringComparer.OrdinalIgnoreCase);
+    private static bool HasCastStep(IFileProvider provider, string abilityFolder) =>
+        castSteps.GetOrAdd(abilityFolder, folder =>
+        {
+            var prefix = $"ShooterGame/Content/{folder}/";
+            return provider.Files.Keys.Any(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                                                Regex.IsMatch(FileName(k), @"^(FP|TP)_.*_(Cast|Activate)(_|$)", RegexOptions.IgnoreCase));
+        });
+
     // a row of the ability folder's voice line table ("Characters/Wushu/S0/Ability_X" -> DataTable_Wushu_X_VOLines, "Cast")
-    private static List<Cue> AbilityVoiceLine(IFileProvider provider, string abilityFolder, string row)
+    private static List<Cue> AbilityVoiceLine(IFileProvider provider, string abilityFolder, string row, bool exact = false)
     {
         var prefix = $"ShooterGame/Content/{abilityFolder}/";
         var tableFile = provider.Files.Keys.FirstOrDefault(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
@@ -288,7 +325,9 @@ public static class AnimationSounds
         try
         {
             if (!provider.TryLoadPackageObject(ObjectPathOf(tableFile), out UDataTable table)) return [];
-            var entry = table.RowMap.FirstOrDefault(r => r.Key.Text.Equals(row, StringComparison.OrdinalIgnoreCase)).Value;
+            // "Cast", or Chamber's "CastAlly" / "CastEnemy"
+            var entry = table.RowMap.FirstOrDefault(r => r.Key.Text.Equals(row, StringComparison.OrdinalIgnoreCase)).Value ??
+                        (exact ? null : table.RowMap.FirstOrDefault(r => r.Key.Text.StartsWith(row, StringComparison.OrdinalIgnoreCase)).Value);
             if (entry?.GetOrDefault<FPackageIndex?>("Event") is not { IsNull: false } voiceEvent || EventPath(voiceEvent) is not { } eventPath) return [];
             return [new Cue(Math.Max(0, entry.GetOrDefault<float>("InitialDelay")), eventPath, true)];
         }

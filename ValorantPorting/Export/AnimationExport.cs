@@ -29,6 +29,13 @@ public static class AnimationExport
             return null;
         }
 
+        if (animation is UAnimMontage montage &&
+            montage.SlotAnimTracks.SelectMany(t => t.AnimTrack?.AnimSegments ?? []).All(s => s.AnimReference?.ResolvedObject is null))
+        {
+            AppLog.Warning($"{item.Name} is an empty montage: the animation it played isn't in the game files any more, so there's nothing to export.");
+            return null;
+        }
+
         if (animation is UAnimSequence { AdditiveAnimType: not EAdditiveAnimationType.AAT_None })
         {
             AppLog.Warning($"{item.Name} is an additive animation (e.g. an aim pose). It is meant to be layered on top of " +

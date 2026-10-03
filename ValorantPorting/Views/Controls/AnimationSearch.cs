@@ -14,11 +14,15 @@ public sealed class AnimationSearch
 {
     private readonly string phrase;
     private readonly List<string[]> words; // each typed word with the names it may also stand for
+    // Riot's codenames a typed name stands for ("astra" -> "rift"): whole words only, or "rift" would find Yoru's
+    // "Dimensional Drift"
+    private readonly HashSet<string> wholeWordOnly;
 
-    private AnimationSearch(string phrase, List<string[]> words)
+    private AnimationSearch(string phrase, List<string[]> words, HashSet<string> wholeWordOnly)
     {
         this.phrase = phrase;
         this.words = words;
+        this.wholeWordOnly = wholeWordOnly;
     }
 
     // Riot's direction letters and body halves in file names ("RunN", "Equip_UB")
@@ -43,14 +47,20 @@ public sealed class AnimationSearch
         if (typed.Count == 0) return null;
 
         var internalNames = InternalNames();
+        var wholeWordOnly = new HashSet<string>();
         var words = typed.Select(word =>
         {
             var options = new List<string> { word };
             if (Synonyms.TryGetValue(word, out var synonyms)) options.AddRange(synonyms);
-            if (internalNames.TryGetValue(word, out var names)) options.AddRange(names);
+            if (internalNames.TryGetValue(word, out var names))
+                foreach (var name in names.Where(n => n != word))
+                {
+                    options.Add(name);
+                    wholeWordOnly.Add(name);
+                }
             return options.Distinct().ToArray();
         }).ToList();
-        return new AnimationSearch(phrase, words);
+        return new AnimationSearch(phrase, words, wholeWordOnly);
     }
 
     // Higher is better; null = no match.
@@ -61,9 +71,9 @@ public sealed class AnimationSearch
         var titleOnly = true;
         foreach (var options in words)
         {
-            if (options.Any(o => ContainsWord(title, item.TitleWords, o))) continue;
+            if (options.Any(o => ContainsWord(title, item.TitleWords, o, wholeWordOnly.Contains(o)))) continue;
             titleOnly = false;
-            if (options.Any(o => ContainsWord(item.SearchText, item.NameWords, o))) continue;
+            if (options.Any(o => ContainsWord(item.SearchText, item.AllWords, o, wholeWordOnly.Contains(o)))) continue;
             if (options[0].Length >= 4 && item.AllWords.Any(w => IsTypo(options[0], w)))
             {
                 typos++;
@@ -84,9 +94,9 @@ public sealed class AnimationSearch
         return score;
     }
 
-    // Short options ("n", "ub") only match whole words of the name; longer ones anywhere.
-    private static bool ContainsWord(string text, HashSet<string> wordsOfText, string option) =>
-        option.Length <= 2 ? wordsOfText.Contains(option) : text.Contains(option);
+    // Short options ("n", "ub") and codenames only match whole words of the name; longer ones anywhere.
+    private static bool ContainsWord(string text, HashSet<string> wordsOfText, string option, bool whole = false) =>
+        option.Length <= 2 || whole ? wordsOfText.Contains(option) : text.Contains(option);
 
     private static bool IsTypo(string typed, string word)
     {

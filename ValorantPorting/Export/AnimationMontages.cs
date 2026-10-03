@@ -37,7 +37,7 @@ public static class AnimationMontages
     public static Result ClassifyCached(IFileProvider provider, IReadOnlyList<AnimationItem> items, DateTime? gameUpdate)
     {
         var file = Path.Combine(App.DataFolder.FullName, "montage-sort-cache.json");
-        var stamp = gameUpdate is { } changed ? $"{Services.UpdateService.CurrentVersion}|{changed.Ticks}|{items.Count}" : null;
+        var stamp = gameUpdate is { } changed ? $"{Services.UpdateService.CurrentVersion}|{changed.Ticks}|{items.Count}|empty-hidden" : null;
         var byPath = new Dictionary<string, AnimationItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in items.Where(i => i.Kind == EAnimationKind.Single)) byPath.TryAdd(item.ObjectPath, item);
 
@@ -103,6 +103,12 @@ public static class AnimationMontages
                 var tracks = montage.SlotAnimTracks
                     .Select(t => (t.AnimTrack?.AnimSegments ?? []).Select(s => s.AnimReference?.ResolvedObject?.GetPathName()).ToList())
                     .Where(t => t.Count > 0).ToList();
+                // nothing left to play (Riot removed its animation from the files): not worth listing
+                if (tracks.Count > 0 && tracks.SelectMany(t => t).All(p => p is null))
+                {
+                    hidden.Add(montageItem);
+                    continue;
+                }
                 if (tracks.Count == 0 || tracks.SelectMany(t => t).Any(p => p is null)) continue;
 
                 var clips = tracks.SelectMany(t => t).Select(p => byPath.GetValueOrDefault(Key(p!))).ToList();

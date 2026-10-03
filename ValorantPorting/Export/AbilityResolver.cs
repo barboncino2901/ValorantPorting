@@ -62,6 +62,33 @@ public sealed class AbilityResolver
     // "/Game/X/Y.Y" -> files (ShooterGame/Content/…uasset) that import the package /Game/X/Y
     public IReadOnlyList<string> FilesUsing(string objectOrPackagePath) => Users(objectOrPackagePath);
 
+    // Where an agent holds an ability's model, from the ability's own file ("EquippableAttachPoint1P" / "3P": Jett's
+    // Blade Storm knives on "CameraSocket" / "L_WeaponMasterSocket"); null: not said (in the hand, like a gun)
+    public static (string? FirstPerson, string? ThirdPerson) HoldSockets(IFileProvider provider, string abilityFolder)
+    {
+        var prefix = $"ShooterGame/Content/{abilityFolder}/";
+        foreach (var file in provider.Files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.EndsWith(".uasset") &&
+                                                            Regex.IsMatch(k[(k.LastIndexOf('/') + 1)..], "^(Ability|Gun)_", RegexOptions.IgnoreCase) &&
+                                                            !NotInGame.IsMatch(k)))
+        {
+            try
+            {
+                var package = file[..^".uasset".Length];
+                if (!provider.TryLoadPackageObject($"{package}.{package[(package.LastIndexOf('/') + 1)..]}_C", out CUE4Parse.UE4.Objects.Engine.UBlueprintGeneratedClass cls) ||
+                    cls.ClassDefaultObject.Load() is not { } defaults) continue;
+                string? Socket(string name) => defaults.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>(name) is { IsNone: false } socket ? socket.Text : null;
+                var (first, third) = (Socket("EquippableAttachPoint1P"), Socket("EquippableAttachPoint3P"));
+                if (first != null || third != null) return (first, third);
+            }
+            catch (Exception)
+            {
+                // unreadable: try the next file
+            }
+        }
+
+        return (null, null);
+    }
+
     // "ShooterGame/Content/…uasset" -> the files it imports
     public IReadOnlyList<string> FilesUsedBy(string file) =>
         imports.TryGetValue(file, out var ids) ? ids.Select(id => fileOf.GetValueOrDefault(id)).OfType<string>().ToList() : [];

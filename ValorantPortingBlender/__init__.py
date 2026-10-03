@@ -155,7 +155,12 @@ def import_texture(path: str) -> bpy.types.Image:
     print(f"[DEBUG] Texture not found in either location. Tried: "
           f"{os.path.join(import_assets_root, translated_path + '.png')!r} and "
           f"{os.path.join(import_assets_root, raw_path + '.png')!r}")
+    missing_textures.add(os.path.basename(raw_path))
     return None
+
+
+# textures an import couldn't find (shown purple in Blender); reported once the import is done
+missing_textures = set()
 
 
 def find_built_material(name, path):
@@ -518,7 +523,9 @@ def add_iridescence(nodes, links, shader, material_data):
         return node if node.type == 'TEX_IMAGE' else None
 
     gradient, albedo, aem = linked_image("Iridescence Gradient"), linked_image("Albedo"), linked_image("AEM")
-    if gradient is None or albedo is None:
+    # only with the AEM's mask: agents' iridescent materials (Astra's 1st person arms) have none, and without it the
+    # whole model became the gradient strip; their normal texture is what shows
+    if gradient is None or albedo is None or aem is None:
         return
     scalars = {v.get("Name"): v.get("Value") for v in material_data.get("Scalars") or []}
     gradient.extension = 'EXTEND'
@@ -549,12 +556,9 @@ def add_iridescence(nodes, links, shader, material_data):
     mix.data_type = 'RGBA'
     links.new(albedo.outputs[0], mix.inputs[6])
     links.new(gradient.outputs[0], mix.inputs[7])
-    if aem is not None:
-        mask = nodes.new("ShaderNodeSeparateColor")
-        links.new(aem.outputs[0], mask.inputs[0])
-        links.new(mask.outputs[2], mix.inputs[0])
-    else:
-        mix.inputs[0].default_value = 1.0
+    mask = nodes.new("ShaderNodeSeparateColor")
+    links.new(aem.outputs[0], mask.inputs[0])
+    links.new(mask.outputs[2], mix.inputs[0])
     links.new(mix.outputs[2], shader.inputs["Albedo"])
 
 
@@ -680,6 +684,14 @@ WEAPON_SOCKET_BONE = "R_WeaponPoint"
 # Unreal's weapon socket axes vs. the gun model's (checked on Vandal/Sheriff/Operator, Jett/Brimstone, 1P and 3P).
 WEAPON_SOCKET_ROTATION = Matrix.Rotation(-math.pi / 2, 4, 'Y') @ Matrix.Rotation(-math.pi / 2, 4, 'X')
 BUDDY_SOCKET_BONE = "Gun_Buddy"
+# agents' sockets abilities name as where they're held (Core skeletons): socket -> (bone, rotation)
+HOLD_SOCKETS = {
+    "R_WeaponPointSocket": ("R_WeaponPoint", WEAPON_SOCKET_ROTATION),
+    "L_WeaponPointSocket": ("L_WeaponPoint", WEAPON_SOCKET_ROTATION),
+    "L_WeaponMasterSocket": ("L_WeaponMaster", WEAPON_SOCKET_ROTATION),
+    "WeaponPoint": ("R_WeaponMaster", WEAPON_SOCKET_ROTATION),
+    "CameraSocket": ("Camera", Matrix()),
+}
 
 
 def unreal_bone_frame(armature, bone_name):
@@ -734,11 +746,28 @@ def import_animation(data, armature=None):
     """armature: where it goes (a scene says so); otherwise the selected armature"""
     armature = armature or find_selected_armature()
     _apply_animation(data, armature)
+    if armature is not None:
+        remove_animation_sounds(armature)  # the previous animation's sounds go with it
     if armature is not None and armature.animation_data and armature.animation_data.action:
-        add_animation_sounds(data, armature.animation_data.action)
+        add_animation_sounds(data, armature.animation_data.action, owner=armature.name)
 
 
-def add_animation_sounds(data, action):
+def remove_animation_sounds(armature):
+    """The sound strips added with the animations applied to this armature before."""
+    editor = bpy.context.scene.sequence_editor
+    if editor is None:
+        return
+    strips = getattr(editor, "strips", None)
+    if strips is None:
+        strips = editor.sequences
+    old = [s for s in strips if s.get("vp_armature") == armature.name]
+    for strip in old:
+        strips.remove(strip)
+    if old:
+        Log.information(f"Removed {len(old)} sound(s) of the previous animation on {armature.name}")
+
+
+def add_animation_sounds(data, action, owner=None):
     """The game's sounds for this animation (gun handling, ability casts, ...) as sound strips in the Video Sequencer,
     each at its moment of the animation; they play with the timeline and go into renders with audio."""
     sounds = data.get("Sounds") or []
@@ -779,6 +808,8 @@ def add_animation_sounds(data, action):
         while taken(channel):
             channel += 1
         strip.channel = channel
+        if owner:
+            strip["vp_armature"] = owner
         added += 1
         # a looping sound (an ultimate's hum, a beam) repeats until the animation ends, as in game
         if sound.get("Loop") and strip.frame_final_duration > 1:
@@ -792,6 +823,8 @@ def add_animation_sounds(data, action):
                     break
                 if again.channel != strip.channel:
                     again.channel = strip.channel
+                if owner:
+                    again["vp_armature"] = owner
                 copy_start = again.frame_final_end
                 copies += 1
     if added:
@@ -1500,6 +1533,15 @@ def import_response(response, holder=None, use_selection=True):
             attach_to_bone(main, holder, WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION, "hand")
         elif import_type == "GunBuddy":
             attach_to_bone(main, holder, BUDDY_SOCKET_BONE, Matrix(), "gun")
+        elif import_type == "Ability":
+            # an ability sent while an agent is selected: where the agent holds it (Chamber's guns in the hand,
+            # Jett's Blade Storm knives on her left weapon socket, or her camera in 1st person)
+            first_person = "Camera" in holder.data.bones and holder.name.upper().startswith("FP")
+            socket = import_settings.get("HoldSocket1P" if first_person else "HoldSocket3P") or WEAPON_SOCKET_BONE
+            bone, rotation = HOLD_SOCKETS.get(socket, (socket, WEAPON_SOCKET_ROTATION))
+            if bone not in holder.data.bones:
+                bone, rotation = WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION
+            attach_to_bone(main, holder, bone, rotation, "hand" if bone == WEAPON_SOCKET_BONE else bone)
 
 
 def register():
@@ -1512,7 +1554,14 @@ def register():
     def handler():
         if not server.messages.empty():  # one message per tick, in the order they came
             try:
+                missing_textures.clear()
                 import_response(server.messages.get_nowait())
+                if missing_textures:
+                    names = sorted(missing_textures)
+                    Log.error(f"{len(names)} texture(s) not found: {', '.join(names)}")
+                    show_message(f"{len(names)} texture(s) weren't found on disk (they show purple), e.g. {names[0]}. "
+                                 "Send it again from the app; if it stays purple, check the app's Assets folder is readable.",
+                                 icon='ERROR')
                 # imports run from a timer, outside any operator: without an undo step of their own, Ctrl+Z
                 # afterwards can step into a half-undone state and crash Blender
                 try:

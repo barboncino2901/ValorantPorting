@@ -7,4 +7,6 @@ public class BlenderExportSettings : ExportSettingsBase
     public bool FirstPersonCamera; // a camera on the 1st person arms' "Camera" bone, like the in-game view
     public string? SceneRole;   // in a scene: "agent" or "gun"
     public string? SceneTarget; // in a scene, for the gun: the agent armature holding it ("agent:TP", "agent:FP", ...)
+    // an ability sent while an agent is selected goes on this socket of theirs (null: in the hand, like a gun)
+    public string? HoldSocket1P, HoldSocket3P;
 }

@@ -286,10 +286,13 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
+            var (hold1P, hold3P) = await Task.Run(() => AbilityResolver.HoldSockets(AppVM.CUE4ParseVM.Provider, item.Folder));
             BlenderService.Send(data, new BlenderExportSettings
             {
                 ReorientBones = false, // like guns: ability props animate with their own bone orientation
-                AnimationFilterKey = $"ability|{item.Folder}/|{item.AgentName} {item.AbilityName}: {item.Part}"
+                AnimationFilterKey = $"ability|{item.Folder}/|{item.AgentName} {item.AbilityName}: {item.Part}",
+                HoldSocket1P = hold1P,
+                HoldSocket3P = hold3P
             });
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent {item.Title} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
