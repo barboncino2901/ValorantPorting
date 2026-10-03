@@ -6,63 +6,30 @@ running the release workflow with that version.
 
 ## 1.12.0
 
-**After this update: close Blender and open it again** (the add-on gets sounds support).
+**After this update: close Blender and open it again.** Nothing to install: the sound converter is built into the
+app and the Blender add-on updates itself.
 
-- **Sounds tab**: every sound effect and voice line in the game (about 21,000), sorted the way you'd look for them:
-  - **Weapons**: each gun and each skin on its own ("Vandal", "Vandal · RGX 11z Pro"): reloads, equips, inspects, fire.
-  - **Kill sounds & finishers**: per skin line, Kill 1 to Kill 5 and the finisher.
-  - **Agent abilities**: one heading per ability ("Raze · Boom Bot (C)") with all its sounds under it.
-  - **Agent movement & more**, **Voice lines** (per agent), **Maps** (per map), **Interface** (menus, character
-    select, in game), **Game modes**, **Music**.
-  - Pick a category in **Show:** and, to narrow it down, one gun skin, ability or map in **Only:**. Search works in
-    plain words across everything: "vandal reload", "elderflame kill 5", "raze boom bot", "spike defuse".
-  - Pick a sound and one of its versions (the game plays one of a few at random, some are 1st or 3rd person), then
-    **Play**, **Save as .wav** for any video editor, or **Send to Blender** to put it on the timeline at the current
-    frame. Voice lines come in the language your game is installed in.
-- **Animations come with their sounds**: animations that make sounds in game bring them along, in Blender's Video
-  Sequencer, at their moments: gun equips, reloads and inspects (every sound at its exact time), ability equips,
-  casts, throws and ultimates (Jett's dash, Neon's ultimate, Raze's rocket launcher, Clove's resurrection, ...),
-  1st and 3rd person. Looping sounds (an ultimate's hum, a held ability, Neon's beam) repeat until the animation
-  ends. Works in scenes and presets too.
-- **Voice lines**: the first equip or cast of an ability or ultimate brings the line the agent says with it (Jett's
-  call as she equips Blade Storm), not re-equips. Tick **Sound effects** and/or **Voice lines** in the Animations tab.
-- Attacks and ability guns have their sounds too: Jett's Blade Storm throws, Chamber's Headhunter and Tour De Force
-  shots (with the reload cycle at its exact moments).
-- Walks, runs and aims only get the held ability's loop; footsteps aren't included (the game adds them while
-  playing, except for Skye's wolf, whose run sounds come along).
-- **Voice lines where the game says them**: one-step ultimates on the equip (Jett, Neon, Chamber), two-step ones on
-  the second step (Breach as he fires, Yoru as he activates), Raze's equip line on the equip and her cast line on
-  the fire; never on re-equips. Applying a new animation removes the previous one's sounds from that model.
-- **Abilities in scenes and presets**: "Add to scene" in the Abilities tab puts an ability model in the scene bar,
-  and an ability animation (Animations tab > Add to scene) goes in the scene too. Sent with the scene, the agent holds
-  the model where the game does and it plays its animation, with its sounds; save it as a preset like any scene.
-- **Scene bar**: each piece has its own ✕, so you can swap just the gun (or the animation, ...) and keep the rest;
-  "Clear all" empties everything.
-- **Fix**: ability animations are named by the ability that actually uses them in game (163 were filed under another
-  ability: Omen's smoke equip sat in his Shrouded Step folder, Chamber's teleport animations in Trademark's, ...),
-  so the name, the sounds and the voice line all match.
-- **Abilities in the hands**: select an agent in Blender before sending an ability model and it goes where the agent
-  holds it, like guns: Chamber's Headhunter and Tour De Force, Raze's launcher, KAY/O's knife in the hand, Jett's
-  Blade Storm knives on her (1st and 3rd person).
-- **Fix**: searching an agent no longer finds another's animations ("astra ultimate" showed Yoru's Dimensional
-  Drift, because Astra's codename is "Rift").
-- **Fix**: the Kuronami Operator's animations show as Kuronami (Riot's files spell it "Ninjia") and are found by
-  searching "kuronami".
-- **Fix**: Astra's 1st person arms no longer turn into a rainbow gradient.
-- **Fix**: empty montages (their animation was removed from the game files) aren't listed, instead of failing with
-  "Format produced no files".
-- Blender now says when textures weren't found (they show purple) instead of only printing it to the console.
-- **Fix**: ability animations show the ability's current key. Some agents' files still use old keybinds, so e.g.
-  Raze's Boom Bot animations said (E) instead of (C) and her Paint Shells (C) instead of (E).
-- To hear sounds in a render: Output Properties > Encoding, pick an audio codec.
-- Light on memory: sounds are only read when you use them (the sound system starts in about 0.3 s and lets go
-  of its memory after 2 minutes without sounds).
+### New
+- **Sounds tab**: every sound effect and voice line in the game (~21,000), sorted by weapons and skins, kill sounds
+  and finishers, agent abilities, voice lines, maps and more. Search in plain words ("vandal reload", "elderflame kill
+  5"), listen, **Save as .wav** or **Send to Blender**.
+- **Animations bring their sounds**: gun handling, ability equips, casts, attacks and ultimates come with their game
+  sounds in Blender's Video Sequencer, at the right moments; loops repeat for the whole animation. Tick **Sound
+  effects** and/or **Voice lines** (the agent's line when using an ultimate or ability) in the Animations tab.
+- **Abilities in scenes and presets**: add an ability model and its animation to the scene bar and save it as a
+  preset; the agent holds it where the game does. Sending an ability with an agent selected in Blender also puts it
+  in their hands.
+- **Scene bar**: remove a single piece (✕) instead of clearing everything.
 
-## 1.11.1
+### Fixes
+- Ability animations now show the right ability and current key (some were named after the wrong ability or an old
+  keybind), and their sounds and voice lines match.
+- Search: an agent no longer finds another's animations (Astra / Yoru), and Kuronami animations are found.
+- Astra's 1st person arms look right again; empty animations that couldn't be exported are hidden; Blender says when
+  textures are missing instead of showing them purple without a word.
+- A gun skin added to a scene could land in the agent's slot.
 
-- **Fix**: a gun skin added to the scene right after opening the Weapon Skins tab could land in the scene's Agent
-  slot (the agent then had nothing to play the animation on). The upgrade level and model pickers could also show
-  the wrong options while a tab was still loading.
+To hear sounds in a render: Output Properties > Encoding, pick an audio codec.
 
 ## 1.11.0
 
