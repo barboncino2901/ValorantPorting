@@ -75,7 +75,33 @@ public static class AnimationSounds
                 if (cues.All(c => c.EventPath != eventPath)) cues.Add(new Cue(Math.Max(0, delay), eventPath, voice));
             }
 
+            // other audio components (a gun's firing audio: "Gun Shot Sound FX" entries): every sound in their data,
+            // except the ones for stopping, unequipping or hitting something
+            void Walk(object? value, string name)
+            {
+                if (Regex.IsMatch(name, "(Stop|Unequip|Impact|Hit|Whiz|Tail|Empty|Reload)", RegexOptions.IgnoreCase)) return;
+                switch (value)
+                {
+                    case ObjectProperty { Value: { IsNull: false } index } when index.ResolvedObject?.Class?.Name.Text == "AkAudioEvent":
+                        Add(index, 0, false);
+                        break;
+                    case ArrayProperty { Value: { } array }:
+                        foreach (var item in array.Properties) Walk(item, name);
+                        break;
+                    case StructProperty { Value.StructType: FStructFallback fallback }:
+                        foreach (var inner in fallback.Properties) Walk(inner.Tag, inner.Name.Text);
+                        break;
+                }
+            }
+
             foreach (var export in package.GetExports())
+            {
+                if (export.ExportType.Contains("Audio", StringComparison.OrdinalIgnoreCase) && !export.ExportType.Contains("Visualizer", StringComparison.OrdinalIgnoreCase))
+                    foreach (var property in export.Properties)
+                        // (AudioEvents lists and voice Lines are read below, with their delays)
+                        if (property.Tag is ArrayProperty or StructProperty && property.Name.Text is not ("AudioEvents" or "Line"))
+                            Walk(property.Tag, property.Name.Text);
+
                 foreach (var property in export.Properties)
                 {
                     var name = property.Name.Text;
@@ -99,6 +125,7 @@ public static class AnimationSounds
                         row.GetOrDefault<FPackageIndex?>("Event") is { IsNull: false } voiceEvent)
                         Add(voiceEvent, row.GetOrDefault<float>("InitialDelay"), true);
                 }
+            }
         }
         catch (Exception)
         {
@@ -165,7 +192,9 @@ public static class AnimationSounds
     private static readonly Regex AgentOf = new(@"Characters/([^/]+)/", RegexOptions.IgnoreCase);
 
     // Steps 2-4 for one animation (or montage) at objectPath: (sound effects, voice lines)
-    public static (List<Cue> Sounds, List<Cue> Voice) LinkedSounds(IFileProvider provider, Links links, string objectPath, bool firstPerson)
+    // directOnly: only the effects playing it (step 2), no guesses from neighbours or names
+    public static (List<Cue> Sounds, List<Cue> Voice) LinkedSounds(IFileProvider provider, Links links, string objectPath, bool firstPerson,
+        bool directOnly = false)
     {
         var path = GamePath(objectPath);
         var name = path[(path.LastIndexOf('/') + 1)..].Split('.')[0];
@@ -199,7 +228,7 @@ public static class AnimationSounds
         var voice = found.Where(c => c.Voice).ToList();
 
         // 3. effects started by the same ability / gun, named for the same moment
-        if (sounds.Count == 0)
+        if (sounds.Count == 0 && !directOnly)
         {
             var owners = players.Where(f => !IsEffect(f))
                 .Concat(effects.SelectMany(e => links.FilesUsing(PackageOf(e))).Where(f => !IsEffect(f) && !IsMontage(f)))
@@ -217,7 +246,7 @@ public static class AnimationSounds
         }
 
         // 4. the agent's sounds named for what the animation is (two words or more: "wolf run")
-        if (sounds.Count == 0 && agent != null && words.Count >= 2)
+        if (sounds.Count == 0 && !directOnly && agent != null && words.Count >= 2)
             sounds = AgentSounds(provider, agent)
                 .Where(e => !e.Contains("/VO/", StringComparison.OrdinalIgnoreCase) && words.All(Words(FileName(e + ".uasset"), agent).Contains))
                 .OrderBy(e => e.Length).Take(3).Select(e => new Cue(0, e)).ToList();
@@ -230,7 +259,17 @@ public static class AnimationSounds
             Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } folder)
             voice = AbilityVoiceLine(provider, folder.Groups[1].Value, "Cast");
 
-        sounds = sounds.Where(c => !c.EventPath.EndsWith("Play_Silence", StringComparison.OrdinalIgnoreCase)).ToList();
+        // not another agent's sounds (effects shared between modes), nor re-equip sounds on anything but a re-equip
+        var reEquip = Regex.IsMatch(name, "(Re_?Equip|Quick_?Equip)", RegexOptions.IgnoreCase);
+        bool Fits(Cue c)
+        {
+            if (c.EventPath.EndsWith("Play_Silence", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!reEquip && Regex.IsMatch(FileName(c.EventPath + ".uasset"), "(Re_?Equip|Quick_?Equip)", RegexOptions.IgnoreCase)) return false;
+            var owner = Regex.Match(c.EventPath, @"/Events_Char_([A-Za-z]+?)(_SFX|_VO|/)", RegexOptions.IgnoreCase);
+            return agent is null || !owner.Success || owner.Groups[1].Value.Equals(agent, StringComparison.OrdinalIgnoreCase);
+        }
+        sounds = sounds.Where(Fits).ToList();
+        voice = voice.Where(Fits).ToList();
         return (Distinct(sounds), Distinct(voice));
     }
 
@@ -290,11 +329,16 @@ public static class AnimationSounds
             .Select(montage => Read(provider, montage)).FirstOrDefault(c => c.Count > 0);
 
         List<Cue> voice = [];
+        var hadCues = cues != null;
         foreach (var source in sourceList)
         {
-            var (sounds, lines) = LinkedSounds(provider, links, source, firstPerson);
+            // with cues of its own, the effects playing it can still add what isn't a cue (a gun's shot)
+            var (sounds, lines) = LinkedSounds(provider, links, source, firstPerson, directOnly: hadCues);
             if (voice.Count == 0) voice = lines;
             if (cues is null && sounds.Count > 0) cues = sounds;
+            else if (hadCues && sounds.Count > 0)
+                cues = cues!.Concat(sounds.Where(s => cues!.All(c => !c.EventPath.Equals(s.EventPath, StringComparison.OrdinalIgnoreCase))))
+                    .OrderBy(c => c.Time).ToList();
             if (cues != null && voice.Count > 0) break;
         }
 

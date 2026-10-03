@@ -335,23 +335,23 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    // the game's sounds (gun handling, ability casts, ...) and voice lines (an ultimate's) that come with animations
-    public string[] AnimationSoundModes { get; } = ["Sound effects + voice lines", "Sound effects only", "Voice lines only", "None"];
-
-    public string AnimationSoundMode
+    // the game's sounds (gun handling, ability casts, ...) and voice lines (an ultimate's call) that come with animations
+    public bool IncludeSoundEffects
     {
-        get => (AppSettings.Current.SkipAnimationSounds, AppSettings.Current.SkipAnimationVoiceLines) switch
-        {
-            (false, false) => AnimationSoundModes[0],
-            (false, true) => AnimationSoundModes[1],
-            (true, false) => AnimationSoundModes[2],
-            _ => AnimationSoundModes[3]
-        };
+        get => !AppSettings.Current.SkipAnimationSounds;
         set
         {
-            var index = Array.IndexOf(AnimationSoundModes, value);
-            AppSettings.Current.SkipAnimationSounds = index is 2 or 3;
-            AppSettings.Current.SkipAnimationVoiceLines = index is 1 or 3;
+            AppSettings.Current.SkipAnimationSounds = !value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool IncludeVoiceLines
+    {
+        get => !AppSettings.Current.SkipAnimationVoiceLines;
+        set
+        {
+            AppSettings.Current.SkipAnimationVoiceLines = !value;
             OnPropertyChanged();
         }
     }

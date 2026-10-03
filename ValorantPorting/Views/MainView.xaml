@@ -398,8 +398,11 @@
                                    Text="Click the agent or gun in Blender first: the animation goes on it." />
                         <DockPanel Margin="0 10 0 0"
                                    ToolTip="Animations that make sounds in game (gun handling, ability casts, ultimates) bring them along, and the voice line said with them (an ultimate's): they go into Blender's Video Sequencer, each at its moment. Footsteps of walks and runs aren't included: the game adds them while playing.">
-                            <TextBlock DockPanel.Dock="Left" Text="Game sounds" VerticalAlignment="Center" Margin="0 0 8 0" />
-                            <ComboBox ItemsSource="{Binding AnimationSoundModes}" SelectedItem="{Binding AnimationSoundMode, Mode=TwoWay}" />
+                            <TextBlock DockPanel.Dock="Left" Text="Bring along:" VerticalAlignment="Center" Margin="0 0 10 0" />
+                            <CheckBox Content="Sound effects" IsChecked="{Binding IncludeSoundEffects}" VerticalAlignment="Center" Margin="0 0 14 0"
+                                      ToolTip="Gun handling, ability equips, casts, attacks and their loops, each at its moment." />
+                            <CheckBox Content="Voice lines" IsChecked="{Binding IncludeVoiceLines}" VerticalAlignment="Center"
+                                      ToolTip="The line the agent says when first using an ability or ultimate (equip / cast), not on re-equips." />
                         </DockPanel>
 
                         <Separator Style="{StaticResource NamedSeparator}" Tag="MIX TWO ANIMATIONS" Margin="0 16 0 0" />

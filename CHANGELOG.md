@@ -24,8 +24,10 @@ running the release workflow with that version.
   casts, throws and ultimates (Jett's dash, Neon's ultimate, Raze's rocket launcher, Clove's resurrection, ...),
   1st and 3rd person. Looping sounds (an ultimate's hum, a held ability, Neon's beam) repeat until the animation
   ends. Works in scenes and presets too.
-- **Voice lines**: ultimates and abilities can bring the line the agent says with them (Jett's "Blade Storm" call
-  as she equips it). **Game sounds** in the Animations tab: sound effects + voice lines, only one of them, or none.
+- **Voice lines**: the first equip or cast of an ability or ultimate brings the line the agent says with it (Jett's
+  call as she equips Blade Storm), not re-equips. Tick **Sound effects** and/or **Voice lines** in the Animations tab.
+- Attacks and ability guns have their sounds too: Jett's Blade Storm throws, Chamber's Headhunter and Tour De Force
+  shots (with the reload cycle at its exact moments).
 - Walks, runs and aims only get the held ability's loop; footsteps aren't included (the game adds them while
   playing, except for Skye's wolf, whose run sounds come along).
 - **Fix**: ability animations show the ability's current key. Some agents' files still use old keybinds, so e.g.
