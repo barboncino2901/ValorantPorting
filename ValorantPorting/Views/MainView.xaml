@@ -51,7 +51,8 @@
         </Border>
         <Border Grid.Row="2" Visibility="{Binding SceneVisibility}" Background="#3A3F4B" Padding="10 6">
             <DockPanel>
-                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear" Command="{Binding ClearSceneCommand}" />
+                <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Clear all" Command="{Binding ClearSceneCommand}"
+                        ToolTip="Empties the whole scene (the ✕ on a piece removes only that one)." />
                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Content="Save as preset..." Command="{Binding SaveCurrentSceneCommand}"
                         ToolTip="Keep this scene as an animation preset: it's then in the Animation Presets tab, to send again in one click." />
                 <Button DockPanel.Dock="Right" Margin="6 0 0 0" Command="{Binding SendSceneCommand}"
@@ -64,8 +65,29 @@
                 </Button>
                 <TextBlock Text="Scene" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="White" Margin="0 0 10 0"
                            ToolTip="A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
-                <TextBlock Text="{Binding SceneText}" VerticalAlignment="Center" Foreground="White" TextTrimming="CharacterEllipsis"
-                           ToolTip="Add pieces with &quot;Add to scene&quot;: agents and gun skins (with their options) on the right, animations in the Animations tab. Adding again replaces that piece." />
+                <ItemsControl ItemsSource="{Binding SceneParts}" VerticalAlignment="Center"
+                              ToolTip="Add pieces with &quot;Add to scene&quot;: agents and gun skins (with their options) on the right, abilities in the Abilities tab, animations in the Animations tab. Adding again replaces that piece; ✕ removes it.">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#2B303A" CornerRadius="3" Padding="7 1 2 1" Margin="0 1 6 1">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock VerticalAlignment="Center" Foreground="White" MaxWidth="320" TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding Label, Mode=OneWay, StringFormat='{}{0}: '}" Foreground="#A9B4C6" />
+                                        <Run Text="{Binding Text, Mode=OneWay}" />
+                                    </TextBlock>
+                                    <Button Content="✕" Padding="5 0" Margin="4 0 0 0" FontSize="10" VerticalAlignment="Center"
+                                            Command="{Binding DataContext.ClearScenePartCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding Key}" ToolTip="Remove only this from the scene" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </DockPanel>
         </Border>
 

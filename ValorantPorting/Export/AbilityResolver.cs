@@ -89,6 +89,22 @@ public sealed class AbilityResolver
         return (null, null);
     }
 
+    // The ability folder letter whose effects / ability files play this animation (directly or through its montages),
+    // when that's one ability of the agent: Omen's "ShortTeleport_Equip" sits in his E folder (Shrouded Step) but only
+    // the smoke's equip effect plays it. null: none, several, or another agent's.
+    public string? OwnerAbilityLetter(string objectPath, string agent)
+    {
+        var path = objectPath.StartsWith("ShooterGame/Content/", StringComparison.OrdinalIgnoreCase)
+            ? "/Game/" + objectPath["ShooterGame/Content/".Length..]
+            : objectPath;
+        var users = Users(path);
+        var players = users.Concat(users.Where(u => u.Contains("Montage", StringComparison.OrdinalIgnoreCase)).SelectMany(m => Users(PackageOf(m))))
+            .Where(f => !f.Contains("Montage", StringComparison.OrdinalIgnoreCase) && !NotInGame.IsMatch(f));
+        var letters = players.Select(f => Regex.Match(f, $@"^ShooterGame/Content/Characters/{Regex.Escape(agent)}/S0/Ability_([^/]+)/", RegexOptions.IgnoreCase))
+            .Where(m => m.Success).Select(m => m.Groups[1].Value.ToUpperInvariant()).Distinct().ToList();
+        return letters.Count == 1 ? letters[0] : null;
+    }
+
     // "ShooterGame/Content/…uasset" -> the files it imports
     public IReadOnlyList<string> FilesUsedBy(string file) =>
         imports.TryGetValue(file, out var ids) ? ids.Select(id => fileOf.GetValueOrDefault(id)).OfType<string>().ToList() : [];

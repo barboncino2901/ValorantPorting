@@ -13,10 +13,11 @@ public static class AnimationNamer
 {
     public record Agent(string Name, IReadOnlyDictionary<string, string> Abilities);
 
-    // (agent codename, ability folder letter) -> "Boom Bot (C)": the ability's real name and current key. File names
-    // use the folder letter, an old keybind for some agents (Raze's "E" files are the Boom Bot, now on C). Without
-    // it, the letter is taken as the key.
-    public static Func<string, string, string?>? AbilityLookup { get; set; }
+    // (agent codename, ability folder letter, the animation's object path) -> "Boom Bot (C)": the ability's real name
+    // and current key. File names use the folder letter, an old keybind for some agents (Raze's "E" files are the Boom
+    // Bot, now on C), and a few animations are filed under another ability than the one using them. Without it, the
+    // letter is taken as the key.
+    public static Func<string, string, string?, string?>? AbilityLookup { get; set; }
 
     private static readonly Dictionary<string, string> Views = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -40,10 +41,12 @@ public static class AnimationNamer
     private static readonly Regex WordWithDirection = new("^(.*[a-z])(NE|NW|SE|SW|N|S|E|W)$", RegexOptions.Compiled);
     private static readonly Regex CamelCase = new("(?<=[a-z])(?=[A-Z0-9])|(?<=[0-9])(?=[A-Za-z])|(?<=[A-Z])(?=[A-Z][a-z])", RegexOptions.Compiled);
 
+    // objectPath: the animation's (for AbilityLookup)
     public static (string Title, string View) Describe(string name,
         IReadOnlyDictionary<string, Agent> agents,
         IReadOnlyDictionary<string, string> guns,
-        IReadOnlyDictionary<string, string> skins)
+        IReadOnlyDictionary<string, string> skins,
+        string? objectPath = null)
     {
         var tokens = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length == 0) return (name, string.Empty);
@@ -60,20 +63,30 @@ public static class AnimationNamer
         Agent? agent = null;
         var shared = false;
         var previousWasSkin = false;
+        var previousWasAgent = false;
         var words = new List<string>();
 
         for (var i = start; i < tokens.Length; i++)
         {
             var token = tokens[i];
-            var afterSkin = previousWasSkin;
+            // the slot letter comes after the skin ("FP_Wraith_S0_4_..."), or right after the agent when a file has no skin ("FP_Wraith_4_...")
+            var afterSkin = previousWasSkin || previousWasAgent;
             previousWasSkin = false;
+            previousWasAgent = false;
 
             if (token.Equals("Core", StringComparison.OrdinalIgnoreCase)) { shared = true; continue; }
             // filler words first: some of them ("Montage") are also skin codenames
             if (token.Equals("Montage", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(token, "^SEQ[0-9]+$")) continue;
             if (token == "UB") { bodyPart = "upper body"; continue; }
             if (token == "LB") { bodyPart = "lower body"; continue; }
-            if (agentName is null && agents.TryGetValue(token, out var foundAgent)) { agent = foundAgent; agentName = foundAgent.Name; agentCode = token; continue; }
+            if (agentName is null && agents.TryGetValue(token, out var foundAgent))
+            {
+                agent = foundAgent;
+                agentName = foundAgent.Name;
+                agentCode = token;
+                previousWasAgent = true;
+                continue;
+            }
             if (gunName is null && guns.TryGetValue(token, out var foundGun)) { gunName = foundGun; continue; }
             if (Regex.IsMatch(token, "^S[0-9]$")) { previousWasSkin = true; continue; } // S0 = default skin
             // skin lines only apply to weapons, melee and finishers, never to an agent's own animations
@@ -88,7 +101,7 @@ public static class AnimationNamer
             if (agent is not null && ability is null && afterSkin && token is "Q" or "E" or "C" or "X" or "4")
             {
                 var key = token == "4" ? "C" : token;
-                ability = AbilityLookup?.Invoke(agentCode!, token) ??
+                ability = AbilityLookup?.Invoke(agentCode!, token, objectPath) ??
                           (agent.Abilities.TryGetValue(key, out var abilityName) ? $"{FixCaps(abilityName)} ({key})" : $"Ability {key}");
                 continue;
             }

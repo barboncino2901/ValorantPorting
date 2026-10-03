@@ -31,18 +31,18 @@ public partial class MainViewModel
         public string Model => (Item ?? Upper!).Name.Split('_')[0].ToUpperInvariant();
     }
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility), nameof(SceneParts))]
     private SceneAsset? sceneAgent;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility), nameof(SceneParts))]
     private SceneAsset? sceneGun;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility), nameof(SceneParts))]
     private SceneAnimation? sceneAgentAnimation;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility), nameof(SceneParts))]
     private SceneAnimation? sceneGunAnimation;
     // an ability model (held by the agent, like the gun) and its own animation
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility), nameof(SceneParts))]
     private AbilityItem? sceneAbility;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility), nameof(SceneParts))]
     private SceneAnimation? sceneAbilityAnimation;
 
     public Visibility SceneVisibility =>
@@ -59,6 +59,40 @@ public partial class MainViewModel
             if (SceneAbility != null || SceneAbilityAnimation != null)
                 text += $"    ·    Ability: {SceneAbility?.Title ?? "—"}    ·    Ability animation: {Animation(SceneAbilityAnimation)}";
             return text;
+        }
+    }
+
+    // the scene bar's pieces, each with its own ✕ (Key: which one ClearScenePart empties)
+    public record ScenePart(string Key, string Label, string Text);
+
+    public List<ScenePart> SceneParts
+    {
+        get
+        {
+            static string Animation(SceneAnimation a) => a.Repeat > 1 ? $"{a.Name} ×{a.Repeat}" : a.Name;
+            var parts = new List<ScenePart>();
+            if (SceneAgent != null) parts.Add(new("agent", "Agent", SceneAgent.Name));
+            if (SceneGun != null) parts.Add(new("gun", "Gun", SceneGun.Name));
+            if (SceneAbility != null) parts.Add(new("ability", "Ability", SceneAbility.Title));
+            if (SceneAgentAnimation != null) parts.Add(new("agentAnimation", "Agent animation", Animation(SceneAgentAnimation)));
+            if (SceneGunAnimation != null) parts.Add(new("gunAnimation", "Gun animation", Animation(SceneGunAnimation)));
+            if (SceneAbilityAnimation != null) parts.Add(new("abilityAnimation", "Ability animation", Animation(SceneAbilityAnimation)));
+            return parts;
+        }
+    }
+
+    // empties one piece of the scene, keeping the others
+    [RelayCommand]
+    public void ClearScenePart(string? key)
+    {
+        switch (key)
+        {
+            case "agent": SceneAgent = null; break;
+            case "gun": SceneGun = null; break;
+            case "ability": SceneAbility = null; break;
+            case "agentAnimation": SceneAgentAnimation = null; break;
+            case "gunAnimation": SceneGunAnimation = null; break;
+            case "abilityAnimation": SceneAbilityAnimation = null; break;
         }
     }
 

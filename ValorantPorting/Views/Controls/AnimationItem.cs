@@ -30,7 +30,7 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         else if (folder.StartsWith("ShooterGame/Content/")) folder = folder["ShooterGame/Content/".Length..];
         Folder = folder;
 
-        (OriginalTitle, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
+        (OriginalTitle, View) = AnimationNamer.Describe(assetName, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins, ObjectPath);
         IsFavorite = UserLibrary.IsFavorite(LibraryId);
         CustomName = UserLibrary.CustomName(LibraryId);
         // "Sprinter" is Neon's internal name, not a sprint
@@ -47,6 +47,8 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         item.Kind = EAnimationKind.FullBody;
         item.UpperHalf = upper;
         item.LowerHalf = lower;
+        // the upper half's name (a real file: its ability is the one using it), without "(upper body)"
+        item.OriginalTitle = upper.OriginalTitle.Replace(" (upper body)", "");
         item.AddToTitle(" (full body)");
         return item;
     }

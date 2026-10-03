@@ -256,18 +256,18 @@ public static class AnimationSounds
 
         // an equip's own line when the VO table has one (Raze: "Equip" as the launcher comes out, "Cast" as he fires)
         else if (voice.Count == 0 && words.Contains("equip") &&
-                 Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } equipFolder &&
-                 AbilityVoiceLine(provider, equipFolder.Groups[1].Value, "Equip", exact: true) is { Count: > 0 } equipLine)
+                 OwnerAbilityFolder(path, players, agent) is { } equipFolder &&
+                 AbilityVoiceLine(provider, equipFolder, "Equip", exact: true) is { Count: > 0 } equipLine)
             voice = equipLine;
 
         // the voice line an ability says when it's used ("Cast" in its VO table): equips, casts, activations
         else if (voice.Count == 0 && words.Any(w => w is "equip" or "cast" or "activate") &&
-                 Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } folder &&
+                 OwnerAbilityFolder(path, players, agent) is { } folder &&
                  // an ability used in two steps (Yoru's ultimate: equip, then activate) says it on the second
-                 !(words.Contains("equip") && HasCastStep(provider, folder.Groups[1].Value)) &&
+                 !(words.Contains("equip") && HasCastStep(provider, folder)) &&
                  // an effect of the ability says it (Breach's ultimate: when he fires): only that effect's animation
-                 !CastLineHasEffect(provider, links, folder.Groups[1].Value))
-            voice = AbilityVoiceLine(provider, folder.Groups[1].Value, "Cast");
+                 !CastLineHasEffect(provider, links, folder))
+            voice = AbilityVoiceLine(provider, folder, "Cast");
 
         // not another agent's sounds (effects shared between modes), nor re-equip sounds on anything but a re-equip
         var reEquip = Regex.IsMatch(name, "(Re_?Equip|Quick_?Equip)", RegexOptions.IgnoreCase);
@@ -287,6 +287,20 @@ public static class AnimationSounds
 
     // the sounds of an ability ending (out of ammo, expiring, timing out) don't belong at the start of its animations
     private static readonly Regex Ending = new(@"(Ammo_?Out|Expire|Timeout|Time_Out|_End(_|$)|Deactivate|Destroyed|NoFuel|Stop)", RegexOptions.IgnoreCase);
+
+    // the ability folder ("Characters/Wraith/S0/Ability_4") of the effects / ability files playing the animation when
+    // they're all one ability's, else the folder it's in (Omen's smoke equip is filed under his E folder)
+    private static string? OwnerAbilityFolder(string path, IEnumerable<string> players, string? agent)
+    {
+        if (agent != null)
+        {
+            var folders = players.Select(f => Regex.Match(f, $@"^ShooterGame/Content/(Characters/{Regex.Escape(agent)}/S0/Ability_[^/]+)/", RegexOptions.IgnoreCase))
+                .Where(m => m.Success).Select(m => m.Groups[1].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (folders.Count == 1) return folders[0];
+        }
+        var own = Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/");
+        return own.Success ? own.Groups[1].Value : null;
+    }
 
     // whether one of the ability's effects says its "Cast" voice line itself (then that effect's animation has it)
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> castLineEffects = new(StringComparer.OrdinalIgnoreCase);

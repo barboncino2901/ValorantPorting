@@ -864,7 +864,11 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var slots = SoundAbilities.Shared(AppVM.CUE4ParseVM.Provider, ValorantNames.Agents);
-            AnimationNamer.AbilityLookup = (agent, letter) => slots.ForFolder(agent, letter)?.ToString();
+            var index = AbilityResolver.Shared(AppVM.CUE4ParseVM.Provider);
+            // the ability whose effects play the animation, else the one whose folder it's in
+            AnimationNamer.AbilityLookup = (agent, letter, path) =>
+                (path is null ? null : index.OwnerAbilityLetter(path, agent) is { } owner ? slots.ForFolder(agent, owner) : null)?.ToString() ??
+                slots.ForFolder(agent, letter)?.ToString();
         }
         catch (Exception ex)
         {

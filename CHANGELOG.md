@@ -36,6 +36,11 @@ running the release workflow with that version.
 - **Abilities in scenes and presets**: "Add to scene" in the Abilities tab puts an ability model in the scene bar,
   and an ability animation (Animations tab > Add to scene) goes in the scene too. Sent with the scene, the agent holds
   the model where the game does and it plays its animation, with its sounds; save it as a preset like any scene.
+- **Scene bar**: each piece has its own ✕, so you can swap just the gun (or the animation, ...) and keep the rest;
+  "Clear all" empties everything.
+- **Fix**: ability animations are named by the ability that actually uses them in game (163 were filed under another
+  ability: Omen's smoke equip sat in his Shrouded Step folder, Chamber's teleport animations in Trademark's, ...),
+  so the name, the sounds and the voice line all match.
 - **Abilities in the hands**: select an agent in Blender before sending an ability model and it goes where the agent
   holds it, like guns: Chamber's Headhunter and Tour De Force, Raze's launcher, KAY/O's knife in the hand, Jett's
   Blade Storm knives on her (1st and 3rd person).
