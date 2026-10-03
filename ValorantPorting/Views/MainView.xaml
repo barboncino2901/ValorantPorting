@@ -394,7 +394,7 @@
                                     <ListBox ItemsSource="{Binding Outfits}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                                         <ListBox.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="92" Rows="5" Columns="10"
+                                                <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="108" Rows="5" Columns="10"
                                                                            VerticalAlignment="Top" HorizontalAlignment="Left" />
                                             </ItemsPanelTemplate>
                                         </ListBox.ItemsPanel>
@@ -408,7 +408,7 @@
                                     <ListBox ItemsSource="{Binding Weapons}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                                         <ListBox.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="92" Rows="5" Columns="6"
+                                                <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="108" Rows="5" Columns="6"
                                                                            VerticalAlignment="Top" HorizontalAlignment="Left" />
                                             </ItemsPanelTemplate>
                                         </ListBox.ItemsPanel>
@@ -422,7 +422,7 @@
                                     <ListBox ItemsSource="{Binding Gunbuddies}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
                                         <ListBox.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="92" Rows="5" Columns="10"
+                                                <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="108" Rows="5" Columns="8"
                                                                            VerticalAlignment="Top" HorizontalAlignment="Left" />
                                             </ItemsPanelTemplate>
                                         </ListBox.ItemsPanel>

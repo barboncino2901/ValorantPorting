@@ -7,7 +7,7 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="FavoriteVisibility" />
     </UserControl.Resources>
-    <StackPanel HorizontalAlignment="Center" Width="64">
+    <StackPanel HorizontalAlignment="Stretch">
         <StackPanel.ToolTip>
             <ToolTip Padding="0" BorderThickness="1"
                      BorderBrush="{DynamicResource {x:Static adonisUi:Brushes.Layer3BorderBrush}}">
@@ -31,6 +31,8 @@
             </TextBlock>
         </Grid>
         <TextBlock Text="{Binding DisplayName, RelativeSource={RelativeSource AncestorType=local:AssetSelectorItem}}"
-                   VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="WordEllipsis" />
+                   HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="2 1 2 0"
+                   LineHeight="15" LineStackingStrategy="BlockLineHeight" MaxHeight="30"
+                   TextTrimming="CharacterEllipsis" />
     </StackPanel>
 </UserControl>
