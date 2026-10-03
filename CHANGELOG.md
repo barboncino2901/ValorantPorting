@@ -4,6 +4,15 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.13.0
+
+### New
+- **New look**: a sidebar for all sections and new colours. Weapon Skins has a gun list, so you can pick a gun
+  (Vandal, Phantom, ...) and see only its skins.
+
+### Fixes
+- Skin and buddy names on the tiles are no longer cut off: they wrap onto two lines.
+
 ## 1.12.0
 
 **After this update: close Blender and open it again.** Nothing to install: the sound converter is built into the
