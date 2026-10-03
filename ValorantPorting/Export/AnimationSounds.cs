@@ -49,25 +49,57 @@ public static class AnimationSounds
 
     public static List<Cue> EffectCues(IFileProvider provider, Func<string, IReadOnlyList<string>> filesUsing, string objectPath, bool firstPerson)
     {
-        var cues = new List<Cue>();
         var path = objectPath.StartsWith("ShooterGame/Content/", StringComparison.OrdinalIgnoreCase)
             ? "/Game/" + objectPath["ShooterGame/Content/".Length..]
             : objectPath;
-        foreach (var file in filesUsing(path))
+        static bool IsEffect(string file) => file.EndsWith(".uasset") && file[(file.LastIndexOf('/') + 1)..].StartsWith("FXC_", StringComparison.OrdinalIgnoreCase);
+        static bool IsMontage(string file) => file.EndsWith(".uasset") && file.Contains("_Montage", StringComparison.OrdinalIgnoreCase);
+        static string PackageOf(string file) => "/Game/" + file["ShooterGame/Content/".Length..^".uasset".Length];
+
+        // effects playing the animation itself, else the montages playing it (an effect plays the montage, which
+        // plays the animation)
+        var users = filesUsing(path);
+        var effects = users.Where(IsEffect).ToList();
+        if (effects.Count == 0)
+            effects = users.Where(IsMontage).SelectMany(m => filesUsing(PackageOf(m))).Where(IsEffect).Distinct().ToList();
+
+        // several effects use it (an equip and a charge marker): the ones named for what the animation does
+        var name = path[(path.LastIndexOf('/') + 1)..];
+        var actions = Regex.Split(name.Split('.')[0], "_").Where(w => w.Length >= 4 && !Regex.IsMatch(w, "^(Montage|Cosmetic)$", RegexOptions.IgnoreCase)).ToList();
+        var named = effects.Where(e => actions.Any(w => e[(e.LastIndexOf('/') + 1)..].Contains(w, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (named.Count > 0) effects = named;
+
+        var cues = new List<Cue>();
+        foreach (var file in effects)
         {
-            var fileName = file[(file.LastIndexOf('/') + 1)..];
-            if (!fileName.StartsWith("FXC_", StringComparison.OrdinalIgnoreCase) || !file.EndsWith(".uasset")) continue;
             try
             {
                 if (!provider.TryLoadPackage(file[..^".uasset".Length], out var package)) continue;
+                void Add(FPackageIndex index, double delay)
+                {
+                    if (index.ResolvedObject?.Class?.Name.Text != "AkAudioEvent" || EventPath(index) is not { } eventPath) return;
+                    var eventName = eventPath[(eventPath.LastIndexOf('/') + 1)..];
+                    // cancelling / stopping sounds aren't part of the animation playing out
+                    if (eventName.StartsWith("Stop_", StringComparison.OrdinalIgnoreCase) || eventName.Contains("Cancel", StringComparison.OrdinalIgnoreCase)) return;
+                    if (cues.All(c => c.EventPath != eventPath)) cues.Add(new Cue(Math.Max(0, delay), eventPath));
+                }
+
                 foreach (var export in package.GetExports())
                     foreach (var property in export.Properties)
                     {
-                        var name = property.Name.Text;
-                        var wanted = StartSounds.Contains(name) || name.Equals(firstPerson ? "PlayOnStart1P" : "PlayOnStart3PAlly", StringComparison.OrdinalIgnoreCase);
-                        if (!wanted || property.Tag is not CUE4Parse.UE4.Assets.Objects.Properties.ObjectProperty { Value: { IsNull: false } index }) continue;
-                        if (index.ResolvedObject?.Class?.Name.Text != "AkAudioEvent" || EventPath(index) is not { } eventPath) continue;
-                        if (cues.All(c => c.EventPath != eventPath)) cues.Add(new Cue(0, eventPath));
+                        var propertyName = property.Name.Text;
+                        var wanted = StartSounds.Contains(propertyName) ||
+                                     propertyName.Equals(firstPerson ? "PlayOnStart1P" : "PlayOnStart3PAlly", StringComparison.OrdinalIgnoreCase);
+                        if (wanted && property.Tag is CUE4Parse.UE4.Assets.Objects.Properties.ObjectProperty { Value: { IsNull: false } index })
+                            Add(index, 0);
+
+                        // newer effects (EffectAudioComponent): a list of { AudioEvent, InitialDelaySeconds }
+                        if (propertyName.Equals("AudioEvents", StringComparison.OrdinalIgnoreCase) &&
+                            property.Tag is CUE4Parse.UE4.Assets.Objects.Properties.ArrayProperty { Value: { } list })
+                            foreach (var item in list.Properties)
+                                if (item is CUE4Parse.UE4.Assets.Objects.Properties.StructProperty { Value.StructType: CUE4Parse.UE4.Assets.Objects.FStructFallback entry } &&
+                                    entry.GetOrDefault<FPackageIndex?>("AudioEvent") is { IsNull: false } audioEvent)
+                                    Add(audioEvent, entry.GetOrDefault<float>("InitialDelaySeconds"));
                     }
             }
             catch (Exception)
@@ -76,23 +108,50 @@ public static class AnimationSounds
             }
         }
 
-        return cues;
+        return cues.OrderBy(c => c.Time).ToList();
+    }
+
+    // object paths of the montages that play this animation ("ShooterGame/Content/…" or "/Game/…" object path in)
+    private static IEnumerable<string> MontagesUsing(Func<string, IReadOnlyList<string>> filesUsing, string objectPath)
+    {
+        var path = objectPath.StartsWith("ShooterGame/Content/", StringComparison.OrdinalIgnoreCase)
+            ? "/Game/" + objectPath["ShooterGame/Content/".Length..]
+            : objectPath;
+        foreach (var file in filesUsing(path))
+        {
+            if (!file.EndsWith(".uasset") || !file.Contains("Montage", StringComparison.OrdinalIgnoreCase)) continue;
+            var package = file[..^".uasset".Length];
+            yield return $"{package}.{package[(package.LastIndexOf('/') + 1)..]}";
+        }
     }
 
     public record Placed(double Time, string Path, string Name); // a .wav at a moment of the animation
 
     // The sounds to send with an animation: the cues of the first source that has any (its montage, then the
     // animation itself), each as a .wav (one version of it: the 1st or 3rd person one to match, English voice).
+    // An animation's sounds, in this order: its own cues (or its montage's), cues of any other montage playing it,
+    // the sounds of the effects that play it. Empty if none.
+    public static List<Cue> FindCues(IFileProvider provider, IEnumerable<string> sources, bool firstPerson,
+        Func<string, IReadOnlyList<string>>? filesUsing = null)
+    {
+        var sourceList = sources.ToList();
+        var cues = sourceList.Select(source => Read(provider, source)).FirstOrDefault(c => c.Count > 0);
+        // montages playing it that the list doesn't pair with it (odd names like "…_Equip_MontageLongTMP")
+        if (cues is null && filesUsing != null)
+            cues = sourceList.SelectMany(source => MontagesUsing(filesUsing, source))
+                .Select(montage => Read(provider, montage)).FirstOrDefault(c => c.Count > 0);
+        if (cues is null && filesUsing != null)
+            cues = sourceList.Select(source => EffectCues(provider, filesUsing, source, firstPerson)).FirstOrDefault(c => c.Count > 0);
+        return cues ?? [];
+    }
+
     // filesUsing: which files use a file (see AbilityResolver.FilesUsing), to find the effects that play the animation
     public static List<Placed> Prepare(IFileProvider provider, IEnumerable<string> sources, bool firstPerson,
         Func<string, IReadOnlyList<string>>? filesUsing = null)
     {
         var placed = new List<Placed>();
-        var sourceList = sources.ToList();
-        var cues = sourceList.Select(source => Read(provider, source)).FirstOrDefault(c => c.Count > 0);
-        if (cues is null && filesUsing != null)
-            cues = sourceList.Select(source => EffectCues(provider, filesUsing, source, firstPerson)).FirstOrDefault(c => c.Count > 0);
-        if (cues is null) return placed;
+        var cues = FindCues(provider, sources, firstPerson, filesUsing);
+        if (cues.Count == 0) return placed;
 
         var wavs = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var cue in cues)
