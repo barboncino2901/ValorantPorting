@@ -396,8 +396,11 @@
                                 ToolTip="A scene gathers an agent, a gun and their animations; &quot;Send scene to Blender&quot; in the bar at the top then brings them in together, the gun already in the agent&apos;s hand." />
                         <TextBlock Margin="0 8 0 0" TextWrapping="Wrap" Opacity="0.6" FontSize="11"
                                    Text="Click the agent or gun in Blender first: the animation goes on it." />
-                        <CheckBox Content="Include game sounds" IsChecked="{Binding IncludeAnimationSounds}" Margin="0 10 0 0"
-                                  ToolTip="Animations that make sounds in game (gun handling, ability casts, mostly 1st person) bring them along: they go into Blender's Video Sequencer, each at its moment. Footsteps aren't included: the game adds them while playing." />
+                        <DockPanel Margin="0 10 0 0"
+                                   ToolTip="Animations that make sounds in game (gun handling, ability casts, ultimates) bring them along, and the voice line said with them (an ultimate's): they go into Blender's Video Sequencer, each at its moment. Footsteps of walks and runs aren't included: the game adds them while playing.">
+                            <TextBlock DockPanel.Dock="Left" Text="Game sounds" VerticalAlignment="Center" Margin="0 0 8 0" />
+                            <ComboBox ItemsSource="{Binding AnimationSoundModes}" SelectedItem="{Binding AnimationSoundMode, Mode=TwoWay}" />
+                        </DockPanel>
 
                         <Separator Style="{StaticResource NamedSeparator}" Tag="MIX TWO ANIMATIONS" Margin="0 16 0 0" />
                         <TextBlock Margin="0 4 0 8" TextWrapping="Wrap" Opacity="0.75"

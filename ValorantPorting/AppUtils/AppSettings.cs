@@ -30,6 +30,8 @@ public partial class AppSettings : ObservableObject
 
     [ObservableProperty] private bool skipAnimationSounds; // don't send the game's sounds with animations (on by default)
 
+    [ObservableProperty] private bool skipAnimationVoiceLines; // nor the voice lines said with them (on by default)
+
     public static void Load()
     {
         if (File.Exists(FilePath.FullName))

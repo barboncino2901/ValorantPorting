@@ -780,6 +780,20 @@ def add_animation_sounds(data, action):
             channel += 1
         strip.channel = channel
         added += 1
+        # a looping sound (an ultimate's hum, a beam) repeats until the animation ends, as in game
+        if sound.get("Loop") and strip.frame_final_duration > 1:
+            end = action.frame_range[1]
+            copy_start = strip.frame_final_end
+            copies = 0
+            while copy_start < end and copies < 200:
+                try:
+                    again = strips.new_sound(name=strip.name, filepath=path, channel=strip.channel, frame_start=int(copy_start))
+                except Exception:
+                    break
+                if again.channel != strip.channel:
+                    again.channel = strip.channel
+                copy_start = again.frame_final_end
+                copies += 1
     if added:
         Log.information(f"Added {added} sound(s) for {data.get('Name')} (Video Sequencer)")
 

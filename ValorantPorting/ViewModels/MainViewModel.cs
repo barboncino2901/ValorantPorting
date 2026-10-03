@@ -335,13 +335,23 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    // the game's sounds (gun handling, ability casts, ...) come with animations that have them
-    public bool IncludeAnimationSounds
+    // the game's sounds (gun handling, ability casts, ...) and voice lines (an ultimate's) that come with animations
+    public string[] AnimationSoundModes { get; } = ["Sound effects + voice lines", "Sound effects only", "Voice lines only", "None"];
+
+    public string AnimationSoundMode
     {
-        get => !AppSettings.Current.SkipAnimationSounds;
+        get => (AppSettings.Current.SkipAnimationSounds, AppSettings.Current.SkipAnimationVoiceLines) switch
+        {
+            (false, false) => AnimationSoundModes[0],
+            (false, true) => AnimationSoundModes[1],
+            (true, false) => AnimationSoundModes[2],
+            _ => AnimationSoundModes[3]
+        };
         set
         {
-            AppSettings.Current.SkipAnimationSounds = !value;
+            var index = Array.IndexOf(AnimationSoundModes, value);
+            AppSettings.Current.SkipAnimationSounds = index is 2 or 3;
+            AppSettings.Current.SkipAnimationVoiceLines = index is 1 or 3;
             OnPropertyChanged();
         }
     }
@@ -350,12 +360,17 @@ public partial class MainViewModel : ObservableObject
     // (a mix: the upper body's sounds first, else the legs')
     public async Task<List<AnimationSounds.Placed>?> SoundsFor(AnimationItem item, AnimationItem? lower = null)
     {
-        if (!IncludeAnimationSounds) return null;
+        var (effects, voiceLines) = (!AppSettings.Current.SkipAnimationSounds, !AppSettings.Current.SkipAnimationVoiceLines);
+        if (!effects && !voiceLines) return null;
         var provider = AppVM.CUE4ParseVM.Provider;
         var sources = AnimationSounds.SourcesOf(item);
         if (lower is not null) sources.AddRange(AnimationSounds.SourcesOf(lower));
-        var sounds = await Task.Run(() => AnimationSounds.Prepare(provider, sources, AnimationSounds.IsFirstPerson(item),
-            AbilityResolver.Shared(provider).FilesUsing));
+        var sounds = await Task.Run(() =>
+        {
+            var index = AbilityResolver.Shared(provider);
+            return AnimationSounds.Prepare(provider, sources, AnimationSounds.IsFirstPerson(item),
+                new AnimationSounds.Links(index.FilesUsing, index.FilesUsedBy), effects, voiceLines);
+        });
         if (sounds.Count > 0) AppLog.Information($"{item.Title}: {sounds.Count} game sound(s) included (Blender: Video Sequencer).");
         return sounds.Count > 0 ? sounds : null;
     }

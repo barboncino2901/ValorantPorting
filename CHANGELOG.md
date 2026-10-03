@@ -20,10 +20,14 @@ running the release workflow with that version.
     **Play**, **Save as .wav** for any video editor, or **Send to Blender** to put it on the timeline at the current
     frame. Voice lines come in the language your game is installed in.
 - **Animations come with their sounds**: animations that make sounds in game bring them along, in Blender's Video
-  Sequencer. Gun equips, reloads and inspects get every sound at its exact moment; abilities (Jett's dash, Neon's
-  ultimate, Raze's Boom Bot, ...) get the sounds the game starts together with them, 1st and 3rd person. Works in
-  scenes and presets too. "Include game sounds" in the Animations tab turns it off. Footsteps aren't included: the
-  game adds them while playing, they aren't part of the animations.
+  Sequencer, at their moments: gun equips, reloads and inspects (every sound at its exact time), ability equips,
+  casts, throws and ultimates (Jett's dash, Neon's ultimate, Raze's rocket launcher, Clove's resurrection, ...),
+  1st and 3rd person. Looping sounds (an ultimate's hum, a held ability, Neon's beam) repeat until the animation
+  ends. Works in scenes and presets too.
+- **Voice lines**: ultimates and abilities can bring the line the agent says with them (Jett's "Blade Storm" call
+  as she equips it). **Game sounds** in the Animations tab: sound effects + voice lines, only one of them, or none.
+- Walks, runs and aims only get the held ability's loop; footsteps aren't included (the game adds them while
+  playing, except for Skye's wolf, whose run sounds come along).
 - **Fix**: ability animations show the ability's current key. Some agents' files still use old keybinds, so e.g.
   Raze's Boom Bot animations said (E) instead of (C) and her Paint Shells (C) instead of (E).
 - To hear sounds in a render: Output Properties > Encoding, pick an audio codec.

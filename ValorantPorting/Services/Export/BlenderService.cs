@@ -63,7 +63,7 @@ public class BlenderService : SocketServiceBase
             UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
             Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
             SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList(),
-            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name }).ToList()
+            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop }).ToList()
         }
     };
 

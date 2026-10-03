@@ -39,6 +39,8 @@ public sealed class AbilityResolver
             for (var i = 0; i < header.StoreEntries.Length; i++)
             {
                 if (!io.PackageIdIndex.TryGetValue(header.PackageIds[i], out var file)) continue;
+                fileOf[header.PackageIds[i].id] = file.Path;
+                imports[file.Path] = header.StoreEntries[i].ImportedPackages.Select(p => p.id).ToArray();
                 foreach (var imported in header.StoreEntries[i].ImportedPackages)
                 {
                     if (!importers.TryGetValue(imported.id, out var list)) importers[imported.id] = list = [];
@@ -59,6 +61,13 @@ public sealed class AbilityResolver
 
     // "/Game/X/Y.Y" -> files (ShooterGame/Content/…uasset) that import the package /Game/X/Y
     public IReadOnlyList<string> FilesUsing(string objectOrPackagePath) => Users(objectOrPackagePath);
+
+    // "ShooterGame/Content/…uasset" -> the files it imports
+    public IReadOnlyList<string> FilesUsedBy(string file) =>
+        imports.TryGetValue(file, out var ids) ? ids.Select(id => fileOf.GetValueOrDefault(id)).OfType<string>().ToList() : [];
+
+    private readonly Dictionary<ulong, string> fileOf = new();
+    private readonly Dictionary<string, ulong[]> imports = new(StringComparer.OrdinalIgnoreCase);
 
     // "/Game/X/Y.Y" -> files (ShooterGame/Content/…uasset) that import the package /Game/X/Y
     private List<string> Users(string objectOrPackagePath)
