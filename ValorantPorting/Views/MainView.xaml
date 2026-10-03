@@ -525,7 +525,7 @@
                     <StackPanel Margin="{adonisUi:Space 1}">
                         <Separator Style="{StaticResource NamedSeparator}" Tag="SOUND" />
                         <TextBlock Visibility="{Binding NoSoundSelectedVisibility}" Margin="0 6 0 0" TextWrapping="Wrap" Opacity="0.6"
-                                   Text="Search for a sound in plain words (&quot;vandal reload&quot;, &quot;jett dash&quot;, &quot;spike defuse&quot;) and click it to listen." />
+                                   Text="Search for a sound in plain words (&quot;vandal reload&quot;, &quot;jett dash&quot;, &quot;spike defuse&quot;, &quot;boom bot&quot;), pick one, then Play to listen." />
                         <StackPanel Visibility="{Binding SelectedSoundVisibility}">
                             <TextBlock Text="{Binding SelectedSound.Title}" FontSize="18" TextWrapping="Wrap" Margin="0 4 0 2" />
                             <TextBlock Text="{Binding SelectedSound.Details}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />

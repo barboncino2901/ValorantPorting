@@ -8,11 +8,13 @@ running the release workflow with that version.
 
 **After this update: close Blender and open it again** (the add-on gets sounds support).
 
-- **Sounds tab**: every sound effect and voice line in the game (about 21,000), with names you can read and search
-  in plain words: "vandal reload", "jett dash", "spike defuse", "sage resurrection". Click one to listen, pick
-  one of its versions (the game plays one of a few at random, some are 1st or 3rd person), **Save as .wav** for
-  any video editor, or **Send to Blender** to put it on the timeline at the current frame. Voice lines come in the
-  language your game is installed in.
+- **Sounds tab**: every sound effect and voice line in the game (about 21,000), with names that say whose sound it
+  is: the agent and ability ("Raze · Boom Bot (C): Enemy spotted alert"), the gun and skin ("Vandal (RGX 11z Pro):
+  Charging handle back (1st person)") or the map ("Lotus: Stone door start rotate"). Search in plain words: "vandal
+  reload", "jett dash", "spike defuse", "boom bot". Pick a sound and one of its versions (the game plays one of a
+  few at random, some are 1st or 3rd person), then **Play**, **Save as .wav** for any video editor, or **Send to
+  Blender** to put it on the timeline at the current frame. Voice lines come in the language your game is installed
+  in.
 - **Animations come with their sounds**: animations that make sounds in game (equips, reloads, inspects, ability
   casts, mostly 1st person) bring them along, each at its exact moment, in Blender's Video Sequencer. Works in scenes
   and presets too. "Include game sounds" in the Animations tab turns it off. Footsteps aren't included: the game

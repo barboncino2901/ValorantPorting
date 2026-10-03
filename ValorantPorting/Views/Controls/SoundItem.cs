@@ -11,11 +11,13 @@ namespace ValorantPorting.Views.Controls;
 // One sound in the Sounds tab: "Vandal: Charging handle back (1st person)", found by its readable name or Riot's.
 public partial class SoundItem : ObservableObject, ILibraryItem
 {
-    public SoundItem(GameSounds.Entry entry)
+    // abilities / maps: see SoundNamer.Describe
+    public SoundItem(GameSounds.Entry entry, SoundAbilities? abilities = null, System.Collections.Generic.IReadOnlyDictionary<string, string>? maps = null)
     {
         EventPath = entry.EventPath;
         EventName = entry.EventName;
-        (Title, Category) = SoundNamer.Describe(entry.EventName, entry.Folder, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins);
+        (Title, Category) = SoundNamer.Describe(entry.EventName, entry.Folder, ValorantNames.Agents, ValorantNames.Guns, ValorantNames.Skins,
+            abilities, maps);
         Details = $"{Category}  ·  {EventName}";
         searchText = $"{Title} {EventName} {Category} {entry.Folder}".Replace('_', ' ');
         isFavorite = UserLibrary.IsFavorite(LibraryId);

@@ -9,6 +9,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ValorantPorting.AppUtils;
+using ValorantPorting.Export;
 using ValorantPorting.Services;
 using ValorantPorting.Services.Endpoints;
 using ValorantPorting.Views.Controls;
@@ -54,7 +55,18 @@ public partial class MainViewModel
         Task.Run(() =>
         {
             ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
-            var items = GameSounds.List(provider).Select(e => new SoundItem(e))
+            SoundAbilities? abilities = null;
+            try
+            {
+                abilities = new SoundAbilities(provider, ValorantNames.Agents);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warning($"Sounds: ability names unavailable ({ex.Message}).");
+            }
+
+            var maps = Export.SoundNamer.MapCodenames(ValorantNames.Maps.Select(m => (m.Name, m.MapUrl)));
+            var items = GameSounds.List(provider).Select(e => new SoundItem(e, abilities, maps))
                 .OrderBy(i => i.Category == "Other").ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase).ToList();
             Application.Current.Dispatcher.Invoke(() =>
             {
@@ -102,11 +114,7 @@ public partial class MainViewModel
                 SoundStatus = variants.Count == 0
                     ? "This one has no audio of its own (it only starts or changes other sounds)."
                     : "";
-                if (SoundVariants.Count > 0)
-                {
-                    SelectedSoundVariant = SoundVariants[0];
-                    _ = PlaySound();
-                }
+                if (SoundVariants.Count > 0) SelectedSoundVariant = SoundVariants[0];
             });
         });
     }
