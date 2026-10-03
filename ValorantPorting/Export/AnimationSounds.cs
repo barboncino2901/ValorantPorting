@@ -186,7 +186,14 @@ public static class AnimationSounds
         // moving around while holding an ability (walk, jump, aim, ...) is played by the ability's held state, whose
         // effect also has its cast or throw: only the state's looping sound goes with those
         var moving = named.Count == 0 && words.Any(Movement.Contains) && !actions.Any(a => a is not ("idle" or "equipped"));
-        var found = effects.SelectMany(e => EffectSounds(provider, e, firstPerson)
+        // an effect without sounds of its own may inherit them (Jett's DaggerThrow1-5 from DaggerThrowParent)
+        IEnumerable<Cue> WithParents(string effect)
+        {
+            var own = EffectSounds(provider, effect, firstPerson);
+            return own.Count > 0 ? own : links.FilesUsedBy(effect).Where(IsEffect).Take(3).SelectMany(parent => EffectSounds(provider, parent, firstPerson));
+        }
+
+        var found = effects.SelectMany(e => WithParents(e)
             .Where(c => !moving || c.Voice || IsLoop(c))).ToList();
         var sounds = found.Where(c => !c.Voice).ToList();
         var voice = found.Where(c => c.Voice).ToList();
@@ -215,8 +222,11 @@ public static class AnimationSounds
                 .Where(e => !e.Contains("/VO/", StringComparison.OrdinalIgnoreCase) && words.All(Words(FileName(e + ".uasset"), agent).Contains))
                 .OrderBy(e => e.Length).Take(3).Select(e => new Cue(0, e)).ToList();
 
+        // voice lines only with the first use (not re-equipping it after a gun, quick / fast equips)
+        if (Regex.IsMatch(name, "(Re_?Equip|Quick_?Equip|Fast_?Equip)", RegexOptions.IgnoreCase)) voice = [];
+
         // the voice line an ability says when it's used ("Cast" in its VO table): equips, casts, activations
-        if (voice.Count == 0 && words.Any(w => w is "equip" or "cast" or "activate") &&
+        else if (voice.Count == 0 && words.Any(w => w is "equip" or "cast" or "activate") &&
             Regex.Match(path, @"^/Game/(Characters/[^/]+/S0/Ability_[^/]+)/") is { Success: true } folder)
             voice = AbilityVoiceLine(provider, folder.Groups[1].Value, "Cast");
 
