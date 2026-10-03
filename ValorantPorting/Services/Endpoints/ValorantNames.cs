@@ -24,6 +24,11 @@ public static class ValorantNames
 
     public static IReadOnlyList<MapInfo> Maps { get; private set; } = [];
 
+    // the guns by class, in the game's order, for the Weapon Skins sidebar: (class "Rifles", the folder a skin's path has
+    // "/Rifles/AK/", name "Vandal")
+    public record GunEntry(string Class, string PathPart, string Name);
+    public static IReadOnlyList<GunEntry> GunList { get; private set; } = [];
+
     public static IReadOnlyDictionary<string, AnimationNamer.Agent> Agents { get; private set; } = new Dictionary<string, AnimationNamer.Agent>();
     public static IReadOnlyDictionary<string, string> Guns { get; private set; } = new Dictionary<string, string>();
     public static IReadOnlyDictionary<string, string> Skins { get; private set; } = new Dictionary<string, string>();
@@ -95,11 +100,22 @@ public static class ValorantNames
 
         var guns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var skins = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var gunList = new List<GunEntry>();
         foreach (var weapon in data["weapons"]?.Children<JObject>() ?? [])
         {
             var gunName = weapon.Value<string>("displayName") ?? "";
             var gunFolder = FolderOf(weapon.Value<string>("assetPath"));
             if (gunFolder is not null) guns[gunFolder] = gunName;
+            // ".../Equippables/Guns/Rifles/AK/AKPrimaryAsset" -> Rifles, "/Rifles/AK/"; ".../Equippables/Melee/..." -> Melee
+            var parts = (weapon.Value<string>("assetPath") ?? "").Split('/');
+            var equippables = Array.IndexOf(parts, "Equippables");
+            if (equippables >= 0 && parts.Length > equippables + 2)
+            {
+                var isGun = parts[equippables + 1] == "Guns" && parts.Length > equippables + 3;
+                var classFolder = isGun ? parts[equippables + 2] : "Melee";
+                var pathPart = isGun ? $"/{parts[equippables + 2]}/{parts[equippables + 3]}/" : "/Equippables/Melee/";
+                gunList.Add(new GunEntry(ClassNames.GetValueOrDefault(classFolder, classFolder), pathPart, isGun ? gunName : "Knife"));
+            }
 
             foreach (var skin in weapon["skins"]?.Children<JObject>() ?? [])
             {
@@ -125,12 +141,20 @@ public static class ValorantNames
                 mapList.Add(new MapInfo(name, url, map.Value<string>("tacticalDescription")));
         }
 
+        GunList = gunList.OrderBy(g => Array.IndexOf(ClassOrder, g.Class) is var i and >= 0 ? i : ClassOrder.Length).ToList();
         Agents = agents;
         AbilityIcons = abilityIcons;
         Guns = guns;
         Skins = skins;
         Maps = mapList;
     }
+
+    private static readonly Dictionary<string, string> ClassNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Sidearms"] = "Sidearms", ["SubMachineGuns"] = "SMGs", ["Shotguns"] = "Shotguns", ["Rifles"] = "Rifles",
+        ["SniperRifles"] = "Snipers", ["HvyMachineGuns"] = "Heavies", ["HeavyWeapons"] = "Heavies", ["Melee"] = "Melee"
+    };
+    private static readonly string[] ClassOrder = ["Sidearms", "SMGs", "Shotguns", "Rifles", "Snipers", "Heavies", "Melee"];
 
     // ".../Rifles/AK/AKPrimaryAsset" -> "AK"
     private static string? FolderOf(string? assetPath)

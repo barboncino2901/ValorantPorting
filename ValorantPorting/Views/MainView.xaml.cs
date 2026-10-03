@@ -28,6 +28,7 @@ public partial class MainView
         AppVM.MainVM.AbilitiesLoaded += () => ApplySearchFilter(AbilityList, SearchText);
         AppVM.MainVM.SavedScenesChanged += () => ApplySearchFilter(SceneList, SearchText);
         AppVM.MainVM.LibraryFilterChanged += RefreshListFilters;
+        AppVM.MainVM.GunFilterChanged += RefreshListFilters;
         // favorites/recent changed (maybe from an export task): re-filter/re-sort when a library view is shown
         UserLibrary.Changed += () => Dispatcher.BeginInvoke(() =>
         {
@@ -146,6 +147,7 @@ public partial class MainView
         // set right away: the tab's first load takes a while, and a tile clicked meanwhile must already count as this
         // tab's (a skin added to the scene as the agent, the wrong pickers shown)
         AppVM.MainVM.CurrentAssetType = assetType;
+        if (assetType == EAssetType.Weapon) AppVM.MainVM.EnsureGunRows();
         DiscordService.Update(assetType);
 
         foreach (var (handlerType, handlerData) in handlers)
@@ -155,6 +157,23 @@ public partial class MainView
                 handlerData.PauseState.Pause();
 
         if (!handlers[assetType].HasStarted) await handlers[assetType].Execute();
+    }
+
+    // sidebar: each section is one of the (header-less) tabs
+    private void OnNavChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton { Tag: string index } && AssetControls is not null)
+            AssetControls.SelectedIndex = int.Parse(index);
+    }
+
+    // Settings / Help: their menu opens under them
+    private void OnOpenMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.DataContext = DataContext;
+        menu.PlacementTarget = button;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        menu.IsOpen = true;
     }
 
     private async void OnStyleSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -195,7 +214,7 @@ public partial class MainView
             if (o is ILibraryItem item && !UserLibrary.Matches(item.LibraryId, library)) return false;
             return o switch
             {
-                AssetSelectorItem asset => !hasText || asset.Match(text),
+                AssetSelectorItem asset => (!hasText || asset.Match(text)) && AppVM.MainVM.MatchesGun(asset),
                 // favorites/recent show across all models, so the "Show animations for" filter doesn't hide them
                 AnimationItem animation => MatchesSearch(animation, animationSearch) &&
                                            (library != ELibraryFilter.All || AppVM.MainVM.MatchesAnimationContext(animation)),
