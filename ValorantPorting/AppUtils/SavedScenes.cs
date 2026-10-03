@@ -23,7 +23,9 @@ public static class SavedScenes
     // an animation: one entry of the list (ItemId) or a mix of two (UpperId + LowerId); ids are the list's LibraryIds
     public record Animation(string Name, string? ItemId, string? UpperId, string? LowerId, int Repeat);
 
-    public record SavedScene(string Name, DateTime Saved, Asset? Agent, Asset? Gun, Animation? AgentAnimation, Animation? GunAnimation);
+    // AbilityId: the ability model's library id ("ability:..."), looked up in the Abilities list
+    public record SavedScene(string Name, DateTime Saved, Asset? Agent, Asset? Gun, Animation? AgentAnimation, Animation? GunAnimation,
+        string? AbilityId = null, string? AbilityName = null, Animation? AbilityAnimation = null);
 
     public static IReadOnlyList<SavedScene> All
     {

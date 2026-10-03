@@ -33,6 +33,9 @@ running the release workflow with that version.
 - **Voice lines where the game says them**: one-step ultimates on the equip (Jett, Neon, Chamber), two-step ones on
   the second step (Breach as he fires, Yoru as he activates), Raze's equip line on the equip and her cast line on
   the fire; never on re-equips. Applying a new animation removes the previous one's sounds from that model.
+- **Abilities in scenes and presets**: "Add to scene" in the Abilities tab puts an ability model in the scene bar,
+  and an ability animation (Animations tab > Add to scene) goes in the scene too. Sent with the scene, the agent holds
+  the model where the game does and it plays its animation, with its sounds; save it as a preset like any scene.
 - **Abilities in the hands**: select an agent in Blender before sending an ability model and it goes where the agent
   holds it, like guns: Chamber's Headhunter and Tour De Force, Raze's launcher, KAY/O's knife in the hand, Jett's
   Blade Storm knives on her (1st and 3rd person).

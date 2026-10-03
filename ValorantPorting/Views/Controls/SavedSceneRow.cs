@@ -14,7 +14,12 @@ public class SavedSceneRow
         GunText = scene.Gun?.Name ?? "—";
         AgentAnimationText = scene.AgentAnimation is { } a ? a.Repeat > 1 ? $"{a.Name} ×{a.Repeat}" : a.Name : "—";
         GunAnimationText = scene.GunAnimation is { } g ? g.Repeat > 1 ? $"{g.Name} ×{g.Repeat}" : g.Name : "—";
-        Summary = string.Join("  ·  ", new[] { scene.Agent?.Name, scene.Gun?.Name, scene.AgentAnimation?.Name, scene.GunAnimation?.Name }
+        AbilityText = scene.AbilityName ?? "—";
+        AbilityAnimationText = scene.AbilityAnimation is { } ab ? ab.Repeat > 1 ? $"{ab.Name} ×{ab.Repeat}" : ab.Name : "—";
+        AbilityVisibility = scene.AbilityName != null || scene.AbilityAnimation != null
+            ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        Summary = string.Join("  ·  ", new[] { scene.Agent?.Name, scene.Gun?.Name, scene.AbilityName, scene.AgentAnimation?.Name,
+                scene.GunAnimation?.Name, scene.AbilityAnimation?.Name }
             .Where(n => n != null));
         SavedText = $"Saved {scene.Saved:d MMM yyyy, HH:mm}";
     }
@@ -27,6 +32,9 @@ public class SavedSceneRow
     public string GunText { get; }
     public string AgentAnimationText { get; }
     public string GunAnimationText { get; }
+    public string AbilityText { get; }
+    public string AbilityAnimationText { get; }
+    public System.Windows.Visibility AbilityVisibility { get; }
 
     // every search word in the name or in what the scene holds ("jett vandal", "xerofang run")
     public bool Match(string filter) =>

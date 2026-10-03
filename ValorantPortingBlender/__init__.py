@@ -1352,7 +1352,7 @@ def select_only(obj):
 def import_scene(data):
     """A scene from the app, in order: the agent, the gun in the agent's hand, then the animations on each. Each step
     is a normal import/animation; the scene only picks which armature is selected before it."""
-    rigs = {}  # "agent:TP" / "agent:FP" / "agent:CS" / "gun" -> armature
+    rigs = {}  # "agent:TP" / "agent:FP" / "agent:CS" / "gun" / "ability" -> armature
     focus = None  # the agent armature the scene used (selected at the end, like after importing it)
     for step in data.get("Steps") or []:
         settings = step.get("Settings") or {}
@@ -1379,6 +1379,9 @@ def import_scene(data):
         if role == "agent":
             for rig in new_rigs:
                 rigs.setdefault("agent:" + rig.name.split("_")[0].upper(), rig)
+        elif role == "ability" and new_rigs:
+            # the ability's rig, which its animation goes on (Jett's knife rig, Chamber's guns)
+            rigs["ability"] = last_import_main if last_import_main in new_rigs else new_rigs[0]
         elif role == "gun" and new_rigs:
             # the gun's body (its magazine and scope are armatures too, and come first by name for some skins)
             rigs["gun"] = last_import_main if last_import_main in new_rigs else                 next((r for r in new_rigs if r.name.upper().startswith("GN_")), new_rigs[0])

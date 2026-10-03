@@ -477,8 +477,11 @@
                                 <TextBlock Text="Send to Blender" VerticalAlignment="Center" Margin="6 0 0 0" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
+                        <Button Content="Add to scene" Command="{Binding AddAbilityToSceneCommand}" Margin="0 6 0 0" Padding="8 5"
+                                ToolTip="Puts this model in the scene bar: sent with the scene, it goes in the agent's hands where the game holds it, and an ability animation added to the scene (Animations tab) plays on it. Saved in presets too." />
                         <Border Background="#262B35" CornerRadius="4" Padding="10 8" Margin="0 12 0 0">
                             <StackPanel>
+                                <TextBlock TextWrapping="Wrap" Margin="0 0 0 6" Text="• Select an agent in Blender before sending it and it goes in their hands, like a gun." />
                                 <TextBlock TextWrapping="Wrap" Margin="0 0 0 6" Text="• Models made of several parts come in assembled, as in game." />
                                 <TextBlock TextWrapping="Wrap" Margin="0 0 0 6" Text="• Their animations are in the Animations tab: click the model in Blender and the list shows its animations." />
                                 <TextBlock TextWrapping="Wrap" Text="• Abilities that are only effects (smokes, walls, fire) have no model. Models drawn entirely with effects (like Fade&apos;s Haunt orb) aren&apos;t listed: their look can&apos;t be exported." />
@@ -507,6 +510,8 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Text="Agent" Opacity="0.6" Margin="0 0 10 4" />
                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedSavedScene.AgentText}" TextWrapping="Wrap" Margin="0 0 0 4" />
@@ -516,6 +521,12 @@
                                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedSavedScene.AgentAnimationText}" TextWrapping="Wrap" Margin="0 0 0 4" />
                                     <TextBlock Grid.Row="3" Text="Gun animation" Opacity="0.6" Margin="0 0 10 0" />
                                     <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedSavedScene.GunAnimationText}" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="4" Text="Ability" Opacity="0.6" Margin="0 4 10 0" Visibility="{Binding SelectedSavedScene.AbilityVisibility}" />
+                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedSavedScene.AbilityText}" TextWrapping="Wrap" Margin="0 4 0 0"
+                                               Visibility="{Binding SelectedSavedScene.AbilityVisibility}" />
+                                    <TextBlock Grid.Row="5" Text="Ability animation" Opacity="0.6" Margin="0 4 10 0" Visibility="{Binding SelectedSavedScene.AbilityVisibility}" />
+                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding SelectedSavedScene.AbilityAnimationText}" TextWrapping="Wrap" Margin="0 4 0 0"
+                                               Visibility="{Binding SelectedSavedScene.AbilityVisibility}" />
                                 </Grid>
                             </Border>
                             <Button Command="{Binding SendSelectedSavedSceneCommand}" Margin="0 12 0 0" Padding="8 8"

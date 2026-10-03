@@ -39,17 +39,26 @@ public partial class MainViewModel
     private SceneAnimation? sceneAgentAnimation;
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
     private SceneAnimation? sceneGunAnimation;
+    // an ability model (held by the agent, like the gun) and its own animation
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    private AbilityItem? sceneAbility;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SceneText), nameof(SceneVisibility))]
+    private SceneAnimation? sceneAbilityAnimation;
 
     public Visibility SceneVisibility =>
-        SceneAgent != null || SceneGun != null || SceneAgentAnimation != null || SceneGunAnimation != null ? Visibility.Visible : Visibility.Collapsed;
+        SceneAgent != null || SceneGun != null || SceneAgentAnimation != null || SceneGunAnimation != null ||
+        SceneAbility != null || SceneAbilityAnimation != null ? Visibility.Visible : Visibility.Collapsed;
 
     public string SceneText
     {
         get
         {
             static string Animation(SceneAnimation? a) => a is null ? "—" : a.Repeat > 1 ? $"{a.Name} ×{a.Repeat}" : a.Name;
-            return $"Agent: {SceneAgent?.Name ?? "—"}    ·    Gun: {SceneGun?.Name ?? "—"}    ·    " +
-                   $"Agent animation: {Animation(SceneAgentAnimation)}    ·    Gun animation: {Animation(SceneGunAnimation)}";
+            var text = $"Agent: {SceneAgent?.Name ?? "—"}    ·    Gun: {SceneGun?.Name ?? "—"}    ·    " +
+                       $"Agent animation: {Animation(SceneAgentAnimation)}    ·    Gun animation: {Animation(SceneGunAnimation)}";
+            if (SceneAbility != null || SceneAbilityAnimation != null)
+                text += $"    ·    Ability: {SceneAbility?.Title ?? "—"}    ·    Ability animation: {Animation(SceneAbilityAnimation)}";
+            return text;
         }
     }
 
@@ -70,6 +79,20 @@ public partial class MainViewModel
         if (kind == EAssetType.Character) SceneAgent = asset;
         else SceneGun = asset;
         AppLog.Information($"Scene: {asset.Name} added.");
+    }
+
+    // the selected ability model (Abilities tab): in the agent's hands, where the game holds it
+    [RelayCommand]
+    public void AddAbilityToScene()
+    {
+        if (SelectedAbility is not { } item)
+        {
+            AppLog.Warning("Select an ability model first.");
+            return;
+        }
+
+        SceneAbility = item;
+        AppLog.Information($"Scene: {item.Title} added.");
     }
 
     // the selected animation (Animations tab)
@@ -104,8 +127,11 @@ public partial class MainViewModel
             case "GN" or "GNTP": // the gun's 1st / 3rd person animations
                 SceneGunAnimation = animation;
                 break;
+            case "AB" or "ABTP" or "ABCS": // an ability model's own animations
+                SceneAbilityAnimation = animation;
+                break;
             default:
-                MessageBox.Show($"A scene holds an agent and a gun, and this animation is for another model ({(animation.Item ?? animation.Upper)!.View}). " +
+                MessageBox.Show($"A scene holds an agent, a gun and an ability, and this animation is for another model ({(animation.Item ?? animation.Upper)!.View}). " +
                                 "Apply it to the selected armature instead.", "Add to scene", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
         }
@@ -139,9 +165,11 @@ public partial class MainViewModel
     }
 
     [RelayCommand]
-    public void LoadSelectedSavedScene()
+    public async Task LoadSelectedSavedScene()
     {
-        if (SelectedSavedScene is { } row && LoadSavedScene(row.Scene))
+        if (SelectedSavedScene is not { } row) return;
+        if (row.Scene.AbilityId != null) await AbilitiesReady();
+        if (LoadSavedScene(row.Scene))
             AppLog.Information($"\"{row.Name}\" is in the scene bar: change it, then send it or save it again.");
     }
 
@@ -185,7 +213,8 @@ public partial class MainViewModel
             : new SavedScenes.Animation(animation.Name, animation.Item?.LibraryId, animation.Upper?.LibraryId, animation.Lower?.LibraryId, animation.Repeat);
 
         SavedScenes.Save(new SavedScenes.SavedScene(name, DateTime.Now, Saved(SceneAgent), Saved(SceneGun),
-            SavedAnimation(SceneAgentAnimation), SavedAnimation(SceneGunAnimation)));
+            SavedAnimation(SceneAgentAnimation), SavedAnimation(SceneGunAnimation),
+            SceneAbility?.LibraryId, SceneAbility?.Title, SavedAnimation(SceneAbilityAnimation)));
         RefreshSavedScenes();
         AppLog.Information($"Saved as the animation preset \"{name}\" (Animation Presets tab).");
     }
@@ -234,6 +263,9 @@ public partial class MainViewModel
         SceneGun = Asset(saved.Gun);
         SceneAgentAnimation = Animation(saved.AgentAnimation);
         SceneGunAnimation = Animation(saved.GunAnimation);
+        SceneAbility = saved.AbilityId is null ? null : Abilities.FirstOrDefault(a => a.LibraryId == saved.AbilityId);
+        if (saved.AbilityId != null && SceneAbility is null) missing.Add(saved.AbilityName ?? "the ability");
+        SceneAbilityAnimation = Animation(saved.AbilityAnimation);
         if (missing.Count == 0) return true;
         MessageBox.Show($"Some of \"{saved.Name}\" isn't in the game files anymore (a game update may have changed it), so it was left out:\n\n" +
                         string.Join("\n", missing), "Animation preset", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -242,6 +274,7 @@ public partial class MainViewModel
 
     public async Task SendSavedScene(SavedScenes.SavedScene saved)
     {
+        if (saved.AbilityId != null) await AbilitiesReady();
         LoadSavedScene(saved);
         await SendScene();
     }
@@ -275,6 +308,8 @@ public partial class MainViewModel
         SceneGun = null;
         SceneAgentAnimation = null;
         SceneGunAnimation = null;
+        SceneAbility = null;
+        SceneAbilityAnimation = null;
     }
 
     private bool sceneExportRunning;
@@ -317,6 +352,8 @@ public partial class MainViewModel
             warnings.Add("There's no agent in the scene: the agent animation goes on the agent armature selected in Blender.");
         if (SceneGun is null && SceneGunAnimation != null)
             warnings.Add("There's no gun in the scene: the gun animation goes on the gun armature selected in Blender.");
+        if (SceneAbility is null && SceneAbilityAnimation != null)
+            warnings.Add("There's no ability model in the scene: the ability animation goes on the armature selected in Blender.");
         if (warnings.Count > 0 &&
             MessageBox.Show(string.Join("\n\n", warnings) + "\n\nSend anyway?", title, MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
@@ -330,13 +367,22 @@ public partial class MainViewModel
                 steps.Add(BlenderService.ExportMessage(await ExportSceneAsset(agent), SceneSettings(agent, "agent", null)));
             if (SceneGun is { } gun)
                 steps.Add(BlenderService.ExportMessage(await ExportSceneAsset(gun), SceneSettings(gun, "gun", SceneAgent != null ? $"agent:{rig}" : null)));
+            if (SceneAbility is { } ability && await ExportAbilityData(ability) is { } abilityData)
+            {
+                var settings = await AbilitySettings(ability);
+                settings.SceneRole = "ability";
+                settings.SceneTarget = SceneAgent != null ? $"agent:{rig}" : null; // held by the agent
+                steps.Add(BlenderService.ExportMessage(abilityData, settings));
+            }
             if (SceneAgentAnimation is { } agentAnimation && await AnimationMessage(agentAnimation, SceneAgent != null ? $"agent:{rig}" : null) is { } a)
                 steps.Add(a);
             if (sendGunAnimation && SceneGunAnimation is { } gunAnimation && await AnimationMessage(gunAnimation, SceneGun != null ? "gun" : null) is { } g)
                 steps.Add(g);
+            if (SceneAbilityAnimation is { } abilityAnimation && await AnimationMessage(abilityAnimation, SceneAbility != null ? "ability" : null) is { } ab)
+                steps.Add(ab);
             if (steps.Count == 0) return;
 
-            var name = SceneAgent?.Name ?? SceneGun?.Name ?? "Scene";
+            var name = SceneAgent?.Name ?? SceneGun?.Name ?? SceneAbility?.Title ?? "Scene";
             BlenderService.SendScene(name, steps);
             if (SceneAgent != null) RegisterSentAsset(BuildAnimationFilterKey(EAssetType.Character, SceneAgent.Item));
             AppLog.Information($"Sent scene {name} ({steps.Count} steps) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");

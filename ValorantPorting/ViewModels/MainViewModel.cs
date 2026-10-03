@@ -245,6 +245,7 @@ public partial class MainViewModel : ObservableObject
         {
             Abilities = new ObservableCollection<AbilityItem>(items);
             AbilitiesLoaded?.Invoke();
+            abilitiesReady.TrySetResult();
             AppLog.Information($"Ability list loaded: {items.Count} models.");
         });
     }
@@ -263,37 +264,8 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var timer = Stopwatch.StartNew();
-            var data = new ExportData { Name = item.Title, Type = "Ability" };
-            await ExportHelpers.ExportLock.WaitAsync(); // one export at a time (they share ExportHelpers.Tasks)
-            try
-            {
-            await Task.Run(() =>
-            {
-                // parts of one model come in together, placed as in game; a rig with the models on its bones
-                data.Parts.AddRange(AbilityResolver.ExportParts(AppVM.CUE4ParseVM.Provider, item));
-            });
-            await Task.WhenAll(ExportHelpers.Tasks.ToArray());
-            ExportHelpers.Tasks.Clear();
-            }
-            finally
-            {
-                ExportHelpers.ExportLock.Release();
-            }
-
-            if (data.Parts.Count == 0)
-            {
-                AppLog.Warning($"{item.Title}: the model could not be read.");
-                return;
-            }
-
-            var (hold1P, hold3P) = await Task.Run(() => AbilityResolver.HoldSockets(AppVM.CUE4ParseVM.Provider, item.Folder));
-            BlenderService.Send(data, new BlenderExportSettings
-            {
-                ReorientBones = false, // like guns: ability props animate with their own bone orientation
-                AnimationFilterKey = $"ability|{item.Folder}/|{item.AgentName} {item.AbilityName}: {item.Part}",
-                HoldSocket1P = hold1P,
-                HoldSocket3P = hold3P
-            });
+            if (await ExportAbilityData(item) is not { } data) return;
+            BlenderService.Send(data, await AbilitySettings(item));
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent {item.Title} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Title}"));
@@ -306,6 +278,49 @@ public partial class MainViewModel : ObservableObject
         {
             abilityExportRunning = false;
         }
+    }
+
+    // an ability model's export (parts of one model together, placed as in game; a rig with the models on its bones);
+    // null if it can't be read
+    private static async Task<ExportData?> ExportAbilityData(AbilityItem item)
+    {
+        var data = new ExportData { Name = item.Title, Type = "Ability" };
+        await ExportHelpers.ExportLock.WaitAsync(); // one export at a time (they share ExportHelpers.Tasks)
+        try
+        {
+            await Task.Run(() => data.Parts.AddRange(AbilityResolver.ExportParts(AppVM.CUE4ParseVM.Provider, item)));
+            await Task.WhenAll(ExportHelpers.Tasks.ToArray());
+            ExportHelpers.Tasks.Clear();
+        }
+        finally
+        {
+            ExportHelpers.ExportLock.Release();
+        }
+
+        if (data.Parts.Count > 0) return data;
+        AppLog.Warning($"{item.Title}: the model could not be read.");
+        return null;
+    }
+
+    // where the agent holds it, and the key the Animations tab filters its animations by
+    private static async Task<BlenderExportSettings> AbilitySettings(AbilityItem item)
+    {
+        var (hold1P, hold3P) = await Task.Run(() => AbilityResolver.HoldSockets(AppVM.CUE4ParseVM.Provider, item.Folder));
+        return new BlenderExportSettings
+        {
+            ReorientBones = false, // like guns: ability props animate with their own bone orientation
+            AnimationFilterKey = $"ability|{item.Folder}/|{item.AgentName} {item.AbilityName}: {item.Part}",
+            HoldSocket1P = hold1P,
+            HoldSocket3P = hold3P
+        };
+    }
+
+    // the Abilities list, loaded if it wasn't (presets with an ability look it up there)
+    private readonly TaskCompletionSource abilitiesReady = new();
+    public Task AbilitiesReady()
+    {
+        LoadAbilities();
+        return abilitiesReady.Task;
     }
 
     // Weapon upgrade level to export ("Level 1" .. fully upgraded, the default) and which agent models
