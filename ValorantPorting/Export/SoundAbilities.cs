@@ -38,6 +38,20 @@ public class SoundAbilities
     private static readonly Regex Folder = new(@"^ShooterGame/Content/Characters/([^/_][^/]*)/S0/Ability_([^/]+)/(.+)\.uasset$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly object SharedLock = new();
+    private static SoundAbilities? shared;
+
+    // built once (about half a second) and used by the Animations tab's names and the Sounds tab
+    public static SoundAbilities Shared(IFileProvider provider, IReadOnlyDictionary<string, AnimationNamer.Agent> agents)
+    {
+        lock (SharedLock) return shared ??= new SoundAbilities(provider, agents);
+    }
+
+    // the ability whose files are in the agent's "Ability_<letter>" folder, with its current key (Raze's "E" folder
+    // holds the Boom Bot, now on C)
+    public Ability? ForFolder(string agent, string letter) =>
+        byLetter.TryGetValue((agent, letter), out var ability) ? ability : null;
+
     public SoundAbilities(IFileProvider provider, IReadOnlyDictionary<string, AnimationNamer.Agent> agents)
     {
         this.agents = agents;

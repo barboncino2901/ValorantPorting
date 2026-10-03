@@ -48,6 +48,18 @@ public sealed class AbilityResolver
         }
     }
 
+    private static readonly object SharedLock = new();
+    private static AbilityResolver? shared;
+
+    // one index for the whole session (about 0.2 s to build), e.g. for the effects that play an animation
+    public static AbilityResolver Shared(IFileProvider provider)
+    {
+        lock (SharedLock) return shared ??= new AbilityResolver(provider);
+    }
+
+    // "/Game/X/Y.Y" -> files (ShooterGame/Content/…uasset) that import the package /Game/X/Y
+    public IReadOnlyList<string> FilesUsing(string objectOrPackagePath) => Users(objectOrPackagePath);
+
     // "/Game/X/Y.Y" -> files (ShooterGame/Content/…uasset) that import the package /Game/X/Y
     private List<string> Users(string objectOrPackagePath)
     {

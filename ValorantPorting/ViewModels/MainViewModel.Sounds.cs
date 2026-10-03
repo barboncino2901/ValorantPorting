@@ -115,7 +115,7 @@ public partial class MainViewModel
             SoundAbilities? abilities = null;
             try
             {
-                abilities = new SoundAbilities(provider, ValorantNames.Agents);
+                abilities = SoundAbilities.Shared(provider, ValorantNames.Agents);
             }
             catch (Exception ex)
             {

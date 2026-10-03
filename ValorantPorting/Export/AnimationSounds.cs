@@ -41,14 +41,57 @@ public static class AnimationSounds
         return cues.OrderBy(c => c.Time).ToList();
     }
 
+    // Effects that play an animation also start sounds with it: ability casts and equips have no sound cues of their
+    // own, their effect ("FXC_Wushu_E_Dashing") plays the montage and its sounds when it starts. Only the sounds made
+    // to start with the effect are taken (not stop / unequip / HUD warning / per-direction ones).
+    private static readonly HashSet<string> StartSounds = new(StringComparer.OrdinalIgnoreCase)
+        { "PlayOnStart", "AudioEvent", "AkAudioEvent" };
+
+    public static List<Cue> EffectCues(IFileProvider provider, Func<string, IReadOnlyList<string>> filesUsing, string objectPath, bool firstPerson)
+    {
+        var cues = new List<Cue>();
+        var path = objectPath.StartsWith("ShooterGame/Content/", StringComparison.OrdinalIgnoreCase)
+            ? "/Game/" + objectPath["ShooterGame/Content/".Length..]
+            : objectPath;
+        foreach (var file in filesUsing(path))
+        {
+            var fileName = file[(file.LastIndexOf('/') + 1)..];
+            if (!fileName.StartsWith("FXC_", StringComparison.OrdinalIgnoreCase) || !file.EndsWith(".uasset")) continue;
+            try
+            {
+                if (!provider.TryLoadPackage(file[..^".uasset".Length], out var package)) continue;
+                foreach (var export in package.GetExports())
+                    foreach (var property in export.Properties)
+                    {
+                        var name = property.Name.Text;
+                        var wanted = StartSounds.Contains(name) || name.Equals(firstPerson ? "PlayOnStart1P" : "PlayOnStart3PAlly", StringComparison.OrdinalIgnoreCase);
+                        if (!wanted || property.Tag is not CUE4Parse.UE4.Assets.Objects.Properties.ObjectProperty { Value: { IsNull: false } index }) continue;
+                        if (index.ResolvedObject?.Class?.Name.Text != "AkAudioEvent" || EventPath(index) is not { } eventPath) continue;
+                        if (cues.All(c => c.EventPath != eventPath)) cues.Add(new Cue(0, eventPath));
+                    }
+            }
+            catch (Exception)
+            {
+                // unreadable effect: no sounds from it
+            }
+        }
+
+        return cues;
+    }
+
     public record Placed(double Time, string Path, string Name); // a .wav at a moment of the animation
 
     // The sounds to send with an animation: the cues of the first source that has any (its montage, then the
     // animation itself), each as a .wav (one version of it: the 1st or 3rd person one to match, English voice).
-    public static List<Placed> Prepare(IFileProvider provider, IEnumerable<string> sources, bool firstPerson)
+    // filesUsing: which files use a file (see AbilityResolver.FilesUsing), to find the effects that play the animation
+    public static List<Placed> Prepare(IFileProvider provider, IEnumerable<string> sources, bool firstPerson,
+        Func<string, IReadOnlyList<string>>? filesUsing = null)
     {
         var placed = new List<Placed>();
-        var cues = sources.Select(source => Read(provider, source)).FirstOrDefault(c => c.Count > 0);
+        var sourceList = sources.ToList();
+        var cues = sourceList.Select(source => Read(provider, source)).FirstOrDefault(c => c.Count > 0);
+        if (cues is null && filesUsing != null)
+            cues = sourceList.Select(source => EffectCues(provider, filesUsing, source, firstPerson)).FirstOrDefault(c => c.Count > 0);
         if (cues is null) return placed;
 
         var wavs = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);

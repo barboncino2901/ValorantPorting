@@ -19,10 +19,13 @@ running the release workflow with that version.
   - Pick a sound and one of its versions (the game plays one of a few at random, some are 1st or 3rd person), then
     **Play**, **Save as .wav** for any video editor, or **Send to Blender** to put it on the timeline at the current
     frame. Voice lines come in the language your game is installed in.
-- **Animations come with their sounds**: animations that make sounds in game (equips, reloads, inspects, ability
-  casts, mostly 1st person) bring them along, each at its exact moment, in Blender's Video Sequencer. Works in scenes
-  and presets too. "Include game sounds" in the Animations tab turns it off. Footsteps aren't included: the game
-  adds them while playing, they aren't part of the animations.
+- **Animations come with their sounds**: animations that make sounds in game bring them along, in Blender's Video
+  Sequencer. Gun equips, reloads and inspects get every sound at its exact moment; abilities (Jett's dash, Neon's
+  ultimate, Raze's Boom Bot, ...) get the sounds the game starts together with them, 1st and 3rd person. Works in
+  scenes and presets too. "Include game sounds" in the Animations tab turns it off. Footsteps aren't included: the
+  game adds them while playing, they aren't part of the animations.
+- **Fix**: ability animations show the ability's current key. Some agents' files still use old keybinds, so e.g.
+  Raze's Boom Bot animations said (E) instead of (C) and her Paint Shells (C) instead of (E).
 - To hear sounds in a render: Output Properties > Encoding, pick an audio codec.
 - Light on memory: sounds are only read when you use them (the sound system starts in about 0.3 s and lets go
   of its memory after 2 minutes without sounds).

@@ -354,7 +354,8 @@ public partial class MainViewModel : ObservableObject
         var provider = AppVM.CUE4ParseVM.Provider;
         var sources = AnimationSounds.SourcesOf(item);
         if (lower is not null) sources.AddRange(AnimationSounds.SourcesOf(lower));
-        var sounds = await Task.Run(() => AnimationSounds.Prepare(provider, sources, AnimationSounds.IsFirstPerson(item)));
+        var sounds = await Task.Run(() => AnimationSounds.Prepare(provider, sources, AnimationSounds.IsFirstPerson(item),
+            AbilityResolver.Shared(provider).FilesUsing));
         if (sounds.Count > 0) AppLog.Information($"{item.Title}: {sounds.Count} game sound(s) included (Blender: Video Sequencer).");
         return sounds.Count > 0 ? sounds : null;
     }
@@ -826,6 +827,16 @@ public partial class MainViewModel : ObservableObject
         if (animationsLoaded || AppVM.CUE4ParseVM is null) return;
         animationsLoaded = true;
         ValorantNames.WaitUntilLoaded(TimeSpan.FromSeconds(10));
+        // ability names with their current keys (the files use old keybinds for some agents)
+        try
+        {
+            var slots = SoundAbilities.Shared(AppVM.CUE4ParseVM.Provider, ValorantNames.Agents);
+            AnimationNamer.AbilityLookup = (agent, letter) => slots.ForFolder(agent, letter)?.ToString();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warning($"Ability keys for animation names unavailable ({ex.Message}).");
+        }
 
         var registry = AppVM.CUE4ParseVM.AssetDataBuffers.Where(a => a is not null).ToList();
         var items = registry
