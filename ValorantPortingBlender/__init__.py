@@ -15,11 +15,12 @@ from mathutils import Matrix, Vector, Quaternion, Euler
 import math
 from .valorant_psk_psa_b5 import pskimport, psaimport
 from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merge_duplicate_materials, find_material_info
+from . import agent_glow
 
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 13, 0),
+    "version": (1, 14, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -1972,6 +1973,15 @@ def import_response(response, holder=None, use_selection=True):
         if obj not in before_import and obj.type == 'ARMATURE':
             obj["vp_preset_model"] = json.dumps(preset_model) if preset_model else ""
             obj["vp_preset_steps"] = "[]"
+    # an agent's in-game glow (Reyna's heart, her ultimate), as a layer on her materials driven from her armature
+    if import_data.get("Glow"):
+        try:
+            glowing = agent_glow.apply(import_data["Glow"], [o for o in bpy.data.objects if o not in before_import], import_texture)
+            if glowing:
+                bpy.app.timers.register(agent_glow.connect_pending, first_interval=0.05)  # once this import is over
+                Log.information(f"Glow added to {glowing} material(s): \"{agent_glow.HEART}\" and \"{agent_glow.ULTIMATE}\" on the armature")
+        except Exception as e:
+            Log.error(f"Could not add the agent's glow: {e}")
     if main is not None and holder is not None:
         if import_type == "Weapon":
             attach_to_bone(main, holder, WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION, "hand")

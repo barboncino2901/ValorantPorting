@@ -15,6 +15,7 @@ public class ExportData
     public string Name;
     public List<ExportPart> Parts = new();
     public string Type;
+    public AgentGlow.Spec? Glow; // an agent's in-game glow (Reyna's heart, her ultimate's tattoos), rebuilt in Blender
 
     public static async Task<UObject> CreateUiData(UBlueprintGeneratedClass asset)
     {
@@ -51,6 +52,7 @@ public class ExportData
             {
                 case EAssetType.Character:
                     ExportHelpers.Character(data.Parts, asset, choices.Models);
+                    data.Glow = AgentGlow.For(data.Parts);
                     break;
                 case EAssetType.Weapon:
                     ExportHelpers.Weapon(data.Parts, style, choices.WeaponLevel);
