@@ -4,6 +4,23 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.15.0
+
+**After this update: close Blender and open it again** (the Blender add-on updates itself).
+
+### New
+- **Save what's in Blender as a preset** (Presets tab): click the agent in Blender and save it with every animation
+  you applied (mixed, on top, after each other) and the gun or ability in its hands. Sending the preset plays them
+  all again in order.
+- **Additive animations work**: about 5,000 more animations can be sent (upper body runs and walks, 1st person
+  idles, walks and jumps, e.g. Neon's High Gear). With "Add on top" only their movement goes onto the current animation.
+- **The spike**: Weapon Skins > Other > Spike, with the defuser. With an agent selected in Blender it goes in their hands;
+  its animations (search "spike") unfold it as when planted.
+- Knife and spike animations are named as such ("Knife (Arcane): Equip", "Spike: Plant Intro").
+
+### Fixes
+- Blend spaces and other entries that can't be exported are no longer in the Animations list.
+
 ## 1.14.0
 
 **After this update: close Blender and open it again** (the Blender add-on updates itself).
