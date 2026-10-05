@@ -166,7 +166,7 @@ public partial class MainViewModel : ObservableObject
 
             var sounds = await SoundsFor(upper, lower);
             BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop, sounds: sounds,
-                layer: AppSettings.Current.LayerAnimations);
+                mode: AppSettings.Current.AnimationMode);
             UserLibrary.AddRecent(upper.LibraryId);
             UserLibrary.AddRecent(lower.LibraryId);
             AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
@@ -365,16 +365,17 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    // what an animation does on a model that's already animated: replace that animation, or go on top of it (only the
-    // bones it moves change, e.g. a face animation over a body animation)
-    public List<string> AnimationModeOptions { get; } = ["Replace its animation", "Add on top"];
+    // what an animation does on a model that's already animated: replace that animation, go on top of it (only the
+    // bones it moves change, e.g. a face animation over a body animation) or play after it (an equip, then its fire)
+    public List<string> AnimationModeOptions { get; } = ["Replace its animation", "Add on top", "Play after"];
+    private static readonly string[] AnimationModes = ["Replace", "Layer", "Chain"];
 
     public string AnimationMode
     {
-        get => AnimationModeOptions[AppSettings.Current.LayerAnimations ? 1 : 0];
+        get => AnimationModeOptions[Math.Max(0, Array.IndexOf(AnimationModes, AppSettings.Current.AnimationMode))];
         set
         {
-            AppSettings.Current.LayerAnimations = value == AnimationModeOptions[1];
+            AppSettings.Current.AnimationMode = AnimationModes[Math.Max(0, AnimationModeOptions.IndexOf(value))];
             OnPropertyChanged();
         }
     }
@@ -979,7 +980,7 @@ public partial class MainViewModel : ObservableObject
 
             var sounds = await SoundsFor(item);
             BlenderService.SendAnimation(item.Name, paths[0], repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop,
-                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds, layer: AppSettings.Current.LayerAnimations);
+                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds, mode: AppSettings.Current.AnimationMode);
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));

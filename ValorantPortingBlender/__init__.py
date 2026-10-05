@@ -745,20 +745,25 @@ def show_message(message, title="Valorant Porting", icon='INFO'):
 def import_animation(data, armature=None):
     """armature: where it goes (a scene says so); otherwise the selected armature"""
     armature = armature or find_selected_armature()
-    # "Layer": on top of the current animation (only the bones this one moves change), not instead of it
-    layer = data.get("Mode") == "Layer"
-    base = armature.animation_data.action if layer and armature is not None and armature.animation_data else None
+    # "Layer": on top of the current animation (only the bones this one moves change); "Chain": after it
+    mode = data.get("Mode")
+    keep = mode in ("Layer", "Chain")
+    base = armature.animation_data.action if keep and armature is not None and armature.animation_data else None
     _apply_animation(data, armature)
     action = armature.animation_data.action if armature is not None and armature.animation_data else None
+    sounds_start = None
     if action is not None and action != base:
+        continuous_quaternions(action)
         # whether it loops (a run, an idle): a layer put on it later can repeat it to its own length
         action["vp_loops"] = bool(data.get("LowerLoops")) and (not data.get("UpperAnimationPath") or bool(data.get("UpperLoops")))
-        if base is not None:
+        if base is not None and mode == "Layer":
             action = layer_actions(armature, base, action, data.get("Name"))
+        elif base is not None:
+            action, sounds_start = chain_actions(armature, base, action, data.get("Name"))
     if armature is not None and base is None:
-        remove_animation_sounds(armature)  # the previous animation's sounds go with it (a layer keeps them)
+        remove_animation_sounds(armature)  # the previous animation's sounds go with it (a layer or chain keeps them)
     if action is not None:
-        add_animation_sounds(data, action, owner=armature.name)
+        add_animation_sounds(data, action, owner=armature.name, start=sounds_start)
 
 
 def remove_animation_sounds(armature):
@@ -776,9 +781,10 @@ def remove_animation_sounds(armature):
         Log.information(f"Removed {len(old)} sound(s) of the previous animation on {armature.name}")
 
 
-def add_animation_sounds(data, action, owner=None):
+def add_animation_sounds(data, action, owner=None, start=None):
     """The game's sounds for this animation (gun handling, ability casts, ...) as sound strips in the Video Sequencer,
-    each at its moment of the animation; they play with the timeline and go into renders with audio."""
+    each at its moment of the animation; they play with the timeline and go into renders with audio.
+    start: the frame the animation starts at (a chained one starts after the previous); default the action's start."""
     sounds = data.get("Sounds") or []
     if not sounds:
         return
@@ -788,7 +794,7 @@ def add_animation_sounds(data, action, owner=None):
     if strips is None:
         strips = editor.sequences  # Blender before 4.4
     fps = scene.render.fps / scene.render.fps_base
-    start = action.frame_range[0]
+    start = action.frame_range[0] if start is None else start
 
     # the same sound at the same moment only once (1st person arms and the gun often share a cue)
     def key(path, frame):
@@ -1103,6 +1109,109 @@ def layer_actions(armature, base, layer, name):
     _fit_timeline(result)
     Log.information(f"{name} on top of {base.name}: {len(moving)} bone(s) from it, the rest as before")
     return result
+
+
+def continuous_quaternions(action):
+    """q and -q are the same rotation, and the game's keys sometimes switch between them from one key to the next
+    (Breach's ultimate fire: the weapon socket). Blender blends keys number by number, so between two such keys the
+    rotation passes through nothing and the bone spins (seen between whole frames: motion blur, a shifted or chained
+    clip). Each key takes the sign closest to the previous one."""
+    quaternions = {}
+    for curve in _action_fcurves(action):
+        if curve.data_path.endswith("rotation_quaternion"):
+            quaternions.setdefault(curve.data_path, {})[curve.array_index] = curve
+    fixed = 0
+    for parts in quaternions.values():
+        if len(parts) != 4 or len({len(parts[i].keyframe_points) for i in range(4)}) != 1:
+            continue
+        count = len(parts[0].keyframe_points)
+        coords = []
+        for i in range(4):
+            flat = [0.0] * (count * 2)
+            parts[i].keyframe_points.foreach_get("co", flat)
+            coords.append(flat)
+        changed = False
+        for k in range(1, count):
+            if sum(coords[i][2 * k - 1] * coords[i][2 * k + 1] for i in range(4)) < 0:
+                for i in range(4):
+                    coords[i][2 * k + 1] = -coords[i][2 * k + 1]
+                changed = True
+        if changed:
+            for i in range(4):
+                parts[i].keyframe_points.foreach_set("co", coords[i])
+                parts[i].update()
+            fixed += 1
+    if fixed:
+        Log.information(f"{action.name}: {fixed} bone(s) kept from spinning between keys")
+
+
+CHAIN_BLEND_SECONDS = 0.2  # between chained animations: the last pose eases into the next one's first
+
+
+def chain_actions(armature, base, clip, name):
+    """The current animation (base), then another one after it: the clip's keys follow the base's end, after a short
+    blend (easing from the base's last pose into the clip's first). Returns the result (a copy: base stays as it
+    was) and the frame the clip starts at."""
+    scene = bpy.context.scene
+    blend = max(1, round(CHAIN_BLEND_SECONDS * scene.render.fps / scene.render.fps_base))
+    base_start, base_end = base.frame_range
+    clip_start = clip.frame_range[0]
+    offset = base_end + blend - clip_start
+
+    result = base.copy()
+    result.name = f"{base.name} → {name}"
+    result["vp_loops"] = False
+    armature.animation_data.action = result
+    if hasattr(armature.animation_data, "action_slot") and len(result.slots) > 0:
+        armature.animation_data.action_slot = result.slots[0]
+    target = {(fc.data_path, fc.array_index): fc for fc in _action_fcurves(result)}
+    clip_curves = list(_action_fcurves(clip))
+
+    # q and -q are the same rotation: a clip stored with the other sign would blend the long way round (a spin)
+    flip = set()
+    quaternions = {}
+    for curve in clip_curves:
+        if curve.data_path.endswith("rotation_quaternion"):
+            quaternions.setdefault(curve.data_path, {})[curve.array_index] = curve
+    for path, parts in quaternions.items():
+        if len(parts) == 4 and all((path, i) in target for i in range(4)):
+            before = [target[(path, i)].evaluate(base_end) for i in range(4)]
+            after = [parts[i].evaluate(clip_start) for i in range(4)]
+            if sum(a * b for a, b in zip(before, after)) < 0:
+                flip.add(path)
+
+    for source in clip_curves:
+        key = (source.data_path, source.array_index)
+        curve = target.get(key)
+        if curve is None:
+            # a bone the base doesn't animate stays at rest during it
+            curve = target[key] = _fcurve_new_on(result, armature, *key)
+            rest = 1.0 if (key[0].endswith("rotation_quaternion") and key[1] == 0) or key[0].endswith("scale") else 0.0
+            curve.keyframe_points.add(2)
+            curve.keyframe_points.foreach_set("co", [base_start, rest, base_end, rest])
+        elif len(curve.keyframe_points) and curve.keyframe_points[-1].co[0] < base_end - 1e-3:
+            curve.keyframe_points.insert(base_end, curve.evaluate(base_end), options={'FAST'})
+        if len(curve.keyframe_points):
+            last = curve.keyframe_points[-1]
+            last.interpolation = 'SINE'
+            last.easing = 'EASE_IN_OUT'
+        sign = -1.0 if source.data_path in flip else 1.0
+        count = len(source.keyframe_points)
+        coords = [0.0] * (count * 2)
+        source.keyframe_points.foreach_get("co", coords)
+        old = len(curve.keyframe_points)
+        curve.keyframe_points.add(count)
+        flat = [0.0] * ((old + count) * 2)
+        curve.keyframe_points.foreach_get("co", flat)
+        flat[old * 2:] = [x for frame, value in zip(coords[0::2], coords[1::2]) for x in (frame + offset, value * sign)]
+        curve.keyframe_points.foreach_set("co", flat)
+        for point, original in zip(curve.keyframe_points[old:], source.keyframe_points):
+            point.interpolation = original.interpolation
+        curve.update()
+    bpy.data.actions.remove(clip)
+    _fit_timeline(result)
+    Log.information(f"{name} plays after {base.name}, from frame {int(base_end + blend)}")
+    return result, base_end + blend
 
 
 def _fcurve_new_on(action, owner, data_path, index):
