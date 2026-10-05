@@ -71,22 +71,28 @@ public sealed class AbilityResolver
                                                             Regex.IsMatch(k[(k.LastIndexOf('/') + 1)..], "^(Ability|Gun)_", RegexOptions.IgnoreCase) &&
                                                             !NotInGame.IsMatch(k)))
         {
-            try
-            {
-                var package = file[..^".uasset".Length];
-                if (!provider.TryLoadPackageObject($"{package}.{package[(package.LastIndexOf('/') + 1)..]}_C", out CUE4Parse.UE4.Objects.Engine.UBlueprintGeneratedClass cls) ||
-                    cls.ClassDefaultObject.Load() is not { } defaults) continue;
-                string? Socket(string name) => defaults.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>(name) is { IsNone: false } socket ? socket.Text : null;
-                var (first, third) = (Socket("EquippableAttachPoint1P"), Socket("EquippableAttachPoint3P"));
-                if (first != null || third != null) return (first, third);
-            }
-            catch (Exception)
-            {
-                // unreadable: try the next file
-            }
+            var (first, third) = HoldSocketsOf(provider, file[..^".uasset".Length]);
+            if (first != null || third != null) return (first, third);
         }
 
         return (null, null);
+    }
+
+    // The same, read from one equippable's file ("ShooterGame/Content/Equippables/Bomb/BombEquippable": the spike
+    // in the left hand, on "L_WeaponMasterSocket"); (null, null) when it doesn't say or can't be read
+    public static (string? FirstPerson, string? ThirdPerson) HoldSocketsOf(IFileProvider provider, string package)
+    {
+        try
+        {
+            if (!provider.TryLoadPackageObject($"{package}.{package[(package.LastIndexOf('/') + 1)..]}_C", out CUE4Parse.UE4.Objects.Engine.UBlueprintGeneratedClass cls) ||
+                cls.ClassDefaultObject.Load() is not { } defaults) return (null, null);
+            string? Socket(string name) => defaults.GetOrDefault<CUE4Parse.UE4.Objects.UObject.FName>(name) is { IsNone: false } socket ? socket.Text : null;
+            return (Socket("EquippableAttachPoint1P"), Socket("EquippableAttachPoint3P"));
+        }
+        catch (Exception)
+        {
+            return (null, null); // unreadable
+        }
     }
 
     // The ability folder letter whose effects / ability files play this animation (directly or through its montages),

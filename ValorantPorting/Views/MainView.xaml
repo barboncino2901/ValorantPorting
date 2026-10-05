@@ -405,7 +405,9 @@
                                         <controls:TextWithIcon Label="Weapon Skins"
                                                                ImageSource="/ValorantPorting;component/Resources/Weapon.png" />
                                     </TabItem.Header>
-                                    <ListBox ItemsSource="{Binding Weapons}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}">
+                                    <Grid>
+                                    <ListBox ItemsSource="{Binding Weapons}" SelectionChanged="OnAssetSelectionChanged" ItemContainerStyle="{StaticResource LibraryItemContainer}"
+                                             Visibility="{Binding WeaponGridVisibility}">
                                         <ListBox.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <controls:UniformGridPanel IsItemsHost="True" MinItemHeight="108" Rows="5" Columns="6"
@@ -413,6 +415,38 @@
                                             </ItemsPanelTemplate>
                                         </ListBox.ItemsPanel>
                                     </ListBox>
+                                    <!-- Other > Spike: the spike and its defuser (not gun skins) -->
+                                    <StackPanel Visibility="{Binding SpikePanelVisibility}" Margin="4 4 4 0">
+                                        <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0 0 0 10"
+                                                   Text="Click an agent in Blender first to put it in their hands (the spike in the left hand, the defuser in the right); with nothing selected it comes in on its own. Its animations are in the Animations tab: search &quot;spike&quot;." />
+                                        <ItemsControl ItemsSource="{Binding SpikeItems}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="#151B23" CornerRadius="6" Padding="12" Margin="0 0 10 10" Width="230">
+                                                        <StackPanel>
+                                                            <Image Source="{Binding Icon}" Height="72" Margin="0 0 0 8" RenderOptions.BitmapScalingMode="HighQuality" />
+                                                            <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Opacity="0.65" FontSize="11.5" Margin="0 2 0 10" />
+                                                            <Button Style="{DynamicResource {x:Static adonisUi:Styles.AccentButton}}" Padding="8 6"
+                                                                    Command="{Binding DataContext.SendSpikeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                    CommandParameter="{Binding}">
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <Image Source="/ValorantPorting;component/Resources/Blender.png" Width="16" Height="16" RenderOptions.BitmapScalingMode="HighQuality" />
+                                                                    <TextBlock Text="Send to Blender" Margin="6 0 0 0" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                </StackPanel>
+                                                            </Button>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                    </Grid>
                                 </TabItem>
                                 <TabItem Style="{StaticResource HiddenTab}">
                                     <TabItem.Header>

@@ -22,8 +22,15 @@ public static class AnimationNamer
     private static readonly Dictionary<string, string> Views = new(StringComparer.OrdinalIgnoreCase)
     {
         ["TP"] = "3rd person", ["FP"] = "1st person", ["CS"] = "Character select", ["GN"] = "Gun",
-        ["GNTP"] = "Gun (3rd person)", ["EQ"] = "Melee", ["AB"] = "Ability prop (1st person)",
+        ["GNTP"] = "Gun (3rd person)", ["EQ"] = "Knife", ["EQTP"] = "Spike", ["AB"] = "Ability prop (1st person)",
         ["ABTP"] = "Ability prop (3rd person)", ["ABCS"] = "Ability prop (character select)"
+    };
+
+    // the held items that aren't guns: the spike ("Bomb" in file names), its defuser, the knife ("Melee"; Aeris's
+    // totems are a knife too). Named this way in titles, whatever ValorantNames calls them
+    private static readonly Dictionary<string, string> HeldItems = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Bomb"] = "Spike", ["Defuser"] = "Spike defuser", ["Melee"] = "Knife", ["Totems"] = "Knife"
     };
 
     private static readonly Dictionary<string, string> Directions = new(StringComparer.Ordinal)
@@ -87,6 +94,12 @@ public static class AnimationNamer
                 previousWasAgent = true;
                 continue;
             }
+            if (gunName is null && HeldItems.TryGetValue(token, out var heldItem))
+            {
+                gunName = heldItem;
+                if (token.Equals("Totems", StringComparison.OrdinalIgnoreCase)) words.Add("Totems");
+                continue;
+            }
             if (gunName is null && guns.TryGetValue(token, out var foundGun)) { gunName = foundGun; continue; }
             if (Regex.IsMatch(token, "^S[0-9]$")) { previousWasSkin = true; continue; } // S0 = default skin
             // skin lines only apply to weapons, melee and finishers, never to an agent's own animations
@@ -123,6 +136,8 @@ public static class AnimationNamer
 
         var title = subject is null ? action : action.Length > 0 ? $"{subject}: {action}" : subject;
         if (string.IsNullOrWhiteSpace(title)) title = name;
+        // the item's own animations (EQ_): a spike or defuser one isn't a knife's
+        if (view == "Knife" && gunName is "Spike" or "Spike defuser") view = "Spike";
         if (shared && view.Length > 0) view += ", shared";
         return (title, view);
     }

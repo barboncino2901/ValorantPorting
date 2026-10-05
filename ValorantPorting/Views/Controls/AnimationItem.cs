@@ -37,6 +37,8 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
         var motion = assetName.Replace("Sprinter", "", StringComparison.OrdinalIgnoreCase);
         IsLoop = LoopingName.IsMatch(motion) && !OneShotName.IsMatch(motion);
         ModelTag = ModelTags.TryGetValue(assetName.Split('_')[0], out var tag) ? tag : "";
+        // the item's own animations (EQ_) are the knife's, except the spike's and its defuser's
+        if (ModelTag == "Knife" && System.Text.RegularExpressions.Regex.IsMatch(assetName, "(?i)_(Bomb|Defuser)_")) ModelTag = "Spike";
     }
 
     // "Vandal: Equip (full body)": both halves of an upper/lower body pair
@@ -100,7 +102,7 @@ public partial class AnimationItem : ObservableObject, ILibraryItem
     private static readonly Dictionary<string, string> ModelTags = new(StringComparer.OrdinalIgnoreCase)
     {
         ["TP"] = "3rd person", ["FP"] = "1st person", ["CS"] = "Char select", ["GN"] = "Gun 1st person", ["GNTP"] = "Gun 3rd person",
-        ["AB"] = "Ability prop", ["ABTP"] = "Ability prop", ["ABCS"] = "Ability prop", ["EQ"] = "Melee"
+        ["AB"] = "Ability prop", ["ABTP"] = "Ability prop", ["ABCS"] = "Ability prop", ["EQ"] = "Knife", ["EQTP"] = "Spike"
     };
 
     public string ModelTag { get; }

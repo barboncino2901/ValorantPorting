@@ -55,6 +55,8 @@ public partial class MainViewModel
             rows.Add(new GunRow(group.Key.ToUpperInvariant(), null, true));
             rows.AddRange(group.Select(g => new GunRow(g.Name, g.PathPart, false)));
         }
+        rows.Add(new GunRow("OTHER", null, true));
+        rows.Add(new GunRow("Spike", SpikeRow, false));
 
         GunRows = rows;
         SelectedGunRow = rows[0];
@@ -63,6 +65,10 @@ public partial class MainViewModel
     partial void OnSelectedGunRowChanged(GunRow? value)
     {
         if (value is { IsHeader: true }) return;
+        if (value is { PathPart: SpikeRow }) LoadSpikeIcons(); // before its cards are shown
+        OnPropertyChanged(nameof(SpikePanelVisibility));
+        OnPropertyChanged(nameof(WeaponGridVisibility));
+        if (value is { PathPart: SpikeRow }) return; // its own panel instead of the skin tiles
         GunFilterChanged?.Invoke();
     }
 
