@@ -34,7 +34,11 @@ public partial class AppSettings : ObservableObject
 
     // on a model that's already animated, a new animation: "Replace"s it, goes on top ("Layer": only the bones it
     // moves) or plays after it ("Chain")
-    [ObservableProperty] private string animationMode = "Replace";
+    [ObservableProperty] private string animationMode = "Replace";
+
+    [ObservableProperty] private double chainBlendSeconds = 0.2; // "Play after": how long the last pose eases into the next animation
+
+    [ObservableProperty] private bool chainFromCurrentFrame; // "Play after" starts at Blender's current frame (cuts the rest) instead of the end
 
     public static void Load()
     {

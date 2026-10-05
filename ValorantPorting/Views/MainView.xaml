@@ -644,6 +644,18 @@
                                     <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding AnimationModeOptions}" SelectedItem="{Binding AnimationMode, Mode=TwoWay}" Width="150" />
                                     <TextBlock Text="If already animated" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                 </DockPanel>
+                                <StackPanel Visibility="{Binding ChainOptionsVisibility}">
+                                    <DockPanel Margin="0 6 0 0"
+                                               ToolTip="Where this animation starts: when the current one ends, or at the frame Blender's timeline is on, cutting what comes after it (an animation cancel, e.g. Jett's next knife throw before the previous one settles). Sound effects of the cut part stop there; voice lines keep playing.">
+                                        <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding ChainStartOptions}" SelectedItem="{Binding ChainStart, Mode=TwoWay}" Width="150" />
+                                        <TextBlock Text="Start" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                    <DockPanel Margin="0 6 0 0"
+                                               ToolTip="How long the previous pose takes to ease into this animation's first pose. None: it starts right away.">
+                                        <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding ChainBlendOptions}" SelectedItem="{Binding ChainBlend, Mode=TwoWay}" Width="150" />
+                                        <TextBlock Text="Blend into it" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </StackPanel>
                                 <Button Style="{DynamicResource {x:Static adonisUi:Styles.AccentButton}}" Command="{Binding ExportAnimationBlenderCommand}" Margin="0 12 0 0" Padding="8 8"
                                         ToolTip="Applies this animation to the agent or gun selected in Blender (double-clicking it in the list does the same).">
                                     <StackPanel Orientation="Horizontal">

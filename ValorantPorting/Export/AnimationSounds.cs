@@ -399,7 +399,7 @@ public static class AnimationSounds
     }
 
     // a .wav at a moment of the animation; Loop: the game repeats it while the animation plays
-    public record Placed(double Time, string Path, string Name, bool Loop = false);
+    public record Placed(double Time, string Path, string Name, bool Loop = false, bool Voice = false); // Voice: a voice line (not cut by the next animation)
 
     // The sounds to send with an animation, each as a .wav (one version: the 1st or 3rd person one to match,
     // English voice): effects and/or voice lines
@@ -427,7 +427,7 @@ public static class AnimationSounds
                 }
             }
 
-            if (wav is not null) placed.Add(new Placed(cue.Time, wav, cue.EventPath[(cue.EventPath.LastIndexOf('/') + 1)..], !cue.Voice && IsLoop(cue)));
+            if (wav is not null) placed.Add(new Placed(cue.Time, wav, cue.EventPath[(cue.EventPath.LastIndexOf('/') + 1)..], !cue.Voice && IsLoop(cue), cue.Voice));
         }
 
         return placed;

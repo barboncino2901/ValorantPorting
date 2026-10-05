@@ -377,6 +377,40 @@ public partial class MainViewModel : ObservableObject
         {
             AppSettings.Current.AnimationMode = AnimationModes[Math.Max(0, AnimationModeOptions.IndexOf(value))];
             OnPropertyChanged();
+            OnPropertyChanged(nameof(ChainOptionsVisibility));
+        }
+    }
+
+    // "Play after": how long the current animation's last pose takes to ease into the next one, and where the next
+    // starts: when the current one ends, or at Blender's current frame (cancelling the rest, like a quick follow-up attack)
+    public Visibility ChainOptionsVisibility => AppSettings.Current.AnimationMode == "Chain" ? Visibility.Visible : Visibility.Collapsed;
+
+    public List<string> ChainBlendOptions { get; } = ["None", "0.05 s", "0.1 s", "0.2 s", "0.3 s", "0.5 s"];
+    private static readonly double[] ChainBlends = [0, 0.05, 0.1, 0.2, 0.3, 0.5];
+
+    public string ChainBlend
+    {
+        get
+        {
+            var index = Array.FindIndex(ChainBlends, b => Math.Abs(b - AppSettings.Current.ChainBlendSeconds) < 1e-6);
+            return ChainBlendOptions[index < 0 ? 3 : index];
+        }
+        set
+        {
+            AppSettings.Current.ChainBlendSeconds = ChainBlends[Math.Max(0, ChainBlendOptions.IndexOf(value))];
+            OnPropertyChanged();
+        }
+    }
+
+    public List<string> ChainStartOptions { get; } = ["When it ends", "At Blender's current frame"];
+
+    public string ChainStart
+    {
+        get => ChainStartOptions[AppSettings.Current.ChainFromCurrentFrame ? 1 : 0];
+        set
+        {
+            AppSettings.Current.ChainFromCurrentFrame = value == ChainStartOptions[1];
+            OnPropertyChanged();
         }
     }
 

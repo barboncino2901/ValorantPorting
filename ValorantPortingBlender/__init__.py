@@ -759,7 +759,14 @@ def import_animation(data, armature=None):
         if base is not None and mode == "Layer":
             action = layer_actions(armature, base, action, data.get("Name"))
         elif base is not None:
-            action, sounds_start = chain_actions(armature, base, action, data.get("Name"))
+            # starting at the timeline's current frame cuts the rest of the current animation (an animation cancel)
+            cut = bpy.context.scene.frame_current if data.get("ChainFrom") == "CurrentFrame" else None
+            blend = data.get("ChainBlend")
+            action, sounds_start, join = chain_actions(armature, base, action, data.get("Name"),
+                                                       CHAIN_BLEND_SECONDS if blend is None else float(blend), cut)
+            # the earlier animations' sound effects stop where the next one takes over: their loops always, the
+            # rest when this one brings sounds of its own; voice lines play on
+            stop_animation_sounds(armature, join, loops_only=not data.get("Sounds"))
     if armature is not None and base is None:
         remove_animation_sounds(armature)  # the previous animation's sounds go with it (a layer or chain keeps them)
     if action is not None:
@@ -779,6 +786,27 @@ def remove_animation_sounds(armature):
         strips.remove(strip)
     if old:
         Log.information(f"Removed {len(old)} sound(s) of the previous animation on {armature.name}")
+
+
+def stop_animation_sounds(armature, frame, loops_only=False):
+    """The sound effects of the animations applied to this armature before stop at this frame (cut short, or removed
+    if they'd start later); voice lines play on. loops_only: only the looping ones (a beam's hum, a fire loop)."""
+    editor = bpy.context.scene.sequence_editor
+    if editor is None:
+        return
+    strips = editor.strips if hasattr(editor, "strips") else editor.sequences
+    stopped = 0
+    for strip in list(strips):
+        if strip.get("vp_armature") != armature.name or strip.get("vp_voice") or (loops_only and not strip.get("vp_loop")):
+            continue
+        if strip.frame_final_start >= frame:
+            strips.remove(strip)
+            stopped += 1
+        elif strip.frame_final_end > frame:
+            strip.frame_final_end = int(frame)
+            stopped += 1
+    if stopped:
+        Log.information(f"Stopped {stopped} sound(s) of the previous animation at frame {int(frame)}")
 
 
 def add_animation_sounds(data, action, owner=None, start=None):
@@ -825,6 +853,8 @@ def add_animation_sounds(data, action, owner=None, start=None):
         strip.channel = channel
         if owner:
             strip["vp_armature"] = owner
+        strip["vp_voice"] = bool(sound.get("Voice"))
+        strip["vp_loop"] = bool(sound.get("Loop"))
         added += 1
         # a looping sound (an ultimate's hum, a beam) repeats until the animation ends, as in game
         if sound.get("Loop") and strip.frame_final_duration > 1:
@@ -840,6 +870,8 @@ def add_animation_sounds(data, action, owner=None, start=None):
                     again.channel = strip.channel
                 if owner:
                     again["vp_armature"] = owner
+                again["vp_voice"] = False
+                again["vp_loop"] = True
                 copy_start = again.frame_final_end
                 copies += 1
     if added:
@@ -1148,13 +1180,19 @@ def continuous_quaternions(action):
 CHAIN_BLEND_SECONDS = 0.2  # between chained animations: the last pose eases into the next one's first
 
 
-def chain_actions(armature, base, clip, name):
+def chain_actions(armature, base, clip, name, blend_seconds=CHAIN_BLEND_SECONDS, cut=None):
     """The current animation (base), then another one after it: the clip's keys follow the base's end, after a short
-    blend (easing from the base's last pose into the clip's first). Returns the result (a copy: base stays as it
-    was) and the frame the clip starts at."""
+    blend (easing from the base's last pose into the clip's first). cut: a frame inside the base where it stops instead
+    (the rest is dropped, like an animation cancel). Returns the result (a copy: base stays as it was), the frame the
+    clip starts at and the frame the base stops at."""
     scene = bpy.context.scene
-    blend = max(1, round(CHAIN_BLEND_SECONDS * scene.render.fps / scene.render.fps_base))
+    blend = max(1, round(blend_seconds * scene.render.fps / scene.render.fps_base))
     base_start, base_end = base.frame_range
+    if cut is not None and not base_start < cut < base_end:
+        Log.warning(f"Frame {cut} isn't inside the current animation ({int(base_start)}-{int(base_end)}): {name} plays after its end")
+        cut = None
+    if cut is not None:
+        base_end = float(cut)
     clip_start = clip.frame_range[0]
     offset = base_end + blend - clip_start
 
@@ -1165,6 +1203,9 @@ def chain_actions(armature, base, clip, name):
     if hasattr(armature.animation_data, "action_slot") and len(result.slots) > 0:
         armature.animation_data.action_slot = result.slots[0]
     target = {(fc.data_path, fc.array_index): fc for fc in _action_fcurves(result)}
+    if cut is not None:
+        for curve in target.values():
+            _truncate_curve(curve, base_end)
     clip_curves = list(_action_fcurves(clip))
 
     # q and -q are the same rotation: a clip stored with the other sign would blend the long way round (a spin)
@@ -1210,8 +1251,25 @@ def chain_actions(armature, base, clip, name):
         curve.update()
     bpy.data.actions.remove(clip)
     _fit_timeline(result)
-    Log.information(f"{name} plays after {base.name}, from frame {int(base_end + blend)}")
-    return result, base_end + blend
+    Log.information(f"{name} plays after {base.name}, from frame {int(base_end + blend)}"
+                    + (f" (cut at frame {int(base_end)})" if cut is not None else ""))
+    return result, base_end + blend, base_end
+
+
+def _truncate_curve(curve, end):
+    """The curve stops at this frame: a key there (its value at that moment) and none after it."""
+    points = curve.keyframe_points
+    if not len(points) or points[-1].co[0] <= end + 1e-4:
+        return
+    value = curve.evaluate(end)
+    kept = [(p.co[0], p.co[1], p.interpolation) for p in points if p.co[0] < end - 1e-4]
+    points.clear()
+    kept.append((end, value, 'LINEAR'))
+    points.add(len(kept))
+    points.foreach_set("co", [x for frame, v, _ in kept for x in (frame, v)])
+    for point, (_, _, interpolation) in zip(points, kept):
+        point.interpolation = interpolation
+    curve.update()
 
 
 def _fcurve_new_on(action, owner, data_path, index):

@@ -65,8 +65,11 @@ public class BlenderService : SocketServiceBase
             UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
             Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
             Mode = mode ?? "Replace",
+            // "Chain": the blend into it (seconds) and whether it starts at Blender's current frame, cutting the rest
+            ChainBlend = AppSettings.Current.ChainBlendSeconds,
+            ChainFrom = AppSettings.Current.ChainFromCurrentFrame ? "CurrentFrame" : "End",
             SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList(),
-            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop }).ToList()
+            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop, s.Voice }).ToList()
         }
     };
 
