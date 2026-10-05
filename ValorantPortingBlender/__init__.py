@@ -813,21 +813,33 @@ def send_preset():
     def holder_of(obj):
         return next((c.target for c in obj.constraints if c.type == 'CHILD_OF' and c.target is not None), None)
 
+    def top(obj):
+        """what this piece is attached to, all the way up: a gun's scope or magazine is on the gun's body, which is
+        in the agent's hand"""
+        seen = set()
+        while (up := holder_of(obj)) is not None and up not in seen:
+            seen.add(obj)
+            obj = up
+        return obj
+
+    def is_agent(obj):
+        return kind(obj) == "agent" or obj.name.split("_")[0].upper() in ("TP", "FP", "CS")
+
     selected = find_selected_armature()
     reply = {}
     if selected is None:
         reply["Error"] = "Click the agent in Blender first (or a gun or ability on its own), then save again."
     else:
-        agent = selected if kind(selected) == "agent" else holder_of(selected)
-        if agent is not None and (kind(agent) == "agent" or agent.name.split("_")[0].upper() in ("TP", "FP", "CS")):
-            reply["Agent"] = info(agent)
+        root = top(selected)
+        if is_agent(root):
+            reply["Agent"] = info(root)
             for obj in bpy.data.objects:
-                if obj.type == 'ARMATURE' and holder_of(obj) == agent and kind(obj) in ("gun", "ability"):
+                if obj.type == 'ARMATURE' and holder_of(obj) == root and kind(obj) in ("gun", "ability"):
                     reply["Gun" if kind(obj) == "gun" else "Ability"] = info(obj)
-        elif kind(selected) in ("gun", "ability"):
-            reply["Gun" if kind(selected) == "gun" else "Ability"] = info(selected)
+        elif kind(root) in ("gun", "ability"):
+            reply["Gun" if kind(root) == "gun" else "Ability"] = info(root)
         else:
-            reply["Agent"] = info(selected)  # sent before this version: only its animations, if any
+            reply["Agent"] = info(root)  # sent before this version: only its animations, if any
     try:
         selection_socket.sendto(("VP_PRESET|" + json.dumps(reply)).encode("utf-8"), ("localhost", SELECTION_PORT))
     except Exception as e:
