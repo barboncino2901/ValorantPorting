@@ -19,7 +19,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 11, 0),
+    "version": (1, 12, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -745,11 +745,20 @@ def show_message(message, title="Valorant Porting", icon='INFO'):
 def import_animation(data, armature=None):
     """armature: where it goes (a scene says so); otherwise the selected armature"""
     armature = armature or find_selected_armature()
+    # "Layer": on top of the current animation (only the bones this one moves change), not instead of it
+    layer = data.get("Mode") == "Layer"
+    base = armature.animation_data.action if layer and armature is not None and armature.animation_data else None
     _apply_animation(data, armature)
-    if armature is not None:
-        remove_animation_sounds(armature)  # the previous animation's sounds go with it
-    if armature is not None and armature.animation_data and armature.animation_data.action:
-        add_animation_sounds(data, armature.animation_data.action, owner=armature.name)
+    action = armature.animation_data.action if armature is not None and armature.animation_data else None
+    if action is not None and action != base:
+        # whether it loops (a run, an idle): a layer put on it later can repeat it to its own length
+        action["vp_loops"] = bool(data.get("LowerLoops")) and (not data.get("UpperAnimationPath") or bool(data.get("UpperLoops")))
+        if base is not None:
+            action = layer_actions(armature, base, action, data.get("Name"))
+    if armature is not None and base is None:
+        remove_animation_sounds(armature)  # the previous animation's sounds go with it (a layer keeps them)
+    if action is not None:
+        add_animation_sounds(data, action, owner=armature.name)
 
 
 def remove_animation_sounds(armature):
@@ -1036,6 +1045,64 @@ def merge_upper_lower(armature, lower_action, upper_action, name):
     bpy.data.actions.remove(upper_action)
     bpy.context.scene.frame_start, bpy.context.scene.frame_end = int(start), int(end)
     Log.information(f"Merged upper and lower body into {lower_action.name}")
+
+
+def _moving_bones(action):
+    """Bones whose keys actually change. Riot's animations key every bone (a face animation also keys the body, frozen
+    in its rest pose), so being keyed doesn't mean being animated."""
+    moving = set()
+    for curve in _action_fcurves(action):
+        if '"' not in curve.data_path or len(curve.keyframe_points) < 2:
+            continue
+        bone = curve.data_path.split('"')[1]
+        if bone in moving:
+            continue
+        coords = [0.0] * (len(curve.keyframe_points) * 2)
+        curve.keyframe_points.foreach_get("co", coords)
+        values = coords[1::2]
+        if max(values) - min(values) > 1e-4:
+            moving.add(bone)
+    return moving
+
+
+def layer_actions(armature, base, layer, name):
+    """The current animation (base) with another on top: the bones the new one moves take its keys, every other bone
+    keeps the base's (a face animation over a body animation; an upper-body one over a run). A looping one repeats to
+    cover the other; otherwise the shorter holds its last pose. Returns the result (a copy: base stays as it was)."""
+    base_length, layer_length = _action_length(base), _action_length(layer)
+    if layer.get("vp_loops") and layer_length < base_length - 0.5:
+        repeat_action(layer, math.ceil(base_length / layer_length))
+    result = base.copy()
+    if base.get("vp_loops") and base_length < _action_length(layer) - 0.5:
+        repeat_action(result, math.ceil(_action_length(layer) / base_length))
+    result.name = f"{base.name} + {name}"
+    result["vp_loops"] = bool(base.get("vp_loops")) and bool(layer.get("vp_loops"))
+    armature.animation_data.action = result
+    if hasattr(armature.animation_data, "action_slot") and len(result.slots) > 0:
+        armature.animation_data.action_slot = result.slots[0]
+
+    moving = _moving_bones(layer)
+    target = {(fc.data_path, fc.array_index): fc for fc in _action_fcurves(result)}
+    for source in _action_fcurves(layer):
+        bone = source.data_path.split('"')[1] if '"' in source.data_path else None
+        if bone not in moving:
+            continue
+        curve = target.get((source.data_path, source.array_index))
+        if curve is None:
+            curve = _fcurve_new_on(result, armature, source.data_path, source.array_index)
+        curve.keyframe_points.clear()
+        count = len(source.keyframe_points)
+        curve.keyframe_points.add(count)
+        coords = [0.0] * (count * 2)
+        source.keyframe_points.foreach_get("co", coords)
+        curve.keyframe_points.foreach_set("co", coords)
+        for point, original in zip(curve.keyframe_points, source.keyframe_points):
+            point.interpolation = original.interpolation
+        curve.update()
+    bpy.data.actions.remove(layer)
+    _fit_timeline(result)
+    Log.information(f"{name} on top of {base.name}: {len(moving)} bone(s) from it, the rest as before")
+    return result
 
 
 def _fcurve_new_on(action, owner, data_path, index):

@@ -45,15 +45,16 @@ public class BlenderService : SocketServiceBase
     // repeat: how many times looping animations (runs, idles) play in a row; lowerLoops/upperLoops: which ones loop
     // sequencePaths: all clips of a montage that plays several in a row (psaPath is the first), joined in Blender
     // sounds: the game's sounds for it, each placed at its moment (the add-on adds them to the Video Sequencer)
+    // layer: on top of the armature's current animation (only the bones this one moves change) instead of replacing it
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null,
-        IReadOnlyList<AnimationSounds.Placed>? sounds = null) =>
-        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths, sounds: sounds)));
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null, bool layer = false) =>
+        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths, sounds: sounds, layer: layer)));
 
     // sceneTarget: in a scene, which armature it goes on ("agent:TP", "agent:FP", "agent:CS" or "gun")
     public static object AnimationMessage(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null,
-        IReadOnlyList<AnimationSounds.Placed>? sounds = null) => new
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null, bool layer = false) => new
     {
         AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
         SceneTarget = sceneTarget,
@@ -62,6 +63,7 @@ public class BlenderService : SocketServiceBase
             Name = name, Type = "Animation", AnimationPath = psaPath.Replace("\\", "/"),
             UpperAnimationPath = upperPsaPath?.Replace("\\", "/"),
             Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
+            Mode = layer ? "Layer" : "Replace",
             SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList(),
             Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop }).ToList()
         }

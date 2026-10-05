@@ -32,6 +32,8 @@ public partial class AppSettings : ObservableObject
 
     [ObservableProperty] private bool skipAnimationVoiceLines; // nor the voice lines said with them (on by default)
 
+    [ObservableProperty] private bool layerAnimations; // a new animation goes on top of the model's current one (only the bones it moves)
+
     public static void Load()
     {
         if (File.Exists(FilePath.FullName))

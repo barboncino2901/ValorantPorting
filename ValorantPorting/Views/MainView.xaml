@@ -639,6 +639,11 @@
                                     <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding RepeatOptions}" SelectedItem="{Binding RepeatCount, Mode=TwoWay}" ItemStringFormat="×{0}" Width="70" />
                                     <TextBlock Text="Repeat" VerticalAlignment="Center" />
                                 </DockPanel>
+                                <DockPanel Margin="0 10 0 0"
+                                           ToolTip="Replace: the model's current animation goes away (as before). Add on top: only the bones this animation moves change and the rest keeps playing, e.g. a face animation over a body animation, or an upper-body one over a run. Earlier sounds stay.">
+                                    <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding AnimationModeOptions}" SelectedItem="{Binding AnimationMode, Mode=TwoWay}" Width="150" />
+                                    <TextBlock Text="If already animated" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
                                 <Button Style="{DynamicResource {x:Static adonisUi:Styles.AccentButton}}" Command="{Binding ExportAnimationBlenderCommand}" Margin="0 12 0 0" Padding="8 8"
                                         ToolTip="Applies this animation to the agent or gun selected in Blender (double-clicking it in the list does the same).">
                                     <StackPanel Orientation="Horizontal">

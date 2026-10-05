@@ -165,7 +165,8 @@ public partial class MainViewModel : ObservableObject
             if (lowerPath is null || upperPath is null) return;
 
             var sounds = await SoundsFor(upper, lower);
-            BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop, sounds: sounds);
+            BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop, sounds: sounds,
+                layer: AppSettings.Current.LayerAnimations);
             UserLibrary.AddRecent(upper.LibraryId);
             UserLibrary.AddRecent(lower.LibraryId);
             AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
@@ -360,6 +361,20 @@ public partial class MainViewModel : ObservableObject
         set
         {
             AppSettings.Current.SkipAnimationSounds = !value;
+            OnPropertyChanged();
+        }
+    }
+
+    // what an animation does on a model that's already animated: replace that animation, or go on top of it (only the
+    // bones it moves change, e.g. a face animation over a body animation)
+    public List<string> AnimationModeOptions { get; } = ["Replace its animation", "Add on top"];
+
+    public string AnimationMode
+    {
+        get => AnimationModeOptions[AppSettings.Current.LayerAnimations ? 1 : 0];
+        set
+        {
+            AppSettings.Current.LayerAnimations = value == AnimationModeOptions[1];
             OnPropertyChanged();
         }
     }
@@ -964,7 +979,7 @@ public partial class MainViewModel : ObservableObject
 
             var sounds = await SoundsFor(item);
             BlenderService.SendAnimation(item.Name, paths[0], repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop,
-                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds);
+                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds, layer: AppSettings.Current.LayerAnimations);
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));
