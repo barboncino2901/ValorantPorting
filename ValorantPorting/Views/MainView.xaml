@@ -584,7 +584,7 @@
                                         </ListBox>
                                         <TextBlock Visibility="{Binding NoSavedScenesVisibility}" HorizontalAlignment="Center" VerticalAlignment="Center"
                                                    TextAlignment="Center" TextWrapping="Wrap" Opacity="0.6" FontSize="14" Margin="40" IsHitTestVisible="False"
-                                                   Text="No animation presets yet. Fill the scene bar with &quot;Add to scene&quot; (agent, gun skin, animations), then click &quot;Save as preset...&quot; in the bar: it shows up here, to send again in one click." />
+                                                   Text="No animation presets yet. Set something up in Blender (agent, gun, animations) and click &quot;Save what's in Blender as a preset...&quot; on the right, or fill the scene bar with &quot;Add to scene&quot; and click &quot;Save as preset...&quot; in the bar: it shows up here, to send again in one click." />
                                     </Grid>
                                 </TabItem>
                                 <TabItem Style="{StaticResource HiddenTab}">
@@ -800,6 +800,12 @@
                         <ScrollViewer Visibility="{Binding ScenePanelVisibility}" VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="{adonisUi:Space 1}">
                                 <Separator Style="{StaticResource NamedSeparator}" Tag="ANIMATION PRESET" />
+                                <Button Command="{Binding SaveFromBlenderCommand}" Margin="0 6 0 0" Padding="8 6"
+                                        ToolTip="Saves what's in Blender as a preset: click the agent in Blender first. Its model and every animation you applied to it (mixed, on top, after each other), and the gun or ability in its hands with theirs. Works for models and animations sent with this version of the app.">
+                                    <TextBlock Text="Save what's in Blender as a preset..." FontWeight="SemiBold" />
+                                </Button>
+                                <TextBlock Margin="0 4 0 10" TextWrapping="Wrap" Opacity="0.6" FontSize="11"
+                                           Text="Click the agent in Blender first: it's saved with everything you applied to it, and what it holds." />
                                 <TextBlock Visibility="{Binding NoSavedSceneSelectedVisibility}" Margin="0 6 0 0" TextWrapping="Wrap" Opacity="0.6"
                                            Text="Pick a preset on the left (double-click sends it to Blender)." />
                                 <StackPanel Visibility="{Binding SelectedSavedSceneVisibility}">

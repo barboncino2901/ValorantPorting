@@ -21,6 +21,16 @@ public static class BlenderSelectionListener
     public static string? AddonVersion { get; private set; }
     public static DateTime LastHeard { get; private set; } = DateTime.MinValue;
     private static DateTime? firstSelection;
+
+    // "VP_PRESET|<json>": the add-on's answer to a preset request (what's on the selected agent, see SaveFromBlender)
+    private static TaskCompletionSource<string>? presetAnswer;
+
+    // waits for the add-on's answer to a preset request just sent; null if none comes in time
+    public static async Task<string?> NextPresetAnswer(TimeSpan timeout)
+    {
+        var answer = presetAnswer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        return await Task.WhenAny(answer.Task, Task.Delay(timeout)) == answer.Task ? answer.Task.Result : null;
+    }
     private static bool reported;
 
     public static void Start(Action<string> onSelection)
@@ -53,6 +63,12 @@ public static class BlenderSelectionListener
                             reported = true;
                             Application.Current.Dispatcher.Invoke(() => AddonVersionSeen?.Invoke(AddonVersion));
                         }
+                        continue;
+                    }
+
+                    if (message.StartsWith("VP_PRESET|"))
+                    {
+                        presetAnswer?.TrySetResult(message["VP_PRESET|".Length..]);
                         continue;
                     }
 

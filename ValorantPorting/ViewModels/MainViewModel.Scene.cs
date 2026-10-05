@@ -203,6 +203,11 @@ public partial class MainViewModel
     {
         if (SelectedSavedScene is not { } row) return;
         if (row.Scene.AbilityId != null) await AbilitiesReady();
+        if (row.Scene.HasSteps &&
+            MessageBox.Show($"\"{row.Name}\" was saved from Blender with several animations per model (on top of / after each other). The scene " +
+                            "bar holds one animation per model, so only the first of each would be loaded.\n\n\"Send to Blender\" plays all of them. " +
+                            "Load into the scene bar anyway?", "Animation preset", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes)
+            return;
         if (LoadSavedScene(row.Scene))
             AppLog.Information($"\"{row.Name}\" is in the scene bar: change it, then send it or save it again.");
     }
@@ -224,8 +229,10 @@ public partial class MainViewModel
     {
         if (SceneVisibility != Visibility.Visible)
         {
-            MessageBox.Show("The scene is empty: add an agent, a gun skin or animations with \"Add to scene\" first.", "Save as preset",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            if (MessageBox.Show("The scene bar is empty. Save what's in Blender instead?\n\nThe agent selected in Blender (or the gun or " +
+                                "ability) with everything you applied to it, and what it holds.", "Save as preset",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                _ = SaveFromBlender();
             return;
         }
 
@@ -237,21 +244,26 @@ public partial class MainViewModel
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
-        static SavedScenes.Asset? Saved(SceneAsset? asset) => asset is null
-            ? null
-            : new SavedScenes.Asset(asset.Item switch { AssetSelectorItem tile => tile.ObjectPath, SavedSceneItem saved => saved.ObjectPath, _ => "" },
-                asset.Item.PackagePath, asset.Type, asset.Item.DisplayName, asset.Name, asset.Style?.GetPathName(),
-                asset.Choices.WeaponLevel, asset.Choices.Models);
-        static SavedScenes.Animation? SavedAnimation(SceneAnimation? animation) => animation is null
-            ? null
-            : new SavedScenes.Animation(animation.Name, animation.Item?.LibraryId, animation.Upper?.LibraryId, animation.Lower?.LibraryId, animation.Repeat);
-
         SavedScenes.Save(new SavedScenes.SavedScene(name, DateTime.Now, Saved(SceneAgent), Saved(SceneGun),
             SavedAnimation(SceneAgentAnimation), SavedAnimation(SceneGunAnimation),
             SceneAbility?.LibraryId, SceneAbility?.Title, SavedAnimation(SceneAbilityAnimation)));
         RefreshSavedScenes();
         AppLog.Information($"Saved as the animation preset \"{name}\" (Animation Presets tab).");
     }
+
+    private static SavedScenes.Asset? Saved(SceneAsset? asset) => asset is null
+        ? null
+        : new SavedScenes.Asset(asset.Item switch { AssetSelectorItem tile => tile.ObjectPath, SavedSceneItem saved => saved.ObjectPath, _ => "" },
+            asset.Item.PackagePath, asset.Type, asset.Item.DisplayName, asset.Name, asset.Style?.GetPathName(),
+            asset.Choices.WeaponLevel, asset.Choices.Models);
+
+    private static SavedScenes.Animation? SavedAnimation(SceneAnimation? animation) => animation is null
+        ? null
+        : new SavedScenes.Animation(animation.Name, animation.Item?.LibraryId, animation.Upper?.LibraryId, animation.Lower?.LibraryId, animation.Repeat);
+
+    // an agent or gun skin's note for Blender: kept on its armature for "Save as preset" from Blender
+    private static object? PresetModelOf(SceneAsset asset) =>
+        Saved(asset) is { ObjectPath.Length: > 0 } saved ? new { Kind = asset.Type == EAssetType.Character ? "agent" : "gun", Asset = saved } : null;
 
     // puts a saved scene in the scene bar; false (with a message) if something in it isn't in the game files anymore
     public bool LoadSavedScene(SavedScenes.SavedScene saved)
@@ -276,22 +288,16 @@ public partial class MainViewModel
                 new ExportChoices(asset.WeaponLevel, asset.Models), asset.Name);
         }
 
-        AnimationItem? Find(string? id) => id is null ? null : Animations.FirstOrDefault(a => a.LibraryId == id);
-
         SceneAnimation? Animation(SavedScenes.Animation? animation)
         {
             if (animation is null) return null;
-            var item = Find(animation.ItemId);
-            var upper = Find(animation.UpperId);
-            var lower = Find(animation.LowerId);
-            if (item is null && (upper is null || lower is null))
-            {
-                missing.Add(animation.Name);
-                return null;
-            }
-
-            return new SceneAnimation(animation.Name, item, item is null ? upper : null, item is null ? lower : null, animation.Repeat);
+            if (SceneAnimationOf(animation) is { } found) return found;
+            missing.Add(animation.Name);
+            return null;
         }
+
+        foreach (var step in new[] { saved.AgentSteps, saved.GunSteps, saved.AbilitySteps }.Where(s => s != null).SelectMany(s => s!))
+            if (SceneAnimationOf(step.Animation) is null && !missing.Contains(step.Animation.Name)) missing.Add(step.Animation.Name);
 
         SceneAgent = Asset(saved.Agent);
         SceneGun = Asset(saved.Gun);
@@ -306,11 +312,22 @@ public partial class MainViewModel
         return false;
     }
 
+    // a saved animation looked up in the list (null: not in the game files anymore)
+    private SceneAnimation? SceneAnimationOf(SavedScenes.Animation animation)
+    {
+        AnimationItem? Find(string? id) => id is null ? null : Animations.FirstOrDefault(a => a.LibraryId == id);
+        var item = Find(animation.ItemId);
+        var upper = Find(animation.UpperId);
+        var lower = Find(animation.LowerId);
+        if (item is null && (upper is null || lower is null)) return null;
+        return new SceneAnimation(animation.Name, item, item is null ? upper : null, item is null ? lower : null, animation.Repeat);
+    }
+
     public async Task SendSavedScene(SavedScenes.SavedScene saved)
     {
         if (saved.AbilityId != null) await AbilitiesReady();
         LoadSavedScene(saved);
-        await SendScene();
+        await SendScene(saved.HasSteps ? saved : null);
     }
 
     public void RenameSavedScene(SavedScenes.SavedScene saved)
@@ -349,14 +366,17 @@ public partial class MainViewModel
     private bool sceneExportRunning;
 
     [RelayCommand]
-    public async Task SendScene()
+    public Task SendScene() => SendScene(null);
+
+    // withSteps: a preset saved from Blender, whose models each get all their saved animations, in order
+    public async Task SendScene(SavedScenes.SavedScene? withSteps)
     {
         const string title = "Send scene";
         if (sceneExportRunning) return;
 
         // the agent armature the gun and the agent animation go on: the animation's model, else 3rd person if exported
         var agentModels = SceneAgent?.Choices.Models ?? ECharacterModels.All;
-        var rig = SceneAgentAnimation?.Model ??
+        var rig = withSteps?.AgentRig ?? SceneAgentAnimation?.Model ??
                   (agentModels.HasFlag(ECharacterModels.ThirdPerson) ? "TP" : agentModels.HasFlag(ECharacterModels.FirstPerson) ? "FP" : "CS");
         var warnings = new List<string>();
         var sendGunAnimation = true;
@@ -408,12 +428,21 @@ public partial class MainViewModel
                 settings.SceneTarget = SceneAgent != null ? $"agent:{rig}" : null; // held by the agent
                 steps.Add(BlenderService.ExportMessage(abilityData, settings));
             }
-            if (SceneAgentAnimation is { } agentAnimation && await AnimationMessage(agentAnimation, SceneAgent != null ? $"agent:{rig}" : null) is { } a)
-                steps.Add(a);
-            if (sendGunAnimation && SceneGunAnimation is { } gunAnimation && await AnimationMessage(gunAnimation, SceneGun != null ? "gun" : null) is { } g)
-                steps.Add(g);
-            if (SceneAbilityAnimation is { } abilityAnimation && await AnimationMessage(abilityAnimation, SceneAbility != null ? "ability" : null) is { } ab)
-                steps.Add(ab);
+            // each model's animations: the scene bar's one, or a saved preset's steps in order
+            async Task AddAnimations(SceneAnimation? single, List<SavedScenes.Step>? saved, string? target)
+            {
+                if (saved is { Count: > 0 })
+                {
+                    foreach (var step in saved)
+                        if (SceneAnimationOf(step.Animation) is { } animation && await AnimationMessage(animation, target, step) is { } message)
+                            steps.Add(message);
+                }
+                else if (single is not null && await AnimationMessage(single, target) is { } message)
+                    steps.Add(message);
+            }
+            await AddAnimations(SceneAgentAnimation, withSteps?.AgentSteps, SceneAgent != null ? $"agent:{rig}" : null);
+            if (sendGunAnimation) await AddAnimations(SceneGunAnimation, withSteps?.GunSteps, SceneGun != null ? "gun" : null);
+            await AddAnimations(SceneAbilityAnimation, withSteps?.AbilitySteps, SceneAbility != null ? "ability" : null);
             if (steps.Count == 0) return;
 
             var name = SceneAgent?.Name ?? SceneGun?.Name ?? SceneAbility?.Title ?? "Scene";
@@ -496,12 +525,16 @@ public partial class MainViewModel
         AnimationFilterKey = BuildAnimationFilterKey(asset.Type, asset.Item),
         FirstPersonCamera = asset.Type == EAssetType.Character && FirstPersonCamera && asset.Choices.Models.HasFlag(ECharacterModels.FirstPerson),
         SceneRole = role,
-        SceneTarget = target
+        SceneTarget = target,
+        PresetModel = PresetModelOf(asset)
     };
 
-    // exports the animation's .psa files and builds its Blender message, like applying it on its own
-    private static async Task<object?> AnimationMessage(SceneAnimation animation, string? target)
+    // exports the animation's .psa files and builds its Blender message, like applying it on its own. step: a preset
+    // saved from Blender, played again as it was (on top of / after the previous animation, its blend and cut frame)
+    private static async Task<object?> AnimationMessage(SceneAnimation animation, string? target, SavedScenes.Step? step = null)
     {
+        var preset = SavedAnimation(animation);
+        var (mode, blend, cut) = (step?.Mode ?? "Replace", step?.ChainBlend, step?.CutFrame);
         var (upper, lower) = animation.Upper is not null ? (animation.Upper, animation.Lower!)
             : animation.Item!.Kind == EAnimationKind.FullBody ? (animation.Item.UpperHalf!, animation.Item.LowerHalf!) : (null, null);
         if (upper is not null)
@@ -510,7 +543,7 @@ public partial class MainViewModel
             var upperPath = await Task.Run(() => AnimationExport.ExportPsa(upper));
             if (lowerPath is null || upperPath is null) return null;
             return BlenderService.AnimationMessage(animation.Name, lowerPath, upperPath, animation.Repeat, lower!.IsLoop, upper.IsLoop, sceneTarget: target,
-                sounds: await AppVM.MainVM.SoundsFor(upper, lower));
+                sounds: await AppVM.MainVM.SoundsFor(upper, lower), mode: mode, preset: preset, chainBlend: blend, chainCutFrame: cut);
         }
 
         var item = animation.Item!;
@@ -521,7 +554,9 @@ public partial class MainViewModel
             paths.Add(path);
         }
 
+        var additive = mode == "Layer" && paths.Count == 1 ? await AnimationExport.AdditiveBase(item) : null;
         return BlenderService.AnimationMessage(item.Name, paths[0], repeat: animation.Repeat, lowerLoops: item.IsLoop,
-            sequencePaths: paths.Count > 1 ? paths : null, sceneTarget: target, sounds: await AppVM.MainVM.SoundsFor(item));
+            sequencePaths: paths.Count > 1 ? paths : null, sceneTarget: target, sounds: await AppVM.MainVM.SoundsFor(item),
+            mode: mode, additive: additive, preset: preset, chainBlend: blend, chainCutFrame: cut);
     }
 }

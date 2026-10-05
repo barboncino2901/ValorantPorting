@@ -19,7 +19,7 @@ from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merg
 bl_info = {
     "name": "Valorant Porting",
     "author": "Half, BK, Zain, DeveloperChipmunk",
-    "version": (1, 12, 0),
+    "version": (1, 13, 0),
     "blender": (4, 0, 0),
     "description": "Blender Server for Valorant Porting (models + animations, Blender 5 compatible)",
     "category": "Import",
@@ -748,6 +748,7 @@ def import_animation(data, armature=None):
     # "Layer": on top of the current animation (only the bones this one moves change); "Chain": after it
     mode = data.get("Mode")
     keep = mode in ("Layer", "Chain")
+    cut_used = None
     base = armature.animation_data.action if keep and armature is not None and armature.animation_data else None
     _apply_animation(data, armature)
     action = armature.animation_data.action if armature is not None and armature.animation_data else None
@@ -761,11 +762,14 @@ def import_animation(data, armature=None):
         elif base is not None and mode == "Layer":
             action = layer_actions(armature, base, action, data.get("Name"))
         elif base is not None:
-            # starting at the timeline's current frame cuts the rest of the current animation (an animation cancel)
-            cut = bpy.context.scene.frame_current if data.get("ChainFrom") == "CurrentFrame" else None
+            # starting at the timeline's current frame cuts the rest of the current animation (an animation cancel);
+            # a preset played again gives the frame it was cut at
+            cut = data.get("ChainCutFrame") if data.get("ChainFrom") == "Frame" else \
+                bpy.context.scene.frame_current if data.get("ChainFrom") == "CurrentFrame" else None
             blend = data.get("ChainBlend")
             action, sounds_start, join = chain_actions(armature, base, action, data.get("Name"),
                                                        CHAIN_BLEND_SECONDS if blend is None else float(blend), cut)
+            cut_used = join if cut is not None and abs(join - float(cut)) < 1e-3 else None
             # the earlier animations' sound effects stop where the next one takes over: their loops always, the
             # rest when this one brings sounds of its own; voice lines play on
             stop_animation_sounds(armature, join, loops_only=not data.get("Sounds"))
@@ -773,6 +777,61 @@ def import_animation(data, armature=None):
         remove_animation_sounds(armature)  # the previous animation's sounds go with it (a layer or chain keeps them)
     if action is not None:
         add_animation_sounds(data, action, owner=armature.name, start=sounds_start)
+        record_preset_step(armature, data, mode if base is not None else "Replace", cut_used)
+
+
+def record_preset_step(armature, data, mode, cut):
+    """What was applied to this armature, in order, for "Save as preset" in the app: the list entry the app named
+    (Preset), and how (on top, after the previous one with its blend and cut frame). A replace starts it again."""
+    try:
+        steps = [] if mode in (None, "Replace") else json.loads(armature.get("vp_preset_steps") or "[]")
+    except Exception:
+        steps = []
+    blend = data.get("ChainBlend")
+    steps.append({"Animation": data.get("Preset"), "Mode": mode or "Replace",
+                  "ChainBlend": CHAIN_BLEND_SECONDS if blend is None else float(blend), "CutFrame": cut})
+    armature["vp_preset_steps"] = json.dumps(steps)
+
+
+def send_preset():
+    """Answers the app's "Save as preset" with what's on the selected agent (its model, its animations in order) and
+    on what it holds (gun, ability), or on the selected gun / ability by itself."""
+    def info(obj):
+        try:
+            model = json.loads(obj.get("vp_preset_model") or "null")
+        except Exception:
+            model = None
+        try:
+            steps = json.loads(obj.get("vp_preset_steps") or "[]")
+        except Exception:
+            steps = []
+        return {"Model": model, "Steps": steps, "Rig": obj.name.split("_")[0].upper()}
+
+    def kind(obj):
+        return (info(obj)["Model"] or {}).get("Kind")
+
+    def holder_of(obj):
+        return next((c.target for c in obj.constraints if c.type == 'CHILD_OF' and c.target is not None), None)
+
+    selected = find_selected_armature()
+    reply = {}
+    if selected is None:
+        reply["Error"] = "Click the agent in Blender first (or a gun or ability on its own), then save again."
+    else:
+        agent = selected if kind(selected) == "agent" else holder_of(selected)
+        if agent is not None and (kind(agent) == "agent" or agent.name.split("_")[0].upper() in ("TP", "FP", "CS")):
+            reply["Agent"] = info(agent)
+            for obj in bpy.data.objects:
+                if obj.type == 'ARMATURE' and holder_of(obj) == agent and kind(obj) in ("gun", "ability"):
+                    reply["Gun" if kind(obj) == "gun" else "Ability"] = info(obj)
+        elif kind(selected) in ("gun", "ability"):
+            reply["Gun" if kind(selected) == "gun" else "Ability"] = info(selected)
+        else:
+            reply["Agent"] = info(selected)  # sent before this version: only its animations, if any
+    try:
+        selection_socket.sendto(("VP_PRESET|" + json.dumps(reply)).encode("utf-8"), ("localhost", SELECTION_PORT))
+    except Exception as e:
+        Log.error(f"Could not answer the app: {e}")
 
 
 def remove_animation_sounds(armature):
@@ -1764,6 +1823,9 @@ def import_response(response, holder=None, use_selection=True):
     if (response.get("Data") or {}).get("Type") == "Sound":
         import_sound(response.get("Data"))
         return
+    if (response.get("Data") or {}).get("Type") == "PresetRequest":
+        send_preset()
+        return
     if (response.get("Data") or {}).get("Parts") is None:
         # something a newer app sends that this add-on doesn't know
         kind = (response.get("Data") or {}).get("Type") or "unknown"
@@ -1775,6 +1837,7 @@ def import_response(response, holder=None, use_selection=True):
 
     # whatever was selected before the import: a gun is attached to a selected agent, a buddy to a selected gun
     holder = holder or (find_selected_armature() if use_selection else None)
+    before_import = set(bpy.data.objects)
 
     import_shaders("VALORANT_Weapon.blend")
     import_shaders("VALORANT_Agent.blend")
@@ -1892,6 +1955,11 @@ def import_response(response, holder=None, use_selection=True):
                  if not [c for c in p["Parent"].constraints if c.type == 'CHILD_OF']), imported_parts[0]["Parent"]) if imported_parts else None
     global last_import_main
     last_import_main = main
+    preset_model = (import_settings or {}).get("PresetModel")
+    for obj in bpy.data.objects:
+        if obj not in before_import and obj.type == 'ARMATURE':
+            obj["vp_preset_model"] = json.dumps(preset_model) if preset_model else ""
+            obj["vp_preset_steps"] = "[]"
     if main is not None and holder is not None:
         if import_type == "Weapon":
             attach_to_bone(main, holder, WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION, "hand")

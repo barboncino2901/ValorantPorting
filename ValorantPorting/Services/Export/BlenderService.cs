@@ -29,6 +29,10 @@ public class BlenderService : SocketServiceBase
         AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/")
     };
 
+    // Asks the add-on what's on the armature selected in Blender (models and the animations applied, see SaveFromBlender);
+    // it answers on the selection channel
+    public static void RequestPreset() => SendMessage(JsonConvert.SerializeObject(new { Data = new { Type = "PresetRequest" } }));
+
     // A scene: several imports/animations in one message, done in order by the add-on (agent, gun in its hand, the
     // animations on each). One message, so none of them can be lost while Blender is busy with the first.
     public static void SendScene(string name, IReadOnlyList<object> steps)
@@ -49,13 +53,16 @@ public class BlenderService : SocketServiceBase
     // moves change) or "Chain" it after the current one
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null,
-        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null) =>
-        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths, sounds: sounds, mode: mode, additive: additive)));
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null,
+        SavedScenes.Animation? preset = null) =>
+        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths,
+            sounds: sounds, mode: mode, additive: additive, preset: preset)));
 
     // sceneTarget: in a scene, which armature it goes on ("agent:TP", "agent:FP", "agent:CS" or "gun")
     public static object AnimationMessage(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null,
-        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null) => new
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null,
+        SavedScenes.Animation? preset = null, double? chainBlend = null, double? chainCutFrame = null) => new
     {
         AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
         SceneTarget = sceneTarget,
@@ -66,8 +73,12 @@ public class BlenderService : SocketServiceBase
             Repeat = repeat, LowerLoops = lowerLoops, UpperLoops = upperLoops,
             Mode = mode ?? "Replace",
             // "Chain": the blend into it (seconds) and whether it starts at Blender's current frame, cutting the rest
-            ChainBlend = AppSettings.Current.ChainBlendSeconds,
-            ChainFrom = AppSettings.Current.ChainFromCurrentFrame ? "CurrentFrame" : "End",
+            // (a preset played again gives its own blend and the frame it was cut at)
+            ChainBlend = chainBlend ?? AppSettings.Current.ChainBlendSeconds,
+            ChainFrom = chainCutFrame != null ? "Frame" : AppSettings.Current.ChainFromCurrentFrame ? "CurrentFrame" : "End",
+            ChainCutFrame = chainCutFrame,
+            // which list entry it is, kept on the armature for "Save as preset" from Blender
+            Preset = preset,
             // an additive animation "Add on top": only its change from its base pose goes onto the current animation
             Additive = additive is null ? null : new
             {

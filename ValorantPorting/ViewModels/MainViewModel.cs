@@ -118,7 +118,9 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        if (CheckCombine(upper, lower)) await SendCombined(upper, lower, $"{upper.Name} + {lower.Name}");
+        if (CheckCombine(upper, lower))
+            await SendCombined(upper, lower, $"{upper.Name} + {lower.Name}",
+                new SavedScenes.Animation($"{upper.Title} + {lower.Title} (legs)", null, upper.LibraryId, lower.LibraryId, RepeatCount));
     }
 
     // whether two animations can be combined (same model, full-body skeleton); asks about odd picks
@@ -153,7 +155,8 @@ public partial class MainViewModel : ObservableObject
                    MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
     }
 
-    private async Task SendCombined(AnimationItem upper, AnimationItem lower, string name)
+    // preset: what it is in the list, kept on the armature for "Save as preset" from Blender
+    private async Task SendCombined(AnimationItem upper, AnimationItem lower, string name, SavedScenes.Animation preset)
     {
         if (animationExportRunning) return;
         animationExportRunning = true;
@@ -166,7 +169,7 @@ public partial class MainViewModel : ObservableObject
 
             var sounds = await SoundsFor(upper, lower);
             BlenderService.SendAnimation(name, lowerPath, upperPath, RepeatCount, lower.IsLoop, upper.IsLoop, sounds: sounds,
-                mode: AppSettings.Current.AnimationMode);
+                mode: AppSettings.Current.AnimationMode, preset: preset);
             UserLibrary.AddRecent(upper.LibraryId);
             UserLibrary.AddRecent(lower.LibraryId);
             AppLog.Information($"Sent {name} (upper + lower body) to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s.");
@@ -312,7 +315,8 @@ public partial class MainViewModel : ObservableObject
             ReorientBones = false, // like guns: ability props animate with their own bone orientation
             AnimationFilterKey = $"ability|{item.Folder}/|{item.AgentName} {item.AbilityName}: {item.Part}",
             HoldSocket1P = hold1P,
-            HoldSocket3P = hold3P
+            HoldSocket3P = hold3P,
+            PresetModel = new { Kind = "ability", AbilityId = item.LibraryId, AbilityName = item.Title }
         };
     }
 
@@ -664,7 +668,10 @@ public partial class MainViewModel : ObservableObject
             ReorientBones = reorient,
             AnimationFilterKey = filterKey,
             FirstPersonCamera = CurrentAssetType == EAssetType.Character && FirstPersonCamera &&
-                                GetExportChoices().Models.HasFlag(ECharacterModels.FirstPerson)
+                                GetExportChoices().Models.HasFlag(ECharacterModels.FirstPerson),
+            PresetModel = sendingType is EAssetType.Character or EAssetType.Weapon
+                ? PresetModelOf(new SceneAsset(sending, sendingType, sendingStyle, sendingChoices, data.Name))
+                : null
         });
         RegisterSentAsset(filterKey);
         if (currentAsset is ILibraryItem sentItem) UserLibrary.AddRecent(sentItem.LibraryId);
@@ -1000,7 +1007,8 @@ public partial class MainViewModel : ObservableObject
             if (item.Kind == EAnimationKind.FullBody)
             {
                 animationExportRunning = false;
-                await SendCombined(item.UpperHalf!, item.LowerHalf!, item.Name);
+                await SendCombined(item.UpperHalf!, item.LowerHalf!, item.Name,
+                    new SavedScenes.Animation(item.Title, item.LibraryId, null, null, RepeatCount));
                 UserLibrary.AddRecent(item.LibraryId);
                 return;
             }
@@ -1019,7 +1027,8 @@ public partial class MainViewModel : ObservableObject
             // put on top of an animation, an additive one brings its base pose: only its change from it is added
             var additive = AppSettings.Current.AnimationMode == "Layer" && clips.Count == 1 ? await AnimationExport.AdditiveBase(item) : null;
             BlenderService.SendAnimation(item.Name, paths[0], repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop,
-                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds, mode: AppSettings.Current.AnimationMode, additive: additive);
+                sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds, mode: AppSettings.Current.AnimationMode, additive: additive,
+                preset: new SavedScenes.Animation(item.Title, item.LibraryId, null, null, item.IsLoop ? RepeatCount : 1));
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));

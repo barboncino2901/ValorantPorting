@@ -9,4 +9,6 @@ public class BlenderExportSettings : ExportSettingsBase
     public string? SceneTarget; // in a scene, for the gun: the agent armature holding it ("agent:TP", "agent:FP", ...)
     // an ability sent while an agent is selected goes on this socket of theirs (null: in the hand, like a gun)
     public string? HoldSocket1P, HoldSocket3P;
+    // what this model is, for "Save as preset" from Blender: { Kind = "agent"/"gun", Asset } or { Kind = "ability", AbilityId, AbilityName }
+    public object? PresetModel;
 }

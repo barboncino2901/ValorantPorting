@@ -23,9 +23,20 @@ public static class SavedScenes
     // an animation: one entry of the list (ItemId) or a mix of two (UpperId + LowerId); ids are the list's LibraryIds
     public record Animation(string Name, string? ItemId, string? UpperId, string? LowerId, int Repeat);
 
-    // AbilityId: the ability model's library id ("ability:..."), looked up in the Abilities list
+    // one animation as applied in Blender: Mode "Replace", "Layer" (on top) or "Chain" (after the previous one, with
+    // this blend in seconds, cut at CutFrame when it started at a chosen frame)
+    public record Step(Animation Animation, string Mode, double ChainBlend, double? CutFrame);
+
+    // AbilityId: the ability model's library id ("ability:..."), looked up in the Abilities list.
+    // AgentSteps/GunSteps/AbilitySteps: saved from Blender, every animation applied to each model in order (then the
+    // single XAnimation is the first one); AgentRig: which agent model they're on ("TP", "FP", "CS")
     public record SavedScene(string Name, DateTime Saved, Asset? Agent, Asset? Gun, Animation? AgentAnimation, Animation? GunAnimation,
-        string? AbilityId = null, string? AbilityName = null, Animation? AbilityAnimation = null);
+        string? AbilityId = null, string? AbilityName = null, Animation? AbilityAnimation = null,
+        List<Step>? AgentSteps = null, List<Step>? GunSteps = null, List<Step>? AbilitySteps = null, string? AgentRig = null)
+    {
+        public bool HasSteps => AgentSteps is { Count: > 1 } || GunSteps is { Count: > 1 } || AbilitySteps is { Count: > 1 } ||
+                                new[] { AgentSteps, GunSteps, AbilitySteps }.Any(s => s?.Any(x => x.Mode != "Replace") == true);
+    }
 
     public static IReadOnlyList<SavedScene> All
     {
