@@ -1810,9 +1810,40 @@ def psaimport(filepath,
         # model's own face: Valorant body animations hold the face at the base skeleton's pose (e.g. half-closed
         # eyelids on other agents) and faces are driven by separate face animations. Real facial motion
         # (blinks, expressions) still comes through as a change from that first frame.
+        # A face animation itself (Face_Idle, Face_Death, ...: only bones under "Head" move) is the agent's own and is
+        # applied as authored: it often starts on its expression (Face_Death holds one throughout), which "relative to
+        # the first frame" would remove.
+        def under_head(j):
+            psa_bone = PsaBonesToProcess[j]
+            return any(p.name.lower() == "head" for p in psa_bone.pose_bone.parent_recursive)
+
+        face_animation = False
+        if bKeepProportions:
+            eps = 0.0005 if bScaleDown else 0.05
+            face_moves = body_moves = False
+            for j in range(Totalbones):
+                # helper bones aren't a body part: the roots ("Skeleton", "Root") carry the whole model, "Splitter" (the
+                # upper/lower body split) and the IK targets turn even in face animations
+                name = PsaBonesToProcess[j].pose_bone.name.lower() if PsaBonesToProcess[j] is not None else ""
+                if j in BoneNotFoundList or PsaBonesToProcess[j] is None or                         name in ("skeleton", "root", "splitter") or name.startswith("ik_"):
+                    continue
+                p0, q0 = Raw_Key_List[raw_key_index + j]
+                # moving = away from the first frame in a good part of it: some face animations' stored body has
+                # single-frame glitches (Breach's: the spine 6.7 degrees off on a few isolated frames)
+                changed = sum(1 for f in range(1, NumRawFrames)
+                              if (Raw_Key_List[raw_key_index + f * Totalbones + j][0] - p0).length >= eps or
+                              abs(Raw_Key_List[raw_key_index + f * Totalbones + j][1].dot(q0)) < 0.99999)
+                moves = changed > max(3, NumRawFrames // 4)
+                if moves and under_head(j):
+                    face_moves = True
+                elif moves:
+                    body_moves = True
+                    break
+            face_animation = face_moves and not body_moves
+
         face_rest_quat = {}
         face_rest_loc = {}
-        if bKeepProportions:
+        if bKeepProportions and not face_animation:
             for j in range(Totalbones):
                 psa_bone = PsaBonesToProcess[j]
                 if j in BoneNotFoundList or psa_bone is None:
