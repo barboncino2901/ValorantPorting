@@ -36,13 +36,50 @@ public static class AnimationExport
             return null;
         }
 
-        if (animation is UAnimSequence { AdditiveAnimType: not EAdditiveAnimationType.AAT_None })
+        // additive animations (an upper body's run over its idle pose, 1st person walks and aims) only store the change
+        // from a base pose; the export adds them to that base (named in the animation), giving the animation as made.
+        // Those measured against their own first frame can't be rebuilt: that frame isn't stored
+        if (animation is UAnimSequence { AdditiveAnimType: not EAdditiveAnimationType.AAT_None } additive && !additive.IsValidAdditive())
         {
-            AppLog.Warning($"{item.Name} is an additive animation (e.g. an aim pose). It is meant to be layered on top of " +
-                           "another animation and will look wrong on its own, so it was not sent.");
+            AppLog.Warning($"{item.Name} is an additive animation measured against its own first pose, which the game " +
+                           "files don't keep, so it can't be rebuilt on its own and was not sent.");
             return null;
         }
 
+        return await WritePsa(animation, item.Name);
+    }
+
+    // An additive animation's base pose, for putting just its change on top of another animation (the "Add on top"
+    // mode): the base pose as .psa (null: the skeleton's rest pose), where in it the base frame is (0 to 1, or
+    // scaled along with the animation), and the kind of change. Null when the animation isn't a rebuildable additive.
+    public record AdditiveInfo(string Type, string? BasePath, double BaseFraction, bool BaseScaled);
+
+    public static async Task<AdditiveInfo?> AdditiveBase(AnimationItem item)
+    {
+        try
+        {
+            if (await AppVM.CUE4ParseVM.Provider.LoadPackageObjectAsync<UAnimationAsset>(item.ObjectPath) is not UAnimSequence
+                { AdditiveAnimType: not EAdditiveAnimationType.AAT_None } sequence || !sequence.IsValidAdditive() ||
+                sequence.RefPoseType == EAdditiveBasePoseType.ABPT_LocalAnimFrame)
+                return null;
+            var type = sequence.AdditiveAnimType == EAdditiveAnimationType.AAT_RotationOffsetMeshSpace ? "MeshRotation" : "Local";
+            if (sequence.RefPoseType == EAdditiveBasePoseType.ABPT_RefPose)
+                return new AdditiveInfo(type, null, 0, false);
+            if (sequence.RefPoseSeq?.Load<UAnimSequence>() is not { } basePose ||
+                await WritePsa(basePose, $"{item.Name} (base pose)") is not { } basePath)
+                return null;
+            return new AdditiveInfo(type, basePath, Math.Clamp((double) sequence.RefFrameIndex / Math.Max(1, basePose.NumFrames - 1), 0, 1),
+                sequence.RefPoseType == EAdditiveBasePoseType.ABPT_AnimScaled);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warning($"{item.Name}: its base pose couldn't be exported ({ex.Message}); it goes on as the whole animation.");
+            return null;
+        }
+    }
+
+    private static async Task<string?> WritePsa(UAnimationAsset animation, string name)
+    {
         var results = await new ExportSession { MaxDegreeOfParallelism = 1 }
             .Add(new AnimationExporter(animation))
             .RunAsync(App.AssetsFolder.FullName, Options);
@@ -53,9 +90,9 @@ public static class AnimationExport
             {
                 var error = result.Error?.ToString() ?? "unknown error";
                 if (error.Contains("CUE4Parse-Natives", StringComparison.OrdinalIgnoreCase) || result.Error is DllNotFoundException)
-                    AppLog.Error($"{item.Name} uses ACL compression, which needs CUE4Parse-Natives.dll (not included yet).");
+                    AppLog.Error($"{name} uses ACL compression, which needs CUE4Parse-Natives.dll (not included yet).");
                 else
-                    AppLog.Error($"Animation export failed for {item.Name}: {result.Error?.Message}");
+                    AppLog.Error($"Animation export failed for {name}: {result.Error?.Message}");
                 continue;
             }
 

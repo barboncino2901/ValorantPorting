@@ -756,7 +756,9 @@ def import_animation(data, armature=None):
         continuous_quaternions(action)
         # whether it loops (a run, an idle): a layer put on it later can repeat it to its own length
         action["vp_loops"] = bool(data.get("LowerLoops")) and (not data.get("UpperAnimationPath") or bool(data.get("UpperLoops")))
-        if base is not None and mode == "Layer":
+        if base is not None and mode == "Layer" and data.get("Additive"):
+            action = layer_additive(armature, base, action, data.get("Additive"), data.get("Name"))
+        elif base is not None and mode == "Layer":
             action = layer_actions(armature, base, action, data.get("Name"))
         elif base is not None:
             # starting at the timeline's current frame cuts the rest of the current animation (an animation cancel)
@@ -1140,6 +1142,131 @@ def layer_actions(armature, base, layer, name):
     bpy.data.actions.remove(layer)
     _fit_timeline(result)
     Log.information(f"{name} on top of {base.name}: {len(moving)} bone(s) from it, the rest as before")
+    return result
+
+
+def layer_additive(armature, base, rebuilt, info, name):
+    """An additive animation on top of the current one (base), as the game plays it: the app sends it rebuilt on its
+    base pose (the whole animation) and that base pose; their difference is added to the current animation.
+    info["Type"]: "Local" (each bone's change in its own space: an upper body's run over the legs) or "MeshRotation"
+    (rotations as seen from the whole model: 1st person walks and aims). Keys are baked per frame for the bones whose
+    pose changes. Returns the result (a copy: base stays as it was)."""
+    from mathutils import Quaternion, Vector
+    base_pose = None
+    if info.get("BasePath"):
+        psaimport(disk_path(info["BasePath"]), context=bpy.context, oArmature=armature, bKeepProportions=True, bRealTime=True,
+                  bUpdateTimelineRange=False, error_callback=Log.error)
+        base_pose = armature.animation_data.action
+        if base_pose in (base, rebuilt):
+            base_pose = None
+        else:
+            continuous_quaternions(base_pose)
+
+    rebuilt_length = _action_length(rebuilt)
+    if rebuilt.get("vp_loops") and rebuilt_length < _action_length(base) - 0.5:
+        repeat_action(rebuilt, math.ceil(_action_length(base) / rebuilt_length))
+    result = base.copy()
+    if base.get("vp_loops") and _action_length(base) < _action_length(rebuilt) - 0.5:
+        repeat_action(result, math.ceil(_action_length(rebuilt) / _action_length(base)))
+    result.name = f"{base.name} + {name}"
+    result["vp_loops"] = bool(base.get("vp_loops")) and bool(rebuilt.get("vp_loops"))
+    armature.animation_data.action = result
+    if hasattr(armature.animation_data, "action_slot") and len(result.slots) > 0:
+        armature.animation_data.action_slot = result.slots[0]
+
+    def curves(action):
+        return {(fc.data_path, fc.array_index): fc for fc in _action_fcurves(action)} if action else {}
+    current_curves, rebuilt_curves, base_curves = curves(result), curves(rebuilt), curves(base_pose)
+
+    def rotation(table, bone, frame):
+        path = f'pose.bones["{bone}"].rotation_quaternion'
+        values = [table[(path, i)].evaluate(frame) if (path, i) in table else (1.0 if i == 0 else 0.0) for i in range(4)]
+        q = Quaternion(values)
+        return q.normalized() if q.magnitude > 1e-6 else Quaternion()
+
+    def location(table, bone, frame):
+        path = f'pose.bones["{bone}"].location'
+        return Vector([table[(path, i)].evaluate(frame) if (path, i) in table else 0.0 for i in range(3)])
+
+    start = min(result.frame_range[0], rebuilt.frame_range[0])
+    end = max(result.frame_range[1], rebuilt.frame_range[1])
+    frames = list(range(int(math.floor(start)), int(math.ceil(end)) + 1))
+    rebuilt_start = rebuilt.frame_range[0]
+    if base_pose is not None:
+        base_start, base_length = base_pose.frame_range[0], _action_length(base_pose)
+    period = rebuilt_length  # the additive's own length (before repeating): a scaled base pose follows it
+
+    def base_frame(frame):
+        if base_pose is None:
+            return 0.0
+        if info.get("BaseScaled"):
+            return base_start + (((frame - rebuilt_start) % period) / period) * base_length
+        return base_start + float(info.get("BaseFraction") or 0.0) * base_length
+
+    bones = sorted(armature.pose.bones, key=lambda b: len(b.parent_recursive))  # parents before their children
+    rest = {}
+    for bone in bones:
+        local = bone.bone.matrix_local.to_quaternion()
+        rest[bone.name] = bone.bone.parent.matrix_local.to_quaternion().inverted() @ local if bone.bone.parent else local
+    mesh_rotation = info.get("Type") == "MeshRotation"
+    # bones that move in the current animation get the change on top; the others (a legs-only animation keys the upper
+    # body frozen) start from the additive's own base pose, as in game, where they play exactly as rebuilt
+    animated = _moving_bones(result)
+    keys = {}  # bone -> (rotations per frame, locations per frame or None)
+    for frame in frames:
+        fb = base_frame(frame)
+        model_now, model_target, model_base, model_new = {}, {}, {}, {}
+        for bone in bones:
+            n = bone.name
+            target = rotation(rebuilt_curves, n, frame)
+            before = rotation(base_curves, n, fb) if base_pose is not None else Quaternion()
+            current = rotation(current_curves, n, frame) if n in animated else before
+            if mesh_rotation:
+                parent = bone.parent.name if bone.parent else None
+                up = (lambda table: table[parent] if parent else Quaternion())
+                model_now[n] = up(model_now) @ rest[n] @ current
+                model_target[n] = up(model_target) @ rest[n] @ target
+                model_base[n] = up(model_base) @ rest[n] @ before
+                model_new[n] = model_target[n] @ model_base[n].inverted() @ model_now[n]
+                new = (up(model_new) @ rest[n]).inverted() @ model_new[n]
+            else:
+                new = target @ before.inverted() @ current
+            # positions add up in the bone's own space in both kinds (the game's rotation kind moves bones too)
+            base_location = location(base_curves, n, fb) if base_pose is not None else Vector()
+            moved = (location(current_curves, n, frame) if n in animated else base_location) + \
+                location(rebuilt_curves, n, frame) - base_location
+            keys.setdefault(n, ([], [] if moved is not None else None))
+            keys[n][0].append(new)
+            if moved is not None:
+                keys[n][1].append(moved)
+
+    changed = 0
+    for bone in bones:
+        n = bone.name
+        rotations, locations = keys[n]
+        if all(rotation(current_curves, n, f).rotation_difference(q).angle < 1e-4 for f, q in zip(frames, rotations)) and \
+                (locations is None or all((location(current_curves, n, f) - v).length < 1e-6 for f, v in zip(frames, locations))):
+            continue  # the additive doesn't change this bone
+        changed += 1
+        for q, previous in zip(rotations[1:], rotations):
+            if q.dot(previous) < 0:
+                q.negate()
+        channels = [("rotation_quaternion", 4, rotations)] + ([("location", 3, locations)] if locations is not None else [])
+        for prop, size, values in channels:
+            path = f'pose.bones["{n}"].{prop}'
+            for i in range(size):
+                curve = current_curves.get((path, i)) or _fcurve_new_on(result, armature, path, i)
+                curve.keyframe_points.clear()
+                curve.keyframe_points.add(len(frames))
+                curve.keyframe_points.foreach_set("co", [x for f, v in zip(frames, values) for x in (f, v[i])])
+                for point in curve.keyframe_points:
+                    point.interpolation = 'LINEAR'
+                curve.update()
+    for action in (rebuilt, base_pose):
+        if action is not None:
+            bpy.data.actions.remove(action)
+    _fit_timeline(result)
+    Log.information(f"{name} (additive) on top of {base.name}: {changed} bone(s) changed")
     return result
 
 

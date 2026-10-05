@@ -49,13 +49,13 @@ public class BlenderService : SocketServiceBase
     // moves change) or "Chain" it after the current one
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null,
-        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null) =>
-        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths, sounds: sounds, mode: mode)));
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null) =>
+        SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths, sounds: sounds, mode: mode, additive: additive)));
 
     // sceneTarget: in a scene, which armature it goes on ("agent:TP", "agent:FP", "agent:CS" or "gun")
     public static object AnimationMessage(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null,
-        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null) => new
+        IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null) => new
     {
         AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
         SceneTarget = sceneTarget,
@@ -68,6 +68,11 @@ public class BlenderService : SocketServiceBase
             // "Chain": the blend into it (seconds) and whether it starts at Blender's current frame, cutting the rest
             ChainBlend = AppSettings.Current.ChainBlendSeconds,
             ChainFrom = AppSettings.Current.ChainFromCurrentFrame ? "CurrentFrame" : "End",
+            // an additive animation "Add on top": only its change from its base pose goes onto the current animation
+            Additive = additive is null ? null : new
+            {
+                additive.Type, BasePath = additive.BasePath?.Replace("\\", "/"), additive.BaseFraction, additive.BaseScaled
+            },
             SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList(),
             Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop, s.Voice }).ToList()
         }
