@@ -5,6 +5,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports.Animation;
+using CUE4Parse.UE4.Assets.Exports;
 using ValorantPorting.Views.Controls;
 
 namespace ValorantPorting.Export;
@@ -32,12 +33,12 @@ public static class AnimationMontages
         return pairs;
     }
 
-    // Sorting opens ~5,600 montages (about 5 s), so the result is kept in .data and reused until the game files or the
-    // app change. One file, replaced each time. gameUpdate: when the game files last changed (null: don't cache).
+    // Sorting opens ~5,600 montages and checks what every other entry is (about 15 s), so the result is kept in .data
+    // and reused until the game files or the app change. One file, replaced each time. gameUpdate: when the game files last changed (null: don't cache).
     public static Result ClassifyCached(IFileProvider provider, IReadOnlyList<AnimationItem> items, DateTime? gameUpdate)
     {
         var file = Path.Combine(App.DataFolder.FullName, "montage-sort-cache.json");
-        var stamp = gameUpdate is { } changed ? $"{Services.UpdateService.CurrentVersion}|{changed.Ticks}|{items.Count}|empty-hidden" : null;
+        var stamp = gameUpdate is { } changed ? $"{Services.UpdateService.CurrentVersion}|{changed.Ticks}|{items.Count}|empty-hidden|blendspaces-hidden" : null;
         var byPath = new Dictionary<string, AnimationItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in items.Where(i => i.Kind == EAnimationKind.Single)) byPath.TryAdd(item.ObjectPath, item);
 
@@ -134,6 +135,21 @@ public static class AnimationMontages
             catch (Exception)
             {
                 // unreadable montage: keep it as it is
+            }
+        }
+
+        // entries in animation folders that aren't animations: blend spaces and aim offsets (the game's mixers of
+        // several animations, each listed on its own), pose assets, a stray mesh. None can be exported
+        foreach (var item in items.Where(i => i.Kind == EAnimationKind.Single && !MontageName.IsMatch(i.Name)))
+        {
+            try
+            {
+                if (provider.TryLoadPackageObject(item.ObjectPath, out UObject asset) && asset is not UAnimSequenceBase)
+                    hidden.Add(item);
+            }
+            catch (Exception)
+            {
+                // unreadable: keep it as it is
             }
         }
 

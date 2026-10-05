@@ -973,9 +973,12 @@ public partial class MainViewModel : ObservableObject
             {
                 foreach (var (montage, clips) in result.Sequences) montage.MakeSequence(clips);
                 foreach (var (clip, montage) in result.Wrappers) clip.Wrapper = montage;
-                Animations = new ObservableCollection<AnimationItem>(items.Where(i => !result.Hidden.Contains(i)));
+                // (a "full body" pair of two hidden halves, e.g. two blend spaces, goes too)
+                Animations = new ObservableCollection<AnimationItem>(items.Where(i => !result.Hidden.Contains(i) &&
+                    !(i.Kind == EAnimationKind.FullBody && (result.Hidden.Contains(i.UpperHalf!) || result.Hidden.Contains(i.LowerHalf!)))));
                 AnimationFilterChanged?.Invoke();
-                AppLog.Information($"Animation list: {result.Hidden.Count} duplicate montages hidden, {result.Sequences.Count} sequences.");
+                AppLog.Information($"Animation list: {result.Hidden.Count} hidden (montages repeating listed animations, blend spaces " +
+                                   $"and other non-animations), {result.Sequences.Count} sequences.");
             });
             MemoryHelper.ReleaseAfterLoading("Animation montages sorted");
         });
