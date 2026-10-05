@@ -4,6 +4,22 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.14.0
+
+**After this update: close Blender and open it again** (the Blender add-on updates itself).
+
+### New
+- **Add on top**: put an animation over the one a model already has; only the bones it moves change. E.g. a face
+  animation ("Breach face", "Reyna face") over a body animation.
+- **Play after**: chain animations one after another (an ultimate's equip, then its cast). Choose the blend between
+  them, or start at Blender's current frame to cut the previous one short (quick follow-up attacks).
+- Pick **Replace / Add on top / Play after** above "Apply in Blender" in the Animations tab.
+
+### Fixes
+- Face animations show their real expressions (death and hit-react faces looked neutral or weak).
+- Some bones could spin between frames (e.g. Breach's ultimate), visible with motion blur or other frame rates.
+- When chaining, earlier looping sounds stop where the next animation starts; voice lines play on.
+
 ## 1.13.0
 
 ### New
