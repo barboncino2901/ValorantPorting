@@ -43,8 +43,9 @@ def _build_group(images, values):
     """The shader group: Shader in (the material as it is), glow added on top. Inputs: Heart, Eyes, Ultimate (0..1),
     Time (seconds), MRAE and Albedo (the material's textures), Hair (1 on her hair material)."""
     group = bpy.data.node_groups.get(GROUP)
-    if group is not None:
+    if group is not None and group.users == 0:
         bpy.data.node_groups.remove(group)
+    # (one already in use stays: a Reyna in the scene keeps hers; this one gets "VP Reyna Glow.001")
     group = bpy.data.node_groups.new(GROUP, 'ShaderNodeTree')
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
@@ -235,7 +236,7 @@ def apply(glow, objects, load_image):
             if material is None or not material.use_nodes or "vampire" not in name:
                 continue
             tree = material.node_tree
-            if any(n.type == 'GROUP' and n.node_tree == group for n in tree.nodes):
+            if tree.nodes.get(GROUP) is not None:  # sent again: it already glows
                 continue
             out = next((n for n in tree.nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
             if out is None or not out.inputs["Surface"].is_linked:
