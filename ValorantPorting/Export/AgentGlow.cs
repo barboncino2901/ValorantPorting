@@ -8,7 +8,7 @@ using ValorantPorting.AppUtils;
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Neon's suit and Overdrive; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -101,6 +101,22 @@ public static class AgentGlow
                     ["UltFresnelColor"] = "6BBEFF", ["UltGlow"] = 2.5, ["HornColor"] = "9AFFFF",
                     ["LegColor"] = "DC6CFF", ["ButterflyColor"] = "FFB8FF", ["LegGlowHeight"] = 0.9,
                     ["GhostRimColor"] = "FF3CC8", ["SparkColor"] = "FFB4F0"
+                }),
+            // Neon: TP_Sprinter_S0_VFX03_M (TP_Sprinter_S0_VFX_MI: "Ultimate", "SprintMask", "TattooMask"): the strips of
+            // her suit (Masks_Body B, coloured by Colors_Body) and its lines (R) light up when she sprints and in her
+            // ultimate; in her ultimate electricity also crawls over her skin (G; Bioelectricity), her tattoo and hair
+            ["Sprinter"] = (
+                new Dictionary<string, string>
+                {
+                    ["UltMasks"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Body01_T.TP_Sprinter_Ult_Masks_Body01_T",
+                    ["UltColors"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Colors_Body01_T.TP_Sprinter_Ult_Colors_Body01_T",
+                    ["Bioelectricity"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Bioelectricity01_T.TP_Sprinter_Ult_Bioelectricity01_T",
+                    ["TattooMask"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Tattoo01_T.TP_Sprinter_Ult_Masks_Tattoo01_T",
+                    ["HairMask"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Hair01_T.TP_Sprinter_Ult_Masks_Hair01_T"
+                },
+                new Dictionary<string, object>
+                {
+                    ["ElectricColor"] = "2BD8FF", ["RimColor"] = "4FC8FF"
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's

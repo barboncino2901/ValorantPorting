@@ -2014,7 +2014,7 @@ def import_response(response, holder=None, use_selection=True):
             glowing = agent_glow.apply(import_data["Glow"], [o for o in bpy.data.objects if o not in before_import], import_texture)
             if glowing:
                 bpy.app.timers.register(agent_glow.connect_pending, first_interval=0.05)  # once this import is over
-                Log.information(f"Glow added to {glowing} material(s): \"{agent_glow.HEART}\" and \"{agent_glow.ULTIMATE}\" on the armature")
+                Log.information(f"Glow added to {glowing} material(s), its controls on the armature")
         except Exception as e:
             Log.error(f"Could not add the agent's glow: {e}")
     if main is not None and holder is not None:
