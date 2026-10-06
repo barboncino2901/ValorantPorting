@@ -6,8 +6,8 @@ using ValorantPorting.AppUtils;
 
 namespace ValorantPorting.Export;
 
-// Glow some agents have in game but not in their base materials: Reyna's pulsing heart, and her tattoos, eyes and
-// fingertips during her ultimate. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
+// eyes and hair; Iso's glowing outfit lines and hands. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -38,6 +38,17 @@ public static class AgentGlow
                     ["EnergyTile"] = 3.0, ["EnergyScrollV"] = -0.1,
                     ["FlareU"] = -0.25, ["FlareV"] = -0.409525, ["FlareUTile"] = 1.5, ["FlareVTile"] = 2.0,
                     ["EmissiveBrightness"] = 150.0
+                }),
+            // Iso: TP_Sequoia_S0_MI's glow mask (R forearms: his E's charged punches, G gloves: his other abilities,
+            // B the lines of his outfit), switched on by the game (GlowToggle_Hands_E / _Hands_XQC / _Outfit)
+            ["Sequoia"] = (
+                new Dictionary<string, string>
+                {
+                    ["GlowMask"] = "/Game/Characters/Sequoia/S0/3P/Materials/TP_Sequoia_S0_VFXMask.TP_Sequoia_S0_VFXMask"
+                },
+                new Dictionary<string, object>
+                {
+                    ["GlowColor"] = "D6AAFF", ["HighlightColor"] = "FABCFF", ["EmissiveBrightness"] = 10.0
                 })
         };
 

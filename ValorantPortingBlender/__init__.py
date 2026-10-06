@@ -572,6 +572,41 @@ def import_shaders(shaderName):
         for node_group in data_from.node_groups:
             if node_group not in bpy.data.node_groups.keys():
                 data_to.node_groups.append(node_group)
+    add_emissive_brightness()
+
+
+AGENT_SHADER = "3P_Character_Mat_V5"
+GLOW_REFERENCE = 30.0  # the most common "Emissive Brightness" on agents: their glow as the shader had it (1.5)
+
+
+def add_emissive_brightness():
+    """Agents' materials say how bright their glowing parts are ("Emissive Brightness": 1.2 for Gekko's suit up to
+    150 for Fade's or Cypher's); the agent shader had a fixed glow strength. It gets that input (by name, the material's
+    value reaches it) and the glow follows it gently: 1.5 x sqrt(value / 30), so 30 stays as it was, 150 is ~2.2x
+    brighter and 1.2 ~5x dimmer."""
+    group = bpy.data.node_groups.get(AGENT_SHADER)
+    if group is None or [i for i in group.interface.items_tree if getattr(i, "name", "") == "Emissive Brightness"]:
+        return  # (this module has its own any())
+    bsdf = next((n for n in group.nodes if n.type == 'BSDF_PRINCIPLED' and not n.inputs["Emission Strength"].is_linked), None)
+    inputs = next((n for n in group.nodes if n.type == 'GROUP_INPUT'), None)
+    if bsdf is None or inputs is None:
+        return
+    base = bsdf.inputs["Emission Strength"].default_value
+    socket = group.interface.new_socket("Emissive Brightness", in_out='INPUT', socket_type='NodeSocketFloat')
+    socket.default_value = GLOW_REFERENCE
+    ratio = group.nodes.new("ShaderNodeMath")
+    ratio.operation = 'DIVIDE'
+    ratio.use_clamp = False
+    ratio.inputs[1].default_value = GLOW_REFERENCE
+    group.links.new(inputs.outputs["Emissive Brightness"], ratio.inputs[0])
+    root = group.nodes.new("ShaderNodeMath")
+    root.operation = 'SQRT'
+    group.links.new(ratio.outputs[0], root.inputs[0])
+    strength = group.nodes.new("ShaderNodeMath")
+    strength.operation = 'MULTIPLY'
+    strength.inputs[1].default_value = base
+    group.links.new(root.outputs[0], strength.inputs[0])
+    group.links.new(strength.outputs[0], bsdf.inputs["Emission Strength"])
 
 
 def create_collection(name):

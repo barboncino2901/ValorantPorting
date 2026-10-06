@@ -1,11 +1,12 @@
 """Glow some agents have in game on top of their base materials, rebuilt in Blender (the app sends the textures and
-values from the game's effect materials; how they combine is rebuilt here).
+values from the game's effect materials; how they combine is rebuilt here). Each agent's controls are custom
+properties on its armature ("Glow: ..."), driving all of its materials at once; they can be keyframed.
 
 Reyna ("Vampire"): her heart pulses behind her top, with a flare streaking over it; her eyes (iris and pupil) can
-glow; during her ultimate (Empress) her tattoos and hair tips glow, energy flows through the tattoos and
-her body tints purple. Custom properties on her armature drive it, for every one of her materials at once, and can be
-keyframed: "Glow: heart" (on by default), "Glow: eyes" and "Glow: ultimate" (off by default; the ultimate also lights
-the eyes)."""
+glow; during her ultimate (Empress) her tattoos and hair tips glow, energy flows through the tattoos and her body tints
+purple ("Glow: heart" on by default, "Glow: eyes", "Glow: ultimate"; the ultimate also lights the eyes).
+Iso ("Sequoia"): his glow mask lights the lines of his outfit, his hands (his E) and his gloves (his other abilities)
+("Glow: outfit", "Glow: hands (E)", "Glow: hands (abilities)")."""
 import math
 import bpy
 
@@ -190,6 +191,72 @@ def _build_group(images, values):
     return group
 
 
+def _build_iso_group(images, values):
+    """Iso: his glow mask lights his forearms (red: his E's charged punches), gloves (green: his other abilities) and
+    the lines of his outfit (blue), each switched on by the game during those moments."""
+    name = "VP Iso Glow"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name in ("Outfit", "Hands E", "Hands abilities", "Time"):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+    uv = nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "EXTRAUVS0"  # the mask is laid out on his second UV map (on the first the outfit lines become blobs)
+    mask = nodes.new("ShaderNodeTexImage")
+    mask.image = _image(images, "GlowMask")
+    links.new(uv.outputs[0], mask.inputs[0])
+    channels = nodes.new("ShaderNodeSeparateColor")
+    links.new(mask.outputs[0], channels.inputs[0])
+
+    total = None
+    for channel, switch in ((0, "Hands E"), (1, "Hands abilities"), (2, "Outfit")):
+        part = nodes.new("ShaderNodeMath")
+        part.operation = 'MULTIPLY'
+        links.new(channels.outputs[channel], part.inputs[0])
+        links.new(inputs.outputs[switch], part.inputs[1])
+        if total is None:
+            total = part.outputs[0]
+        else:
+            add = nodes.new("ShaderNodeMath")
+            add.operation = 'ADD'
+            links.new(total, add.inputs[0])
+            links.new(part.outputs[0], add.inputs[1])
+            total = add.outputs[0]
+    emission = nodes.new("ShaderNodeEmission")
+    emission.inputs["Color"].default_value = (*_color(values.get("GlowColor", "D6AAFF")), 1.0)
+    strength = nodes.new("ShaderNodeMath")
+    strength.operation = 'MULTIPLY'
+    links.new(total, strength.inputs[0])
+    strength.inputs[1].default_value = 2.5
+    links.new(strength.outputs[0], emission.inputs["Strength"])
+    add = nodes.new("ShaderNodeAddShader")
+    links.new(inputs.outputs["Shader"], add.inputs[0])
+    links.new(emission.outputs[0], add.inputs[1])
+    links.new(add.outputs[0], output.inputs[0])
+    return group
+
+
+# each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
+# armature: (custom property, the group's input, default, description)
+AGENTS = {
+    "vampire": dict(
+        node=GROUP, build=_build_group, materials="vampire",
+        controls=[(HEART, "Heart", 1.0, CONTROLS[HEART][1]), (EYES, "Eyes", 0.0, CONTROLS[EYES][1]),
+                  (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1])]),
+    "sequoia": dict(
+        node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip="hair",
+        controls=[("Glow: outfit", "Outfit", 0.0, "Iso's outfit lines glowing"),
+                  ("Glow: hands (E)", "Hands E", 0.0, "Iso's forearms glowing, as with his E (charged punches)"),
+                  ("Glow: hands (abilities)", "Hands abilities", 0.0, "Iso's gloves glowing, as with his other abilities")]),
+}
+
+
 def _drive(tree, node, socket, armature, prop):
     curve = tree.driver_add(f'nodes["{node.name}"].inputs["{socket}"].default_value')
     driver = curve.driver
@@ -203,10 +270,18 @@ def _drive(tree, node, socket, armature, prop):
     driver.expression = "value"  # a simple expression: no Python, works without "Auto Run Python Scripts"
 
 
+def _armature_of(obj):
+    if obj.parent is not None and obj.parent.type == 'ARMATURE':
+        return obj.parent
+    return next((m.object for m in obj.modifiers if m.type == 'ARMATURE' and m.object), None)
+
+
 def apply(glow, objects, load_image):
     """glow: what the app sent ({"Agent", "Textures": role -> game path, "Values"}); objects: the agent's new objects;
-    load_image(game path) -> image. Adds the glow layer to the agent's body and hair materials (not the eye overlay)."""
-    if (glow or {}).get("Agent", "").lower() != "vampire":
+    load_image(game path) -> image. Adds the agent's glow layer to its own materials (body, hair; not the eye overlay
+    shared by agents) and its controls to its armature."""
+    spec = AGENTS.get((glow or {}).get("Agent", "").lower())
+    if spec is None:
         return 0
     images = {}
     for role, path in (glow.get("Textures") or {}).items():
@@ -214,29 +289,26 @@ def apply(glow, objects, load_image):
             images[role] = load_image(path)
         except Exception:
             images[role] = None
-    group = _build_group(images, glow.get("Values") or {})
+    group = spec["build"](images, glow.get("Values") or {})
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
     done = 0
     for obj in objects:
         if obj.type != 'MESH':
             continue
-        armature = obj.parent if obj.parent is not None and obj.parent.type == 'ARMATURE' else \
-            next((m.object for m in obj.modifiers if m.type == 'ARMATURE' and m.object), None)
+        armature = _armature_of(obj)
         if armature is None or obj.name.upper().startswith("FP_"):
-            continue  # the 1st person arms have their own tattoo layout (not done yet)
-        for prop, (default, description) in CONTROLS.items():
+            continue  # the 1st person arms have their own layouts (not done yet)
+        for prop, _, default, description in spec["controls"]:
             if prop not in armature:
                 armature[prop] = default
                 armature.id_properties_ui(prop).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0, description=description)
         for slot in obj.material_slots:
             material = slot.material
             name = (material.name if material else "").lower()
-            # her own materials: body, heart, hair (her eye overlay, shared by agents, is left alone: her eyes are
-            # in the body's texture)
-            if material is None or not material.use_nodes or "vampire" not in name:
+            if material is None or not material.use_nodes or spec["materials"] not in name or                     (spec.get("skip") and spec["skip"] in name):
                 continue
             tree = material.node_tree
-            if tree.nodes.get(GROUP) is not None:  # sent again: it already glows
+            if tree.nodes.get(spec["node"]) is not None:  # sent again: it already glows
                 continue
             out = next((n for n in tree.nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
             if out is None or not out.inputs["Surface"].is_linked:
@@ -244,16 +316,17 @@ def apply(glow, objects, load_image):
             source = out.inputs["Surface"].links[0].from_socket
             node = tree.nodes.new("ShaderNodeGroup")
             node.node_tree = group
-            node.name = node.label = GROUP
+            node.name = node.label = spec["node"]
             node.location = (out.location.x, out.location.y - 260)
-            node.inputs["Hair"].default_value = 1.0 if "hair" in name else 0.0
+            if "Hair" in node.inputs:
+                node.inputs["Hair"].default_value = 1.0 if "hair" in name else 0.0
             tree.links.new(source, node.inputs["Shader"])
             tree.links.new(node.outputs[0], out.inputs["Surface"])
             for role, key in (("MRAE", "mrae"), ("Albedo", "_df")):
                 found = next((n for n in tree.nodes if n.type == 'TEX_IMAGE' and n.image and key in n.image.name.lower()), None)
-                if found is not None:
+                if found is not None and role in node.inputs:
                     tree.links.new(found.outputs[0], node.inputs[role])
-            pending.append((material, armature, fps))
+            pending.append((material, armature, fps, spec))
             done += 1
     return done
 
@@ -263,21 +336,20 @@ pending = []
 
 
 def connect_pending():
-    """Connects the glow layers to their armature's controls ("Glow: heart", "Glow: eyes", "Glow: ultimate") and to
-    the timeline. Done after the import, and the armature is told it changed: Blender's evaluated copy of it doesn't
-    have the new properties until then, and drivers reading them before that are marked invalid."""
+    """Connects the glow layers to their armature's controls (the "Glow: ..." properties) and to the timeline. Done
+    after the import, and the armature is told it changed: Blender's evaluated copy of it doesn't have the new
+    properties until then, and drivers reading them before that are marked invalid."""
     while pending:
-        material, armature, fps = pending.pop()
+        material, armature, fps, spec = pending.pop()
         try:
             tree = material.node_tree
-            node = tree.nodes.get(GROUP)
+            node = tree.nodes.get(spec["node"])
         except ReferenceError:
             continue  # deleted meanwhile
         if node is None:
             continue
-        _drive(tree, node, "Heart", armature, HEART)
-        _drive(tree, node, "Eyes", armature, EYES)
-        _drive(tree, node, "Ultimate", armature, ULTIMATE)
+        for prop, socket, _, _ in spec["controls"]:
+            _drive(tree, node, socket, armature, prop)
         time = tree.driver_add(f'nodes["{node.name}"].inputs["Time"].default_value')
         time.driver.expression = f"frame / {fps:g}"
         armature.update_tag()
