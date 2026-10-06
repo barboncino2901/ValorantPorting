@@ -2,7 +2,7 @@
 values from the game's effect materials; how they combine is rebuilt here).
 
 Reyna ("Vampire"): her heart pulses behind her top, with a flare streaking over it; her eyes (iris and pupil) can
-glow; during her ultimate (Empress) her tattoos, fingertips and hair tips glow, energy flows through the tattoos and
+glow; during her ultimate (Empress) her tattoos and hair tips glow, energy flows through the tattoos and
 her body tints purple. Custom properties on her armature drive it, for every one of her materials at once, and can be
 keyframed: "Glow: heart" (on by default), "Glow: eyes" and "Glow: ultimate" (off by default; the ultimate also lights
 the eyes)."""
@@ -16,7 +16,7 @@ ULTIMATE = "Glow: ultimate"
 CONTROLS = {
     HEART: (1.0, "Reyna's pulsing heart and the flare over it"),
     EYES: (0.0, "Reyna's eyes glowing (the ultimate lights them too)"),
-    ULTIMATE: (0.0, "Reyna's ultimate (Empress): tattoos, fingertips, hair tips and eyes glow; keyframe it to switch it on"),
+    ULTIMATE: (0.0, "Reyna's ultimate (Empress): tattoos, hair tips and eyes glow; keyframe it to switch it on"),
 }
 # her glow, as it looks in game: a pink-leaning violet (the heart's game colour, 8A40FF, reads bluer in Blender's AgX
 # view than the game's rendering)
@@ -161,10 +161,8 @@ def _build_group(images, values):
         strength = 1.0 * float(values.get("UltTattooMultiply", 3.0))
         amount = math_node('ADD', amount, math_node('MULTIPLY', math_node('MULTIPLY', separate(tattoo.outputs[0])[0], lit),
                                                     math_node('MULTIPLY', ult, strength)))
-    # fingertips and nails (red channel of the mask set)
-    sets = texture("MaskSets")
-    if sets is not None:
-        amount = math_node('ADD', amount, math_node('MULTIPLY', separate(sets.outputs[0])[0], math_node('MULTIPLY', ult, 2.5)))
+    # (no finger glow: the mask set's finger shapes are gradients for an effect of their own; as a glow they streak
+    # along the fingers)
     total = mix_color('MULTIPLY', glow, math_node('MULTIPLY', amount, not_hair))
 
     # her hair: the pink tips (where the hair's own colour is pink) glow in the ultimate
