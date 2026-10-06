@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using ValorantPorting.AppUtils;
 
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -77,8 +78,46 @@ public static class AgentGlow
                 new Dictionary<string, object>
                 {
                     ["ArmColor"] = "C7FF78", ["HandColor"] = "FAFF26", ["HairColor"] = "FFFFFF"
+                }),
+            // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
+            // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
+            // colours: dark, orange, gold)
+            ["Pine"] = (
+                new Dictionary<string, string>
+                {
+                    ["Cells"] = "/Game/Characters/Pine/S0/VFX/C/Textures/Pine_UltTeleportWPO_TFX.Pine_UltTeleportWPO_TFX"
+                },
+                new Dictionary<string, object>
+                {
+                    ["EdgeColorA"] = "C68A00", ["EdgeColorB"] = "FFBF00", ["EdgeWidth"] = 0.04
                 })
         };
+
+    // agents who change model in their ultimate: the other model, same skeleton (Veto's symbiote form, which the game
+    // fades in over him with TP_Pine_S0_transform_Mat / TP_Pine_S0_Sym_transform_Mat). Sent with the 3rd person model;
+    // the add-on puts it on the same rig, hidden until "Ult form" is raised
+    private static readonly Dictionary<string, string> UltForms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Pine"] = "/Game/Characters/Pine/S0/3P/Models/TP_Pine_Sym_S0_Skelmesh.TP_Pine_Sym_S0_Skelmesh"
+    };
+
+    public static void AddUltForm(List<ExportPart> parts)
+    {
+        var thirdPerson = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/3P/", StringComparison.OrdinalIgnoreCase) &&
+                                                                                  p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
+        if (thirdPerson is null) return;
+        var codename = thirdPerson[(thirdPerson.IndexOf("/Characters/", StringComparison.OrdinalIgnoreCase) + "/Characters/".Length)..].Split('/')[0];
+        if (!UltForms.TryGetValue(codename, out var meshPath)) return;
+        try
+        {
+            if (AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(meshPath, out USkeletalMesh mesh))
+                ExportHelpers.Mesh(mesh, parts);
+        }
+        catch (Exception)
+        {
+            // missing from this game version: no ult form
+        }
+    }
 
     // the glow of the agent these parts are (null: none known); exports its textures with the other files
     public static Spec? For(IEnumerable<ExportPart> parts)

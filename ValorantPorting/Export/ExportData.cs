@@ -52,6 +52,7 @@ public class ExportData
             {
                 case EAssetType.Character:
                     ExportHelpers.Character(data.Parts, asset, choices.Models);
+                    AgentGlow.AddUltForm(data.Parts);
                     data.Glow = AgentGlow.For(data.Parts);
                     break;
                 case EAssetType.Weapon:

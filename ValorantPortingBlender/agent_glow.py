@@ -10,7 +10,8 @@ Iso ("Sequoia"): his glow mask lights the lines of his outfit, his hands (his E)
 Chamber ("Deadeye"): his gold tattoo (side of his head, wrists), which his colour texture leaves out ("Tattoo": 1 as
 in game; animating it from 0 reveals it with a glowing edge, as in character select).
 Waylay ("Terra"): the crystal shards on her arms glow at their edges, green-yellow, with her nails and hair tips
-("Glow: tattoos")."""
+("Glow: tattoos").
+Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
 
@@ -393,6 +394,127 @@ def _build_waylay_group(images, values):
     return group
 
 
+def _build_veto_group(images, values):
+    """Veto: his ultimate turns him into his symbiote form, a second model on the same rig. "Ult form" 0 -> 1 spreads
+    it over him from his feet up in bubbling cells (the game's Pine_UltTeleportWPO_TFX cells), his normal model
+    disappearing where it arrives, with a glowing orange-gold edge between them. Reveal: 0 his normal model's
+    materials, 1 the symbiote form's."""
+    name = "VP Veto Ult Form"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name in ("Form", "Reveal", "Time"):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    width = float(values.get("EdgeWidth", 0.06))
+    # where on him: height (the model's own box, before posing: the spread stays on the body when he moves) plus cells
+    coords = nodes.new("ShaderNodeTexCoord")
+    generated = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(coords.outputs["Generated"], generated.inputs[0])
+    scaled = nodes.new("ShaderNodeVectorMath")
+    scaled.operation = 'MULTIPLY'
+    scaled.inputs[1].default_value = (4.0, 2.0, 8.0)  # about round cells on a body ~2x as tall as wide
+    links.new(coords.outputs["Generated"], scaled.inputs[0])
+    cells = nodes.new("ShaderNodeTexImage")
+    cells.image = _image(images, "Cells")
+    cells.projection = 'BOX'
+    cells.projection_blend = 0.3
+    links.new(scaled.outputs[0], cells.inputs[0])
+    cell_value = cells.outputs[1] if cells.image is not None else 0.5  # alpha: the cells
+    field = math_node('ADD', math_node('MULTIPLY', generated.outputs[2], 0.75), math_node('MULTIPLY', cell_value, 0.25))
+    # the front: below it the symbiote form, above it his normal model
+    front = math_node('SUBTRACT', math_node('MULTIPLY', inputs.outputs["Form"], 1.0 + 2.0 * width), width)
+    distance = math_node('SUBTRACT', field, front)
+    side = math_node('MULTIPLY', distance, math_node('SUBTRACT', 1.0, math_node('MULTIPLY', inputs.outputs["Reveal"], 2.0)))
+    visible = math_node('GREATER_THAN', side, 0.0)
+    # the glowing edge, brightest at the front
+    edge = math_node('SUBTRACT', 1.0, math_node('DIVIDE', math_node('ABSOLUTE', distance), width), clamp=True)
+    tint = nodes.new("ShaderNodeMix")
+    tint.data_type = 'RGBA'
+    links.new(edge, tint.inputs[0])
+    tint.inputs[6].default_value = (*_color(values.get("EdgeColorA", "C68A00")), 1.0)
+    tint.inputs[7].default_value = (*_color(values.get("EdgeColorB", "FFBF00")), 1.0)
+    glow = nodes.new("ShaderNodeEmission")
+    links.new(tint.outputs[2], glow.inputs["Color"])
+    links.new(math_node('MULTIPLY', math_node('POWER', edge, 3.0), 5.0), glow.inputs["Strength"])
+    lit = nodes.new("ShaderNodeAddShader")
+    links.new(inputs.outputs["Shader"], lit.inputs[0])
+    links.new(glow.outputs[0], lit.inputs[1])
+    gone = nodes.new("ShaderNodeBsdfTransparent")
+    mix = nodes.new("ShaderNodeMixShader")
+    links.new(visible, mix.inputs[0])
+    links.new(gone.outputs[0], mix.inputs[1])
+    links.new(lit.outputs[0], mix.inputs[2])
+    links.new(mix.outputs[0], output.inputs[0])
+    return group
+
+
+ULT_FORM_TAG = " (ult form)"
+
+
+def _prepare_veto(objects):
+    """Puts his symbiote form on his normal model's rig (it comes with its own copy of the same skeleton) and gives it
+    its own materials (it shares one with his arm, which must disappear while it appears); his eye overlay, shared
+    by all agents, gets a copy of its own too."""
+    meshes = [o for o in objects if o.type == 'MESH' and not o.name.upper().startswith("FP_")]
+    form = next((o for o in meshes if "pine_sym" in o.name.lower()), None)
+    body = next((o for o in meshes if o is not form and _armature_of(o) is not None), None)
+    if form is None or body is None:
+        return objects
+    rig, own_rig = _armature_of(body), _armature_of(form)
+    if own_rig is not None and own_rig is not rig:
+        for modifier in form.modifiers:
+            if modifier.type == 'ARMATURE':
+                modifier.object = rig
+        world = form.matrix_world.copy()
+        form.parent = rig
+        form.matrix_world = world
+        data = own_rig.data
+        bpy.data.objects.remove(own_rig)
+        if data.users == 0:
+            bpy.data.armatures.remove(data)
+        for collection in rig.users_collection:
+            if collection not in form.users_collection:
+                collection.objects.link(form)
+    # its outfit is his normal outfit's shape exactly: pushed out 1 mm so the renderers can tell the two apart (where
+    # it is hidden, the outfit under it must show)
+    if form.modifiers.get("VP Ult Form Offset") is None:
+        offset = form.modifiers.new("VP Ult Form Offset", 'DISPLACE')
+        offset.direction = 'NORMAL'
+        offset.mid_level = 0.0
+        offset.strength = 0.001
+    for slot in form.material_slots:
+        if slot.material is not None and ULT_FORM_TAG not in slot.material.name and slot.material.name != "None":
+            copy = slot.material.copy()
+            copy.name = slot.material.name + ULT_FORM_TAG
+            slot.material = copy
+    for slot in body.material_slots:
+        if slot.material is not None and "pine" not in slot.material.name.lower():
+            copy = slot.material.copy()
+            copy.name = slot.material.name + " (Pine)"  # "pine": gets the layer
+            slot.material = copy
+    return [o for o in objects if o is not own_rig]
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -411,6 +533,9 @@ AGENTS = {
     "terra": dict(
         node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair", "terra_s0_floaters"),
         controls=[("Glow: tattoos", "Tattoos", 0.0, "Waylay's crystal tattoos, nails and hair tips glowing, as when she uses her abilities")]),
+    "pine": dict(
+        node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
+        controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
 }
 
 
@@ -447,6 +572,8 @@ def apply(glow, objects, load_image):
         except Exception:
             images[role] = None
     group = spec["build"](images, glow.get("Values") or {})
+    if spec.get("prepare"):
+        objects = spec["prepare"](objects)
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
     done = 0
     for obj in objects:
@@ -481,6 +608,12 @@ def apply(glow, objects, load_image):
                 node.inputs["Hair"].default_value = 1.0 if "hair" in name else 0.0
             if "Shard" in node.inputs:
                 node.inputs["Shard"].default_value = 1.0 if "floaters" in name else 0.0
+            if "Reveal" in node.inputs:
+                node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name else 0.0
+            if spec.get("see_through"):
+                if hasattr(material, "use_transparent_shadow"):
+                    material.use_transparent_shadow = True  # its hidden parts cast no shadow (Eevee)
+
             tree.links.new(source, node.inputs["Shader"])
             tree.links.new(node.outputs[0], out.inputs["Surface"])
             for role, key in (("MRAE", "mrae"), ("Albedo", "_df")):
