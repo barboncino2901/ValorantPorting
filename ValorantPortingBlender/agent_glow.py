@@ -6,7 +6,9 @@ Reyna ("Vampire"): her heart pulses behind her top, with a flare streaking over 
 glow; during her ultimate (Empress) her tattoos and hair tips glow, energy flows through the tattoos and her body tints
 purple ("Glow: heart" on by default, "Glow: eyes", "Glow: ultimate"; the ultimate also lights the eyes).
 Iso ("Sequoia"): his glow mask lights the lines of his outfit, his hands (his E) and his gloves (his other abilities)
-("Glow: outfit", "Glow: hands (E)", "Glow: hands (abilities)")."""
+("Glow: outfit", "Glow: hands (E)", "Glow: hands (abilities)").
+Chamber ("Deadeye"): his gold tattoo (side of his head, wrists), which his colour texture leaves out ("Tattoo": 1 as
+in game; animating it from 0 reveals it with a glowing edge, as in character select)."""
 import math
 import bpy
 
@@ -242,6 +244,73 @@ def _build_iso_group(images, values):
     return group
 
 
+def _build_chamber_group(images, values):
+    """Chamber: his colour texture leaves his tattoo out (side of his head, wrists); the game draws it on top, gold
+    and metallic (the alpha of his multi-mask). "Tattoo" reveals it left to right (game: TattooAlpha), with a glowing
+    edge where it's appearing (character select); at 1 it's fully there, as in game."""
+    name = "VP Chamber Tattoo"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name, default in (("Tattoo", 1.0), ("Time", 0.0)):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    uv = nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "UV_SINGLE"
+    mask = nodes.new("ShaderNodeTexImage")
+    mask.image = _image(images, "MultiMask")
+    links.new(uv.outputs[0], mask.inputs[0])
+    tattoo = mask.outputs[1]  # alpha
+
+    # the reveal: a left-to-right ramp across the texture (game: T_Mask_Ramp_LeftRight, tiled once), shown where it's
+    # below the "Tattoo" value; a thin band at the front glows
+    position = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(uv.outputs[0], position.inputs[0])
+    ramp = math_node('SUBTRACT', 1.0, position.outputs[0])
+    reveal = math_node('MULTIPLY', inputs.outputs["Tattoo"], 1.02)  # at 1 everything is shown
+    shown = math_node('MULTIPLY', math_node('SUBTRACT', reveal, ramp), 60.0, clamp=True)
+    edge_width = float(values.get("EdgeThickness", 0.3)) * 0.1
+    edge = math_node('MULTIPLY', math_node('SUBTRACT', 1.0, math_node('MULTIPLY', math_node('ABSOLUTE', math_node('SUBTRACT', reveal, ramp)), 1 / edge_width), clamp=True),
+                     math_node('SUBTRACT', 1.0, math_node('GREATER_THAN', inputs.outputs["Tattoo"], 0.999)))
+    amount = math_node('MULTIPLY', tattoo, shown)
+
+    gold = nodes.new("ShaderNodeBsdfPrincipled")
+    gold.inputs["Base Color"].default_value = (*_color(values.get("TattooColor", "BA7E4C")), 1.0)
+    gold.inputs["Metallic"].default_value = float(values.get("TattooMetallic", 1.0))
+    gold.inputs["Roughness"].default_value = float(values.get("TattooRoughness", 0.5))
+    mix = nodes.new("ShaderNodeMixShader")
+    links.new(amount, mix.inputs[0])
+    links.new(inputs.outputs["Shader"], mix.inputs[1])
+    links.new(gold.outputs[0], mix.inputs[2])
+    glow = nodes.new("ShaderNodeEmission")
+    glow.inputs["Color"].default_value = (*_color(values.get("EdgeColor", "FFFFCF")), 1.0)
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', tattoo, edge), 8.0), glow.inputs["Strength"])
+    add = nodes.new("ShaderNodeAddShader")
+    links.new(mix.outputs[0], add.inputs[0])
+    links.new(glow.outputs[0], add.inputs[1])
+    links.new(add.outputs[0], output.inputs[0])
+    return group
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -250,10 +319,13 @@ AGENTS = {
         controls=[(HEART, "Heart", 1.0, CONTROLS[HEART][1]), (EYES, "Eyes", 0.0, CONTROLS[EYES][1]),
                   (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1])]),
     "sequoia": dict(
-        node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip="hair",
+        node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip=("hair",),
         controls=[("Glow: outfit", "Outfit", 0.0, "Iso's outfit lines glowing"),
                   ("Glow: hands (E)", "Hands E", 0.0, "Iso's forearms glowing, as with his E (charged punches)"),
                   ("Glow: hands (abilities)", "Hands abilities", 0.0, "Iso's gloves glowing, as with his other abilities")]),
+    "deadeye": dict(
+        node="VP Chamber Tattoo", build=_build_chamber_group, materials="deadeye", skip=("hair", "glass"),
+        controls=[("Tattoo", "Tattoo", 1.0, "Chamber's gold tattoo (side of his head, wrists); from 0 it reveals left to right with a glowing edge, as in character select")]),
 }
 
 
@@ -305,7 +377,7 @@ def apply(glow, objects, load_image):
         for slot in obj.material_slots:
             material = slot.material
             name = (material.name if material else "").lower()
-            if material is None or not material.use_nodes or spec["materials"] not in name or                     (spec.get("skip") and spec["skip"] in name):
+            if material is None or not material.use_nodes or spec["materials"] not in name or                     [word for word in spec.get("skip", ()) if word in name]:
                 continue
             tree = material.node_tree
             if tree.nodes.get(spec["node"]) is not None:  # sent again: it already glows

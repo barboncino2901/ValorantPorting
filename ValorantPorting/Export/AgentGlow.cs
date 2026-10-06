@@ -7,7 +7,7 @@ using ValorantPorting.AppUtils;
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -49,6 +49,19 @@ public static class AgentGlow
                 new Dictionary<string, object>
                 {
                     ["GlowColor"] = "D6AAFF", ["HighlightColor"] = "FABCFF", ["EmissiveBrightness"] = 10.0
+                }),
+            // Chamber: his colour texture is DE_NoTattoo_TEX; his master material draws the tattoo on top (the alpha of
+            // DE_MultiMask_TEX: side of his head, wrists), gold and metallic, revealed left to right with a glowing edge
+            // in character select (TattooAlpha 0 -> 1.4, Glow Edge Thickness 0.3)
+            ["Deadeye"] = (
+                new Dictionary<string, string>
+                {
+                    ["MultiMask"] = "/Game/Characters/Deadeye/S0/VFX/Texture/DE_MultiMask_TEX.DE_MultiMask_TEX"
+                },
+                new Dictionary<string, object>
+                {
+                    ["TattooColor"] = "BA7E4C", ["TattooMetallic"] = 1.0, ["TattooRoughness"] = 0.5,
+                    ["EdgeColor"] = "FFFFCF", ["EdgeThickness"] = 0.3
                 })
         };
 
