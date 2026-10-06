@@ -8,7 +8,9 @@ purple ("Glow: heart" on by default, "Glow: eyes", "Glow: ultimate"; the ultimat
 Iso ("Sequoia"): his glow mask lights the lines of his outfit, his hands (his E) and his gloves (his other abilities)
 ("Glow: outfit", "Glow: hands (E)", "Glow: hands (abilities)").
 Chamber ("Deadeye"): his gold tattoo (side of his head, wrists), which his colour texture leaves out ("Tattoo": 1 as
-in game; animating it from 0 reveals it with a glowing edge, as in character select)."""
+in game; animating it from 0 reveals it with a glowing edge, as in character select).
+Waylay ("Terra"): her crystal-shard tattoos glow green to yellow toward the hand, with her nails and hair tips
+("Glow: tattoos")."""
 import math
 import bpy
 
@@ -311,6 +313,82 @@ def _build_chamber_group(images, values):
     return group
 
 
+def _build_waylay_group(images, values):
+    """Waylay: her crystal-shard tattoos (the decal's alpha, on her second UV map) glow lime green on the arm turning
+    yellow toward the hand (her arm mask's gradient), her nails glow, and her hair's light tips glow white, all when
+    the game lights her tattoos (BP_TattooGlow, raised by her abilities)."""
+    name = "VP Waylay Glow"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor')
+    for socket_name in ("Tattoos", "Time", "Hair"):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def texture(role, uv_name):
+        uv = nodes.new("ShaderNodeUVMap")
+        uv.uv_map = uv_name
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = _image(images, role)
+        links.new(uv.outputs[0], node.inputs[0])
+        return node
+
+    def separate(color_socket):
+        node = nodes.new("ShaderNodeSeparateColor")
+        links.new(color_socket, node.inputs[0])
+        return node.outputs
+
+    on = inputs.outputs["Tattoos"]
+    not_hair = math_node('SUBTRACT', 1.0, inputs.outputs["Hair"])
+    shards = texture("TattooDecal", "EXTRAUVS0").outputs[1]
+    masks = texture("Masks", "UV_SINGLE")
+    arm = separate(masks.outputs[0])
+    # green on the arm, yellow toward the hand
+    tint = nodes.new("ShaderNodeMix")
+    tint.data_type = 'RGBA'
+    links.new(arm[1], tint.inputs[0])
+    tint.inputs[6].default_value = (*_color(values.get("ArmColor", "C7FF78")), 1.0)
+    tint.inputs[7].default_value = (*_color(values.get("HandColor", "FAFF26")), 1.0)
+    shard_glow = math_node('MULTIPLY', math_node('MULTIPLY', shards, on), math_node('MULTIPLY', not_hair, 2.5))
+    nails = math_node('MULTIPLY', math_node('MULTIPLY', masks.outputs[1], on), math_node('MULTIPLY', not_hair, 3.0))
+    body = nodes.new("ShaderNodeEmission")
+    links.new(tint.outputs[2], body.inputs["Color"])
+    links.new(math_node('ADD', shard_glow, nails), body.inputs["Strength"])
+    # hair: its light tips (bright in its colour texture) glow white
+    albedo = separate(inputs.outputs["Albedo"])
+    light = math_node('MULTIPLY', math_node('SUBTRACT', math_node('MAXIMUM', albedo[0], albedo[1]), 0.35), 2.5, clamp=True)
+    hair = nodes.new("ShaderNodeEmission")
+    hair.inputs["Color"].default_value = (*_color(values.get("HairColor", "FFFFFF")), 1.0)
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', light, on), math_node('MULTIPLY', inputs.outputs["Hair"], 0.6)), hair.inputs["Strength"])
+    add = nodes.new("ShaderNodeAddShader")
+    links.new(inputs.outputs["Shader"], add.inputs[0])
+    links.new(body.outputs[0], add.inputs[1])
+    add2 = nodes.new("ShaderNodeAddShader")
+    links.new(add.outputs[0], add2.inputs[0])
+    links.new(hair.outputs[0], add2.inputs[1])
+    links.new(add2.outputs[0], output.inputs[0])
+    return group
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -326,6 +404,9 @@ AGENTS = {
     "deadeye": dict(
         node="VP Chamber Tattoo", build=_build_chamber_group, materials="deadeye", skip=("hair", "glass"),
         controls=[("Tattoo", "Tattoo", 1.0, "Chamber's gold tattoo (side of his head, wrists); from 0 it reveals left to right with a glowing edge, as in character select")]),
+    "terra": dict(
+        node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair"),
+        controls=[("Glow: tattoos", "Tattoos", 0.0, "Waylay's crystal tattoos, nails and hair tips glowing, as when she uses her abilities")]),
 }
 
 
@@ -377,7 +458,9 @@ def apply(glow, objects, load_image):
         for slot in obj.material_slots:
             material = slot.material
             name = (material.name if material else "").lower()
-            if material is None or not material.use_nodes or spec["materials"] not in name or                     [word for word in spec.get("skip", ()) if word in name]:
+            wanted = (spec["materials"],) if isinstance(spec["materials"], str) else spec["materials"]
+            if material is None or not material.use_nodes or not [word for word in wanted if word in name] or \
+                    [word for word in spec.get("skip", ()) if word in name]:
                 continue
             tree = material.node_tree
             if tree.nodes.get(spec["node"]) is not None:  # sent again: it already glows

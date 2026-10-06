@@ -7,7 +7,7 @@ using ValorantPorting.AppUtils;
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -62,6 +62,19 @@ public static class AgentGlow
                 {
                     ["TattooColor"] = "BA7E4C", ["TattooMetallic"] = 1.0, ["TattooRoughness"] = 0.5,
                     ["EdgeColor"] = "FFFFCF", ["EdgeThickness"] = 0.3
+                }),
+            // Waylay: her crystal-shard tattoo decal (FP_Terra_S0_Tattoo_Decal, on her second UV map) and arm masks
+            // (TP_Terra_Masks_TFX: R arm, G toward the hand, A nails), lit by the game (BP_TattooGlow) in her
+            // TP_Terra_S0_Arm_Base_MI colours; her hair glows too (TP_Terra_S0_Hair_MI: HairGlow_Color)
+            ["Terra"] = (
+                new Dictionary<string, string>
+                {
+                    ["TattooDecal"] = "/Game/Characters/Terra/S0/1P/Materials/FP_Terra_S0_Tattoo_Decal.FP_Terra_S0_Tattoo_Decal",
+                    ["Masks"] = "/Game/Characters/Terra/S0/3P/Materials/TP_Terra_Masks_TFX.TP_Terra_Masks_TFX"
+                },
+                new Dictionary<string, object>
+                {
+                    ["ArmColor"] = "C7FF78", ["HandColor"] = "FAFF26", ["HairColor"] = "FFFFFF"
                 })
         };
 
