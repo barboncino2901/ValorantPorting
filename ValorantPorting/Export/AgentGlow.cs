@@ -63,14 +63,16 @@ public static class AgentGlow
                     ["TattooColor"] = "BA7E4C", ["TattooMetallic"] = 1.0, ["TattooRoughness"] = 0.5,
                     ["EdgeColor"] = "FFFFCF", ["EdgeThickness"] = 0.3
                 }),
-            // Waylay: her crystal-shard tattoo decal (FP_Terra_S0_Tattoo_Decal, on her second UV map) and arm masks
-            // (TP_Terra_Masks_TFX: R arm, G toward the hand, A nails), lit by the game (BP_TattooGlow) in her
-            // TP_Terra_S0_Arm_Base_MI colours; her hair glows too (TP_Terra_S0_Hair_MI: HairGlow_Color)
+            // Waylay: her crystal shards (separate pieces, FP_Terra_S0_Floaters_MI) glow where their mask says, her
+            // nails (TP_Terra_Masks_TFX: A) and hair tips too, lit by the game (BP_TattooGlow) in her
+            // TP_Terra_S0_Arm_Base_MI colours (G of the arm mask: green on the arm, yellow toward the hand)
             ["Terra"] = (
                 new Dictionary<string, string>
                 {
                     ["TattooDecal"] = "/Game/Characters/Terra/S0/1P/Materials/FP_Terra_S0_Tattoo_Decal.FP_Terra_S0_Tattoo_Decal",
-                    ["Masks"] = "/Game/Characters/Terra/S0/3P/Materials/TP_Terra_Masks_TFX.TP_Terra_Masks_TFX"
+                    ["Masks"] = "/Game/Characters/Terra/S0/3P/Materials/TP_Terra_Masks_TFX.TP_Terra_Masks_TFX",
+                    // her crystal shards are separate pieces (FP_Terra_S0_Floaters_MI); this mask is where they glow
+                    ["FloatersMask"] = "/Game/Characters/Terra/S0/1P/Materials/FP_Terra_MasksFloaters_TFX.FP_Terra_MasksFloaters_TFX"
                 },
                 new Dictionary<string, object>
                 {

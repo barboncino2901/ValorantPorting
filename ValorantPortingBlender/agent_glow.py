@@ -9,7 +9,7 @@ Iso ("Sequoia"): his glow mask lights the lines of his outfit, his hands (his E)
 ("Glow: outfit", "Glow: hands (E)", "Glow: hands (abilities)").
 Chamber ("Deadeye"): his gold tattoo (side of his head, wrists), which his colour texture leaves out ("Tattoo": 1 as
 in game; animating it from 0 reveals it with a glowing edge, as in character select).
-Waylay ("Terra"): her crystal-shard tattoos glow green to yellow toward the hand, with her nails and hair tips
+Waylay ("Terra"): the crystal shards on her arms glow at their edges, green-yellow, with her nails and hair tips
 ("Glow: tattoos")."""
 import math
 import bpy
@@ -314,9 +314,10 @@ def _build_chamber_group(images, values):
 
 
 def _build_waylay_group(images, values):
-    """Waylay: her crystal-shard tattoos (the decal's alpha, on her second UV map) glow lime green on the arm turning
-    yellow toward the hand (her arm mask's gradient), her nails glow, and her hair's light tips glow white, all when
-    the game lights her tattoos (BP_TattooGlow, raised by her abilities)."""
+    """Waylay: her crystal shards (separate pieces on her arms, their own material) glow at their edges (the floaters
+    mask: white edges, dark cores), lime green turning yellow toward the hand; her nails glow softly and her hair's
+    light tips glow white; all when the game lights her tattoos (BP_TattooGlow, raised by her abilities).
+    Part: 0 her arm, 1 her hair, 2 her shards."""
     name = "VP Waylay Glow"
     old = bpy.data.node_groups.get(name)
     if old is not None and old.users == 0:
@@ -325,7 +326,7 @@ def _build_waylay_group(images, values):
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
     face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor')
-    for socket_name in ("Tattoos", "Time", "Hair"):
+    for socket_name in ("Tattoos", "Time", "Hair", "Shard"):
         face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
     nodes, links = group.nodes, group.links
@@ -344,7 +345,7 @@ def _build_waylay_group(images, values):
                 links.new(v, node.inputs[i])
         return node.outputs[0]
 
-    def texture(role, uv_name):
+    def texture(role, uv_name="UV_SINGLE"):
         uv = nodes.new("ShaderNodeUVMap")
         uv.uv_map = uv_name
         node = nodes.new("ShaderNodeTexImage")
@@ -358,34 +359,37 @@ def _build_waylay_group(images, values):
         return node.outputs
 
     on = inputs.outputs["Tattoos"]
-    not_hair = math_node('SUBTRACT', 1.0, inputs.outputs["Hair"])
-    shards = texture("TattooDecal", "EXTRAUVS0").outputs[1]
-    masks = texture("Masks", "UV_SINGLE")
-    arm = separate(masks.outputs[0])
-    # green on the arm, yellow toward the hand
-    tint = nodes.new("ShaderNodeMix")
-    tint.data_type = 'RGBA'
-    links.new(arm[1], tint.inputs[0])
-    tint.inputs[6].default_value = (*_color(values.get("ArmColor", "C7FF78")), 1.0)
-    tint.inputs[7].default_value = (*_color(values.get("HandColor", "FAFF26")), 1.0)
-    shard_glow = math_node('MULTIPLY', math_node('MULTIPLY', shards, on), math_node('MULTIPLY', not_hair, 2.5))
-    nails = math_node('MULTIPLY', math_node('MULTIPLY', masks.outputs[1], on), math_node('MULTIPLY', not_hair, 3.0))
-    body = nodes.new("ShaderNodeEmission")
-    links.new(tint.outputs[2], body.inputs["Color"])
-    links.new(math_node('ADD', shard_glow, nails), body.inputs["Strength"])
+    hair_part, shard_part = inputs.outputs["Hair"], inputs.outputs["Shard"]
+    arm_part = math_node('SUBTRACT', math_node('SUBTRACT', 1.0, hair_part), shard_part, clamp=True)
+    green = _color(values.get("ArmColor", "C7FF78"))
+    yellow = _color(values.get("HandColor", "FAFF26"))
+
+    # her shards: bright at the edges, fading into dark cores; green, a touch yellower than the arm's green
+    shard_mask = separate(texture("FloatersMask").outputs[0])[0]
+    shard_glow = math_node('MULTIPLY', math_node('MULTIPLY', math_node('POWER', shard_mask, 2.0), on), math_node('MULTIPLY', shard_part, 1.8))
+    shard_color = tuple((g * 2 + y) / 3 for g, y in zip(green, yellow))
+    shards = nodes.new("ShaderNodeEmission")
+    shards.inputs["Color"].default_value = (*shard_color, 1.0)
+    links.new(shard_glow, shards.inputs["Strength"])
+    # her nails (the alpha of her arm mask), softly
+    nails_mask = texture("Masks").outputs[1]
+    nails = nodes.new("ShaderNodeEmission")
+    nails.inputs["Color"].default_value = (*yellow, 1.0)
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', nails_mask, on), math_node('MULTIPLY', arm_part, 1.2)), nails.inputs["Strength"])
     # hair: its light tips (bright in its colour texture) glow white
     albedo = separate(inputs.outputs["Albedo"])
     light = math_node('MULTIPLY', math_node('SUBTRACT', math_node('MAXIMUM', albedo[0], albedo[1]), 0.35), 2.5, clamp=True)
     hair = nodes.new("ShaderNodeEmission")
     hair.inputs["Color"].default_value = (*_color(values.get("HairColor", "FFFFFF")), 1.0)
-    links.new(math_node('MULTIPLY', math_node('MULTIPLY', light, on), math_node('MULTIPLY', inputs.outputs["Hair"], 0.6)), hair.inputs["Strength"])
-    add = nodes.new("ShaderNodeAddShader")
-    links.new(inputs.outputs["Shader"], add.inputs[0])
-    links.new(body.outputs[0], add.inputs[1])
-    add2 = nodes.new("ShaderNodeAddShader")
-    links.new(add.outputs[0], add2.inputs[0])
-    links.new(hair.outputs[0], add2.inputs[1])
-    links.new(add2.outputs[0], output.inputs[0])
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', light, on), math_node('MULTIPLY', hair_part, 0.6)), hair.inputs["Strength"])
+
+    result = inputs.outputs["Shader"]
+    for glow in (shards, nails, hair):
+        add = nodes.new("ShaderNodeAddShader")
+        links.new(result, add.inputs[0])
+        links.new(glow.outputs[0], add.inputs[1])
+        result = add.outputs[0]
+    links.new(result, output.inputs[0])
     return group
 
 
@@ -405,7 +409,7 @@ AGENTS = {
         node="VP Chamber Tattoo", build=_build_chamber_group, materials="deadeye", skip=("hair", "glass"),
         controls=[("Tattoo", "Tattoo", 1.0, "Chamber's gold tattoo (side of his head, wrists); from 0 it reveals left to right with a glowing edge, as in character select")]),
     "terra": dict(
-        node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair"),
+        node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair", "terra_s0_floaters"),
         controls=[("Glow: tattoos", "Tattoos", 0.0, "Waylay's crystal tattoos, nails and hair tips glowing, as when she uses her abilities")]),
 }
 
@@ -475,6 +479,8 @@ def apply(glow, objects, load_image):
             node.location = (out.location.x, out.location.y - 260)
             if "Hair" in node.inputs:
                 node.inputs["Hair"].default_value = 1.0 if "hair" in name else 0.0
+            if "Shard" in node.inputs:
+                node.inputs["Shard"].default_value = 1.0 if "floaters" in name else 0.0
             tree.links.new(source, node.inputs["Shader"])
             tree.links.new(node.outputs[0], out.inputs["Surface"])
             for role, key in (("MRAE", "mrae"), ("Albedo", "_df")):
