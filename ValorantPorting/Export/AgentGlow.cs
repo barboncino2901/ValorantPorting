@@ -8,7 +8,7 @@ using ValorantPorting.AppUtils;
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -78,6 +78,25 @@ public static class AgentGlow
                 new Dictionary<string, object>
                 {
                     ["ArmColor"] = "C7FF78", ["HandColor"] = "FAFF26", ["HairColor"] = "FFFFFF"
+                }),
+            // Clove: her ultimate brings her back as a ghost fading in (rebuilt after a Blender setup the user made),
+            // then her normal model with her ult's glow (3P_SMO_X_Fight-Body_MI / -Hair_MI: TP_ULT_ textures, glow
+            // mask, blue rim, glowing hair tips) until she gets a kill; her C (TP_Smonk_S0_C_Swap_01_MI_) lights her
+            // legs up to 90 cm, with smoke waves and the butterflies on her trousers
+            ["Smonk"] = (
+                new Dictionary<string, string>
+                {
+                    ["UltAlbedo"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_DF.TP_ULT_Smonk_S0_DF",
+                    ["UltMask"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_Mask.TP_ULT_Smonk_S0_Mask",
+                    ["UltHairAlbedo"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_Hair_DF.TP_ULT_Smonk_S0_Hair_DF",
+                    ["UltHairMask"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_Ult_Smonk_S0_Hair_Mask.TP_Ult_Smonk_S0_Hair_Mask",
+                    ["CMask"] = "/Game/Characters/Smonk/S0/3P/Materials/TP_Smonk_S0_C_Mask.TP_Smonk_S0_C_Mask",
+                    ["Waves"] = "/Game/Characters/Smonk/S0/VFX/C/Textures/SMO_C_HUD_Waves_TFX.SMO_C_HUD_Waves_TFX"
+                },
+                new Dictionary<string, object>
+                {
+                    ["UltFresnelColor"] = "6BBEFF", ["UltGlow"] = 2.5, ["HornColor"] = "9AFFFF",
+                    ["LegColor"] = "DC6CFF", ["ButterflyColor"] = "FFB8FF", ["LegGlowHeight"] = 0.9
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's

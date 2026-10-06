@@ -11,6 +11,8 @@ Chamber ("Deadeye"): his gold tattoo (side of his head, wrists), which his colou
 in game; animating it from 0 reveals it with a glowing edge, as in character select).
 Waylay ("Terra"): the crystal shards on her arms glow at their edges, green-yellow, with her nails and hair tips
 ("Glow: tattoos").
+Clove ("Smonk"): her ultimate's ghost fading in, then her ult glow ("Ult: respawn", "Ult: ghost", "Ult: active"); her
+legs glowing with her C ("Glow: legs (C)").
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
@@ -515,6 +517,210 @@ def _prepare_veto(objects):
     return [o for o in objects if o is not own_rig]
 
 
+def _build_clove_group(images, values):
+    """Clove: her ultimate and her C.
+    Respawn: 0 -> 1 she fades in from her head down, a ghost (dark, purple rim, magenta wisps, yellow sparks at the
+    edge; after a Blender setup made for her). Ghost: 1 the ghost look, 0 her normal look. Ult: her normal model with
+    her ult's glow (the game's TP_ULT_ textures and glow mask, a blue rim, glowing hair tips), until she gets a kill.
+    Legs (C): her legs glow purple up to 90 cm, smoke waves rising and the butterflies on her trousers lit.
+    Hair: 1 on her hair's material. Height: her model's height (m), for the legs."""
+    name = "VP Clove Glow"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name, default in (("Respawn", 1.0), ("Ghost", 0.0), ("Ult", 0.0), ("Legs", 0.0), ("Time", 0.0),
+                                 ("Hair", 0.0), ("Height", 1.75)):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def texture(role):
+        uv = nodes.new("ShaderNodeUVMap")
+        uv.uv_map = "UV_SINGLE"
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = _image(images, role)
+        links.new(uv.outputs[0], node.inputs[0])
+        return node
+
+    def separate(color_socket):
+        node = nodes.new("ShaderNodeSeparateColor")
+        links.new(color_socket, node.inputs[0])
+        return node.outputs
+
+    def emission(color, strength):
+        node = nodes.new("ShaderNodeEmission")
+        if isinstance(color, tuple):
+            node.inputs["Color"].default_value = (*color, 1.0)
+        else:
+            links.new(color, node.inputs["Color"])
+        links.new(strength, node.inputs["Strength"])
+        return node.outputs[0]
+
+    def add(a, b):
+        node = nodes.new("ShaderNodeAddShader")
+        links.new(a, node.inputs[0])
+        links.new(b, node.inputs[1])
+        return node.outputs[0]
+
+    def mix_shader(fac, a, b):
+        node = nodes.new("ShaderNodeMixShader")
+        links.new(fac, node.inputs[0])
+        links.new(a, node.inputs[1])
+        links.new(b, node.inputs[2])
+        return node.outputs[0]
+
+    def ramp(fac, stops):
+        node = nodes.new("ShaderNodeValToRGB")
+        elements = node.color_ramp.elements
+        while len(elements) < len(stops):
+            elements.new(0.5)
+        for element, (position, color) in zip(elements, stops):
+            element.position = position
+            element.color = (*color, 1.0)
+        links.new(fac, node.inputs[0])
+        return node.outputs[0]
+
+    hair = inputs.outputs["Hair"]
+    body = math_node('SUBTRACT', 1.0, hair)
+    coords = nodes.new("ShaderNodeTexCoord")
+    generated = separate(coords.outputs["Generated"])  # her model's own box (before posing): 0 feet, 1 head
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.5
+    facing = rim.outputs["Facing"]  # 0 facing the camera, 1 at her outline
+    fresnel = nodes.new("ShaderNodeFresnel")
+    fresnel.inputs["IOR"].default_value = 1.5
+
+    # her ult: the game's glow mask (her TP_ULT_ colours where it is white), a blue rim; her hair's tips
+    ult = inputs.outputs["Ult"]
+    ult_albedo = texture("UltAlbedo").outputs[0]
+    ult_mask = separate(texture("UltMask").outputs[0])[0]
+    glow = float(values.get("UltGlow", 2.5))
+    body_glow = emission(ult_albedo, math_node('MULTIPLY', math_node('MULTIPLY', ult_mask, ult), math_node('MULTIPLY', body, glow)))
+    blue_rim = emission(_color(values.get("UltFresnelColor", "6BBEFF")),
+                        math_node('MULTIPLY', math_node('MULTIPLY', math_node('POWER', facing, 3.0), ult), 0.8))
+    hair_mask = separate(texture("UltHairMask").outputs[0])[0]
+    tips = math_node('MULTIPLY', math_node('SUBTRACT', hair_mask, 0.5), 2.0, clamp=True)
+    horns = emission(_color(values.get("HornColor", "9AFFFF")),
+                     math_node('MULTIPLY', math_node('MULTIPLY', tips, ult), math_node('MULTIPLY', hair, 1.5)))
+    result = add(add(add(inputs.outputs["Shader"], body_glow), blue_rim), horns)
+
+    # her C: her legs up to LegGlowHeight glow purple at their outline, smoke waves rising; her trousers' butterflies
+    legs = inputs.outputs["Legs"]
+    height = math_node('MULTIPLY', generated[2], inputs.outputs["Height"])
+    leg_part = math_node('DIVIDE', math_node('SUBTRACT', float(values.get("LegGlowHeight", 0.9)), height), 0.35, clamp=True)
+    leg_part = math_node('MULTIPLY', math_node('MULTIPLY', leg_part, legs), body)
+    waves_uv = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', math_node('ADD', generated[0], generated[1]), 2.0), waves_uv.inputs[0])
+    links.new(math_node('SUBTRACT', math_node('MULTIPLY', generated[2], 2.0), math_node('MULTIPLY', inputs.outputs["Time"], 0.4)), waves_uv.inputs[1])
+    waves = nodes.new("ShaderNodeTexImage")
+    waves.image = _image(images, "Waves")
+    links.new(waves_uv.outputs[0], waves.inputs[0])
+    wave = separate(waves.outputs[0])[0]
+    leg_light = math_node('ADD', math_node('MULTIPLY', math_node('POWER', facing, 2.0), 1.5), math_node('MULTIPLY', wave, 0.4))
+    leg_glow = emission(_color(values.get("LegColor", "DC6CFF")), math_node('MULTIPLY', leg_light, leg_part))
+    butterflies = separate(texture("CMask").outputs[0])[0]
+    butterfly_glow = emission(_color(values.get("ButterflyColor", "FFB8FF")),
+                              math_node('MULTIPLY', math_node('MULTIPLY', butterflies, legs), math_node('MULTIPLY', body, 3.0)))
+    result = add(add(result, leg_glow), butterfly_glow)
+
+    # the ghost: dark, a purple rim, magenta wisps drifting
+    ghost_rim = ramp(fresnel.outputs[0], ((0.11, (0.0, 0.0, 0.0)), (0.30, (0.758, 0.241, 1.0)), (0.65, (0.231, 0.162, 1.0))))
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 3.0
+    noise.inputs["Detail"].default_value = 4.0
+    noise.inputs["Distortion"].default_value = 1.0
+    drift = nodes.new("ShaderNodeVectorMath")
+    drift.operation = 'ADD'
+    links.new(coords.outputs["Generated"], drift.inputs[0])
+    drift_z = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', inputs.outputs["Time"], 0.15), drift_z.inputs[2])
+    links.new(drift_z.outputs[0], drift.inputs[1])
+    links.new(drift.outputs[0], noise.inputs["Vector"])
+    wisps = ramp(noise.outputs["Fac"], ((0.55, (0.0, 0.0, 0.0)), (0.75, (0.97, 0.0, 1.0))))
+    ghost_color = nodes.new("ShaderNodeMix")
+    ghost_color.data_type = 'RGBA'
+    ghost_color.blend_type = 'ADD'
+    ghost_color.inputs[0].default_value = 1.0
+    links.new(ghost_rim, ghost_color.inputs[6])
+    links.new(wisps, ghost_color.inputs[7])
+    dark = nodes.new("ShaderNodeBsdfDiffuse")
+    dark.inputs["Color"].default_value = (0.02, 0.0, 0.03, 1.0)
+    ghost = add(dark.outputs[0], emission(ghost_color.outputs[2], math_node('ADD', 0.0, 4.0)))
+    result = mix_shader(inputs.outputs["Ghost"], result, ghost)
+
+    # respawning: she appears from her head down, the edge broken up and sparking yellow
+    width = 0.05
+    edge_noise = nodes.new("ShaderNodeTexNoise")
+    edge_noise.inputs["Scale"].default_value = 13.0
+    links.new(coords.outputs["Generated"], edge_noise.inputs["Vector"])
+    field = math_node('ADD', math_node('MULTIPLY', math_node('SUBTRACT', 1.0, generated[2]), 0.85),
+                      math_node('MULTIPLY', edge_noise.outputs["Fac"], 0.15))
+    front = math_node('SUBTRACT', math_node('MULTIPLY', inputs.outputs["Respawn"], 1.0 + 2.0 * width), width)
+    distance = math_node('SUBTRACT', front, field)  # > 0: arrived
+    shown = math_node('GREATER_THAN', distance, 0.0)
+    spark = math_node('SUBTRACT', 1.0, math_node('DIVIDE', math_node('ABSOLUTE', distance), width), clamp=True)
+    sparks = emission((1.0, 0.827, 0.0), math_node('MULTIPLY', math_node('POWER', spark, 3.0), 8.0))
+    gone = nodes.new("ShaderNodeBsdfTransparent")
+    result = mix_shader(shown, gone.outputs[0], add(result, sparks))
+    links.new(result, output.inputs[0])
+    return group
+
+
+def _prepare_clove(objects):
+    """Gives her eye overlay (shared by all agents) a copy of its own, so it fades in with her."""
+    for obj in objects:
+        if obj.type == 'MESH' and not obj.name.upper().startswith("FP_") and "smonk" in obj.name.lower():
+            for slot in obj.material_slots:
+                if slot.material is not None and "smonk" not in slot.material.name.lower() and slot.material.name != "None":
+                    copy = slot.material.copy()
+                    copy.name = slot.material.name + " (Smonk)"  # "smonk": gets the layer
+                    slot.material = copy
+    return objects
+
+
+def _swap_clove_albedo(tree, node, name, images):
+    """Her ult's colours (TP_ULT_ textures) replace her own while "Ult" is up: a mix after her colour texture."""
+    role = "UltHairAlbedo" if "hair" in name else "UltAlbedo"
+    image = _image(images, role)
+    found = next((n for n in tree.nodes if n.type == 'TEX_IMAGE' and n.image and "_df" in n.image.name.lower()
+                  and "ult" not in n.image.name.lower()), None)
+    if image is None or found is None:
+        return
+    ult = tree.nodes.new("ShaderNodeTexImage")
+    ult.image = image
+    ult.location = (found.location.x, found.location.y - 300)
+    uv = found.inputs[0].links[0].from_socket if found.inputs[0].is_linked else None
+    if uv is not None:
+        tree.links.new(uv, ult.inputs[0])
+    mix = tree.nodes.new("ShaderNodeMix")
+    mix.data_type = 'RGBA'
+    mix.name = mix.label = "VP Clove Ult Colours"
+    mix.location = (found.location.x + 300, found.location.y)
+    for link in list(found.outputs[0].links):
+        target = link.to_socket
+        tree.links.remove(link)
+        tree.links.new(mix.outputs[2], target)
+    tree.links.new(found.outputs[0], mix.inputs[6])
+    tree.links.new(ult.outputs[0], mix.inputs[7])
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -533,6 +739,14 @@ AGENTS = {
     "terra": dict(
         node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair", "terra_s0_floaters"),
         controls=[("Glow: tattoos", "Tattoos", 0.0, "Waylay's crystal tattoos, nails and hair tips glowing, as when she uses her abilities")]),
+    "smonk": dict(
+        node="VP Clove Glow", build=_build_clove_group, materials="smonk", prepare=_prepare_clove,
+        per_material=_swap_clove_albedo, see_through=True,
+        extra_drivers=[("VP Clove Ult Colours", "Factor", "Ult: active")],
+        controls=[("Ult: respawn", "Respawn", 1.0, "Clove's ultimate, coming back: from 0 to 1 she fades in from her head down (with \"Ult: ghost\" at 1, as a ghost)"),
+                  ("Ult: ghost", "Ghost", 0.0, "Clove as a ghost, as she comes back with her ultimate; animate it to 0 to bring her normal look back"),
+                  ("Ult: active", "Ult", 0.0, "Clove's ultimate is on: her ult colours and glow, until she gets a kill"),
+                  ("Glow: legs (C)", "Legs", 0.0, "Clove's legs glowing, smoke rising and her trousers' butterflies lit, as with her C")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
@@ -608,6 +822,10 @@ def apply(glow, objects, load_image):
                 node.inputs["Hair"].default_value = 1.0 if "hair" in name else 0.0
             if "Shard" in node.inputs:
                 node.inputs["Shard"].default_value = 1.0 if "floaters" in name else 0.0
+            if "Height" in node.inputs:
+                node.inputs["Height"].default_value = max(obj.dimensions.z, 0.5)
+            if spec.get("per_material"):
+                spec["per_material"](tree, node, name, images)
             if "Reveal" in node.inputs:
                 node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name else 0.0
             if spec.get("see_through"):
@@ -644,6 +862,9 @@ def connect_pending():
             continue
         for prop, socket, _, _ in spec["controls"]:
             _drive(tree, node, socket, armature, prop)
+        for node_name, socket, prop in spec.get("extra_drivers", ()):
+            if tree.nodes.get(node_name) is not None:
+                _drive(tree, tree.nodes[node_name], socket, armature, prop)
         time = tree.driver_add(f'nodes["{node.name}"].inputs["Time"].default_value')
         time.driver.expression = f"frame / {fps:g}"
         armature.update_tag()
