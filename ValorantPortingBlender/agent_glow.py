@@ -11,7 +11,7 @@ Chamber ("Deadeye"): his gold tattoo (side of his head, wrists), which his colou
 in game; animating it from 0 reveals it with a glowing edge, as in character select).
 Waylay ("Terra"): the crystal shards on her arms glow at their edges, green-yellow, with her nails and hair tips
 ("Glow: tattoos").
-Clove ("Smonk"): her ultimate's ghost fading in, then her ult glow ("Ult: respawn", "Ult: ghost", "Ult: active"); her
+Clove ("Smonk"): her ultimate's ghost (her resurrection model) fading in, then her ult glow ("Ult: respawn", "Ult: ghost", "Ult: active"); her
 legs glowing with her C ("Glow: legs (C)").
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
@@ -473,13 +473,19 @@ def _build_veto_group(images, values):
 ULT_FORM_TAG = " (ult form)"
 
 
-def _prepare_veto(objects):
-    """Puts his symbiote form on his normal model's rig (it comes with its own copy of the same skeleton) and gives it
-    its own materials (it shares one with his arm, which must disappear while it appears); his eye overlay, shared
-    by all agents, gets a copy of its own too."""
+def _put_form_on_rig(objects, form_word, codename, offset=0.0):
+    """Puts an agent's other model (Veto's symbiote form, Clove's ghost; it comes with its own copy of the same
+    skeleton) on the rig of her normal model, gives it its own materials (tagged "(ult form)") and gives the shared
+    eye overlay a copy of its own (named after the agent, so it gets the layer)."""
     meshes = [o for o in objects if o.type == 'MESH' and not o.name.upper().startswith("FP_")]
-    form = next((o for o in meshes if "pine_sym" in o.name.lower()), None)
+    form = next((o for o in meshes if form_word in o.name.lower()), None)
     body = next((o for o in meshes if o is not form and _armature_of(o) is not None), None)
+    if body is not None:
+        for slot in body.material_slots:
+            if slot.material is not None and codename not in slot.material.name.lower() and slot.material.name != "None":
+                copy = slot.material.copy()
+                copy.name = f"{slot.material.name} ({codename.capitalize()})"
+                slot.material = copy
     if form is None or body is None:
         return objects
     rig, own_rig = _armature_of(body), _armature_of(form)
@@ -497,33 +503,32 @@ def _prepare_veto(objects):
         for collection in rig.users_collection:
             if collection not in form.users_collection:
                 collection.objects.link(form)
-    # its outfit is his normal outfit's shape exactly: pushed out 1 mm so the renderers can tell the two apart (where
-    # it is hidden, the outfit under it must show)
-    if form.modifiers.get("VP Ult Form Offset") is None:
-        offset = form.modifiers.new("VP Ult Form Offset", 'DISPLACE')
-        offset.direction = 'NORMAL'
-        offset.mid_level = 0.0
-        offset.strength = 0.001
+    if offset and form.modifiers.get("VP Ult Form Offset") is None:
+        displace = form.modifiers.new("VP Ult Form Offset", 'DISPLACE')
+        displace.direction = 'NORMAL'
+        displace.mid_level = 0.0
+        displace.strength = offset
     for slot in form.material_slots:
         if slot.material is not None and ULT_FORM_TAG not in slot.material.name and slot.material.name != "None":
             copy = slot.material.copy()
             copy.name = slot.material.name + ULT_FORM_TAG
             slot.material = copy
-    for slot in body.material_slots:
-        if slot.material is not None and "pine" not in slot.material.name.lower():
-            copy = slot.material.copy()
-            copy.name = slot.material.name + " (Pine)"  # "pine": gets the layer
-            slot.material = copy
     return [o for o in objects if o is not own_rig]
+
+
+def _prepare_veto(objects):
+    """His symbiote form on his rig; its outfit is his normal outfit's shape exactly: pushed out 1 mm so the renderers
+    can tell the two apart (where it is hidden, the outfit under it must show)."""
+    return _put_form_on_rig(objects, "pine_sym", "pine", offset=0.001)
 
 
 def _build_clove_group(images, values):
     """Clove: her ultimate and her C.
-    Respawn: 0 -> 1 she fades in from her head down, a ghost (dark, purple rim, magenta wisps, yellow sparks at the
-    edge; after a Blender setup made for her). Ghost: 1 the ghost look, 0 her normal look. Ult: her normal model with
-    her ult's glow (the game's TP_ULT_ textures and glow mask, a blue rim, glowing hair tips), until she gets a kill.
+    Ghost: 0 -> 1 her ghost (the resurrection model, see-through pink as in game) takes her model's place from her
+    head down. Respawn: 0 -> 1 she (or her ghost) fades in from her head down. Ult: her normal model with her ult's
+    glow (the game's glow mask, a blue rim, her ult hair colours), until she gets a kill.
     Legs (C): her legs glow purple up to 90 cm, smoke waves rising and the butterflies on her trousers lit.
-    Hair: 1 on her hair's material. Height: her model's height (m), for the legs."""
+    Hair: 1 on her hair's material. Height: her model's height (m), for the legs. Reveal: 1 on her ghost's material."""
     name = "VP Clove Glow"
     old = bpy.data.node_groups.get(name)
     if old is not None and old.users == 0:
@@ -532,7 +537,7 @@ def _build_clove_group(images, values):
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
     for socket_name, default in (("Respawn", 1.0), ("Ghost", 0.0), ("Ult", 0.0), ("Legs", 0.0), ("Time", 0.0),
-                                 ("Hair", 0.0), ("Height", 1.75)):
+                                 ("Hair", 0.0), ("Height", 1.75), ("Reveal", 0.0)):
         face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
     nodes, links = group.nodes, group.links
@@ -604,21 +609,24 @@ def _build_clove_group(images, values):
     rim = nodes.new("ShaderNodeLayerWeight")
     rim.inputs["Blend"].default_value = 0.5
     facing = rim.outputs["Facing"]  # 0 facing the camera, 1 at her outline
-    fresnel = nodes.new("ShaderNodeFresnel")
-    fresnel.inputs["IOR"].default_value = 1.5
 
     # her ult: the game's glow mask (her TP_ULT_ colours where it is white), a blue rim; her hair's tips
     ult = inputs.outputs["Ult"]
     ult_albedo = texture("UltAlbedo").outputs[0]
     ult_mask = separate(texture("UltMask").outputs[0])[0]
+    ult_mask = math_node('DIVIDE', math_node('SUBTRACT', ult_mask, 0.6), 0.4, clamp=True)  # its bright parts (eyes, ...)
     glow = float(values.get("UltGlow", 2.5))
     body_glow = emission(ult_albedo, math_node('MULTIPLY', math_node('MULTIPLY', ult_mask, ult), math_node('MULTIPLY', body, glow)))
     blue_rim = emission(_color(values.get("UltFresnelColor", "6BBEFF")),
-                        math_node('MULTIPLY', math_node('MULTIPLY', math_node('POWER', facing, 3.0), ult), 0.8))
+                        math_node('MULTIPLY', math_node('MULTIPLY', math_node('POWER', facing, 4.0), ult), 0.5))
     hair_mask = separate(texture("UltHairMask").outputs[0])[0]
-    tips = math_node('MULTIPLY', math_node('SUBTRACT', hair_mask, 0.5), 2.0, clamp=True)
-    horns = emission(_color(values.get("HornColor", "9AFFFF")),
-                     math_node('MULTIPLY', math_node('MULTIPLY', tips, ult), math_node('MULTIPLY', hair, 1.5)))
+    tips = math_node('MULTIPLY', math_node('SUBTRACT', hair_mask, 0.5), 2.0, clamp=True)  # Hair_EM_Mask_Min 0.5
+    # her hair glows its ult colours, washed out (Hair_Saturation 0.25): light pink, its tips light blue
+    washed = nodes.new("ShaderNodeHueSaturation")
+    washed.inputs["Saturation"].default_value = 0.25
+    washed.inputs["Value"].default_value = 1.6
+    links.new(texture("UltHairAlbedo").outputs[0], washed.inputs["Color"])
+    horns = emission(washed.outputs[0], math_node('MULTIPLY', math_node('MULTIPLY', tips, ult), math_node('MULTIPLY', hair, 1.2)))
     result = add(add(add(inputs.outputs["Shader"], body_glow), blue_rim), horns)
 
     # her C: her legs up to LegGlowHeight glow purple at their outline, smoke waves rising; her trousers' butterflies
@@ -640,43 +648,49 @@ def _build_clove_group(images, values):
                               math_node('MULTIPLY', math_node('MULTIPLY', butterflies, legs), math_node('MULTIPLY', body, 3.0)))
     result = add(add(result, leg_glow), butterfly_glow)
 
-    # the ghost: dark, a purple rim, magenta wisps drifting
-    ghost_rim = ramp(fresnel.outputs[0], ((0.11, (0.0, 0.0, 0.0)), (0.30, (0.758, 0.241, 1.0)), (0.65, (0.231, 0.162, 1.0))))
-    noise = nodes.new("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 3.0
-    noise.inputs["Detail"].default_value = 4.0
-    noise.inputs["Distortion"].default_value = 1.0
-    drift = nodes.new("ShaderNodeVectorMath")
-    drift.operation = 'ADD'
-    links.new(coords.outputs["Generated"], drift.inputs[0])
-    drift_z = nodes.new("ShaderNodeCombineXYZ")
-    links.new(math_node('MULTIPLY', inputs.outputs["Time"], 0.15), drift_z.inputs[2])
-    links.new(drift_z.outputs[0], drift.inputs[1])
-    links.new(drift.outputs[0], noise.inputs["Vector"])
-    wisps = ramp(noise.outputs["Fac"], ((0.55, (0.0, 0.0, 0.0)), (0.75, (0.97, 0.0, 1.0))))
-    ghost_color = nodes.new("ShaderNodeMix")
-    ghost_color.data_type = 'RGBA'
-    ghost_color.blend_type = 'ADD'
-    ghost_color.inputs[0].default_value = 1.0
-    links.new(ghost_rim, ghost_color.inputs[6])
-    links.new(wisps, ghost_color.inputs[7])
-    dark = nodes.new("ShaderNodeBsdfDiffuse")
-    dark.inputs["Color"].default_value = (0.02, 0.0, 0.03, 1.0)
-    ghost = add(dark.outputs[0], emission(ghost_color.outputs[2], math_node('ADD', 0.0, 4.0)))
-    result = mix_shader(inputs.outputs["Ghost"], result, ghost)
+    # her ghost (the resurrection model; the game's 3P_SMO_X_Dismiss-Formless_MAT): unlit and see-through, pale
+    # lavender turning pink at its outline (SMO_X_Color-Soft_LUT), a bright pink rim, glowing eyes
+    lut = nodes.new("ShaderNodeTexImage")
+    lut.image = _image(images, "GhostLut")
+    lut.extension = 'EXTEND'
+    lut_uv = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('POWER', facing, 0.75), lut_uv.inputs[0])
+    lut_uv.inputs[1].default_value = 0.5
+    links.new(lut_uv.outputs[0], lut.inputs[0])
+    ghost_body = emission(lut.outputs[0] if lut.image is not None else (0.82, 0.64, 1.0), math_node('ADD', 0.0, 0.8))
+    ghost_rim = emission(_color(values.get("GhostRimColor", "FF3CC8")),
+                         math_node('MULTIPLY', math_node('POWER', facing, 2.0), 6.0))
+    eyes = separate(texture("GhostEyes").outputs[0])[0]
+    ghost_eyes = emission((1.0, 0.92, 1.0), math_node('MULTIPLY', eyes, 6.0))
+    see_through = nodes.new("ShaderNodeBsdfTransparent")
+    opacity = math_node('ADD', 0.3, math_node('MULTIPLY', math_node('POWER', facing, 0.75), 0.7), clamp=True)
+    opacity = math_node('MAXIMUM', opacity, eyes)
+    ghost = mix_shader(opacity, see_through.outputs[0], add(add(ghost_body, ghost_rim), ghost_eyes))
+    reveal = inputs.outputs["Reveal"]
+    result = mix_shader(reveal, result, ghost)
 
-    # respawning: she appears from her head down, the edge broken up and sparking yellow
+    # which is shown: "Ghost" swaps her model for her ghost from her head down; "Respawn" fades either in from her head
+    # down, the edge sparking pink
     width = 0.05
     edge_noise = nodes.new("ShaderNodeTexNoise")
     edge_noise.inputs["Scale"].default_value = 13.0
     links.new(coords.outputs["Generated"], edge_noise.inputs["Vector"])
     field = math_node('ADD', math_node('MULTIPLY', math_node('SUBTRACT', 1.0, generated[2]), 0.85),
-                      math_node('MULTIPLY', edge_noise.outputs["Fac"], 0.15))
-    front = math_node('SUBTRACT', math_node('MULTIPLY', inputs.outputs["Respawn"], 1.0 + 2.0 * width), width)
-    distance = math_node('SUBTRACT', front, field)  # > 0: arrived
-    shown = math_node('GREATER_THAN', distance, 0.0)
-    spark = math_node('SUBTRACT', 1.0, math_node('DIVIDE', math_node('ABSOLUTE', distance), width), clamp=True)
-    sparks = emission((1.0, 0.827, 0.0), math_node('MULTIPLY', math_node('POWER', spark, 3.0), 8.0))
+                      math_node('MULTIPLY', edge_noise.outputs["Fac"], 0.15))  # 0 her head .. 1 her feet
+
+    def front(control):
+        return math_node('SUBTRACT', math_node('MULTIPLY', control, 1.0 + 2.0 * width), width)
+
+    ghost_side = math_node('MULTIPLY', math_node('SUBTRACT', front(inputs.outputs["Ghost"]), field),
+                           math_node('SUBTRACT', math_node('MULTIPLY', reveal, 2.0), 1.0))  # > 0: this one shown
+    respawn_side = math_node('SUBTRACT', front(inputs.outputs["Respawn"]), field)
+    shown = math_node('MULTIPLY', math_node('GREATER_THAN', ghost_side, 0.0), math_node('GREATER_THAN', respawn_side, 0.0))
+
+    def edge(distance):
+        return math_node('POWER', math_node('SUBTRACT', 1.0, math_node('DIVIDE', math_node('ABSOLUTE', distance), width), clamp=True), 3.0)
+
+    sparks = emission(_color(values.get("SparkColor", "FFB4F0")),
+                      math_node('MULTIPLY', math_node('MAXIMUM', edge(ghost_side), edge(respawn_side)), 6.0))
     gone = nodes.new("ShaderNodeBsdfTransparent")
     result = mix_shader(shown, gone.outputs[0], add(result, sparks))
     links.new(result, output.inputs[0])
@@ -684,21 +698,16 @@ def _build_clove_group(images, values):
 
 
 def _prepare_clove(objects):
-    """Gives her eye overlay (shared by all agents) a copy of its own, so it fades in with her."""
-    for obj in objects:
-        if obj.type == 'MESH' and not obj.name.upper().startswith("FP_") and "smonk" in obj.name.lower():
-            for slot in obj.material_slots:
-                if slot.material is not None and "smonk" not in slot.material.name.lower() and slot.material.name != "None":
-                    copy = slot.material.copy()
-                    copy.name = slot.material.name + " (Smonk)"  # "smonk": gets the layer
-                    slot.material = copy
-    return objects
+    """Her ghost (the resurrection model) on her rig."""
+    return _put_form_on_rig(objects, "resurrection", "smonk")
 
 
 def _swap_clove_albedo(tree, node, name, images):
-    """Her ult's colours (TP_ULT_ textures) replace her own while "Ult" is up: a mix after her colour texture."""
-    role = "UltHairAlbedo" if "hair" in name else "UltAlbedo"
-    image = _image(images, role)
+    """Her ult's hair colours (TP_ULT_Smonk_S0_Hair_DF) replace her own while "Ult" is up: a mix after its colour
+    texture."""
+    if "hair" not in name or ULT_FORM_TAG in name:
+        return  # in game her ult keeps her own colours, but for her hair
+    image = _image(images, "UltHairAlbedo")
     found = next((n for n in tree.nodes if n.type == 'TEX_IMAGE' and n.image and "_df" in n.image.name.lower()
                   and "ult" not in n.image.name.lower()), None)
     if image is None or found is None:
@@ -743,8 +752,8 @@ AGENTS = {
         node="VP Clove Glow", build=_build_clove_group, materials="smonk", prepare=_prepare_clove,
         per_material=_swap_clove_albedo, see_through=True,
         extra_drivers=[("VP Clove Ult Colours", "Factor", "Ult: active")],
-        controls=[("Ult: respawn", "Respawn", 1.0, "Clove's ultimate, coming back: from 0 to 1 she fades in from her head down (with \"Ult: ghost\" at 1, as a ghost)"),
-                  ("Ult: ghost", "Ghost", 0.0, "Clove as a ghost, as she comes back with her ultimate; animate it to 0 to bring her normal look back"),
+        controls=[("Ult: respawn", "Respawn", 1.0, "Clove fading in from her head down (0 to 1), as she comes back with her ultimate (with \"Ult: ghost\" at 1: her ghost)"),
+                  ("Ult: ghost", "Ghost", 0.0, "Clove's ghost (her resurrection model) instead of her: 0 to 1 it takes her place from her head down; back to 0 for her ult form"),
                   ("Ult: active", "Ult", 0.0, "Clove's ultimate is on: her ult colours and glow, until she gets a kill"),
                   ("Glow: legs (C)", "Legs", 0.0, "Clove's legs glowing, smoke rising and her trousers' butterflies lit, as with her C")]),
     "pine": dict(

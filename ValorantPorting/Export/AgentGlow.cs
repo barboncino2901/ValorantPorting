@@ -79,9 +79,9 @@ public static class AgentGlow
                 {
                     ["ArmColor"] = "C7FF78", ["HandColor"] = "FAFF26", ["HairColor"] = "FFFFFF"
                 }),
-            // Clove: her ultimate brings her back as a ghost fading in (rebuilt after a Blender setup the user made),
-            // then her normal model with her ult's glow (3P_SMO_X_Fight-Body_MI / -Hair_MI: TP_ULT_ textures, glow
-            // mask, blue rim, glowing hair tips) until she gets a kill; her C (TP_Smonk_S0_C_Swap_01_MI_) lights her
+            // Clove: her ultimate brings her back as a ghost (her resurrection model, see UltForms), then her normal
+            // model with her ult's glow (3P_SMO_X_Fight-Body_MI / -Hair_MI: glow mask, blue rim, her TP_ULT_ hair
+            // colours) until she gets a kill; her C (TP_Smonk_S0_C_Swap_01_MI_) lights her
             // legs up to 90 cm, with smoke waves and the butterflies on her trousers
             ["Smonk"] = (
                 new Dictionary<string, string>
@@ -91,12 +91,16 @@ public static class AgentGlow
                     ["UltHairAlbedo"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_Hair_DF.TP_ULT_Smonk_S0_Hair_DF",
                     ["UltHairMask"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_Ult_Smonk_S0_Hair_Mask.TP_Ult_Smonk_S0_Hair_Mask",
                     ["CMask"] = "/Game/Characters/Smonk/S0/3P/Materials/TP_Smonk_S0_C_Mask.TP_Smonk_S0_C_Mask",
-                    ["Waves"] = "/Game/Characters/Smonk/S0/VFX/C/Textures/SMO_C_HUD_Waves_TFX.SMO_C_HUD_Waves_TFX"
+                    ["Waves"] = "/Game/Characters/Smonk/S0/VFX/C/Textures/SMO_C_HUD_Waves_TFX.SMO_C_HUD_Waves_TFX",
+                    // her ghost: its colours from its middle to its outline, its eyes
+                    ["GhostLut"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/SMO_X_Color-Soft_LUT.SMO_X_Color-Soft_LUT",
+                    ["GhostEyes"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_Smonk_S0_Resurrection_Eyes_Mask_DF.TP_Smonk_S0_Resurrection_Eyes_Mask_DF"
                 },
                 new Dictionary<string, object>
                 {
                     ["UltFresnelColor"] = "6BBEFF", ["UltGlow"] = 2.5, ["HornColor"] = "9AFFFF",
-                    ["LegColor"] = "DC6CFF", ["ButterflyColor"] = "FFB8FF", ["LegGlowHeight"] = 0.9
+                    ["LegColor"] = "DC6CFF", ["ButterflyColor"] = "FFB8FF", ["LegGlowHeight"] = 0.9,
+                    ["GhostRimColor"] = "FF3CC8", ["SparkColor"] = "FFB4F0"
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
@@ -113,11 +117,13 @@ public static class AgentGlow
         };
 
     // agents who change model in their ultimate: the other model, same skeleton (Veto's symbiote form, which the game
-    // fades in over him with TP_Pine_S0_transform_Mat / TP_Pine_S0_Sym_transform_Mat). Sent with the 3rd person model;
+    // fades in over him with TP_Pine_S0_transform_Mat / TP_Pine_S0_Sym_transform_Mat; Clove's ghost). Sent with the 3rd person model;
     // the add-on puts it on the same rig, hidden until "Ult form" is raised
     private static readonly Dictionary<string, string> UltForms = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Pine"] = "/Game/Characters/Pine/S0/3P/Models/TP_Pine_Sym_S0_Skelmesh.TP_Pine_Sym_S0_Skelmesh"
+        ["Pine"] = "/Game/Characters/Pine/S0/3P/Models/TP_Pine_Sym_S0_Skelmesh.TP_Pine_Sym_S0_Skelmesh",
+        // Clove's ghost as she comes back (drawn by the game with 3P_SMO_X_Dismiss-Formless_MAT)
+        ["Smonk"] = "/Game/Characters/Smonk/S0/Ability_X/3P/Models/AB_Smonk_S0_X_Resurrection_Skelmesh.AB_Smonk_S0_X_Resurrection_Skelmesh"
     };
 
     public static void AddUltForm(List<ExportPart> parts)
