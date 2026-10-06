@@ -13,8 +13,8 @@ Waylay ("Terra"): the crystal shards on her arms glow at their edges, green-yell
 ("Glow: tattoos").
 Clove ("Smonk"): her ultimate's ghost (her resurrection model) fading in, then her ult glow ("Ult: respawn", "Ult: ghost", "Ult: active"); her
 legs glowing with her C ("Glow: legs (C)").
-Neon ("Sprinter"): her suit lit when she sprints ("Glow: sprint (E)"), and in her ultimate electricity over her skin,
-her tattoo and hair ("Glow: ultimate").
+Neon ("Sprinter"): her suit lit when she sprints ("Glow: sprint (E)"); in her ultimate her suit, tattoo and the edges of
+her skin glow cyan with electricity, her hair blue to yellow ("Glow: ultimate"; after a Blender setup made for her).
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
@@ -733,10 +733,12 @@ def _swap_clove_albedo(tree, node, name, images):
 
 
 def _build_neon_group(images, values):
-    """Neon: Sprint (her E, High Gear): the strips of her suit light up blue to cyan (TP_Sprinter_Ult_Masks_Body01_T B,
-    coloured by TP_Sprinter_Ult_Colors_Body01_T) with its thin lines (R). Ult (Overdrive): the same, plus electricity
-    crawling over her skin (G, minus A; TP_Sprinter_Ult_Bioelectricity01_T moving), her chest tattoo
-    (TP_Sprinter_Ult_Masks_Tattoo01_T), her hair (TP_Sprinter_Ult_Masks_Hair01_T) and a blue rim. Hair: 1 on her hair."""
+    """Neon (after a Blender setup made for her ultimate): Ult (Overdrive): her suit's lines and tattoo glow cyan, the
+    edges of her skin glow with electricity moving over them (TP_Sprinter_Ult_Masks_Body01_T R and G, the model's
+    vertex colours G, TP_Sprinter_Ult_Bioelectricity01_T), the strips of her suit in their own colours
+    (TP_Sprinter_Ult_Colors_Body01_T), and her hair blue at the roots turning yellow at the tips
+    (TP_Sprinter_Ult_Masks_Hair01_T: the way along each strand).
+    Sprint (her E): her suit's strips and lines only. Hair: 1 on her hair. Albedo: her colour texture."""
     name = "VP Neon Glow"
     old = bpy.data.node_groups.get(name)
     if old is not None and old.users == 0:
@@ -744,6 +746,7 @@ def _build_neon_group(images, values):
     group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor')
     for socket_name in ("Sprint", "Ult", "Time", "Hair"):
         face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
@@ -778,62 +781,95 @@ def _build_neon_group(images, values):
         links.new(color_socket, node.inputs[0])
         return node.outputs
 
-    def emission(color, strength):
-        node = nodes.new("ShaderNodeEmission")
-        if isinstance(color, tuple):
-            node.inputs["Color"].default_value = (*color, 1.0)
-        else:
-            links.new(color, node.inputs["Color"])
-        links.new(strength, node.inputs["Strength"])
+    def mix(blend, factor, a, b):
+        node = nodes.new("ShaderNodeMix")
+        node.data_type = 'RGBA'
+        node.blend_type = blend
+        for socket, v in ((node.inputs[0], factor), (node.inputs[6], a), (node.inputs[7], b)):
+            if isinstance(v, (int, float)):
+                socket.default_value = v
+            elif isinstance(v, tuple):
+                socket.default_value = (*v, 1.0)
+            else:
+                links.new(v, socket)
+        return node.outputs[2]
+
+    def ramp(fac, stops):
+        node = nodes.new("ShaderNodeValToRGB")
+        elements = node.color_ramp.elements
+        while len(elements) < len(stops):
+            elements.new(0.5)
+        for element, (position, color) in zip(elements, stops):
+            element.position = position
+            element.color = (*color, 1.0)
+        links.new(fac, node.inputs[0])
         return node.outputs[0]
 
-    result = inputs.outputs["Shader"]
-
-    def add(glow):
-        nonlocal result
-        node = nodes.new("ShaderNodeAddShader")
-        links.new(result, node.inputs[0])
-        links.new(glow, node.inputs[1])
-        result = node.outputs[0]
+    def emission(color, strength):
+        node = nodes.new("ShaderNodeEmission")
+        links.new(color, node.inputs["Color"])
+        links.new(strength, node.inputs["Strength"])
+        return node.outputs[0]
 
     hair = inputs.outputs["Hair"]
     body = math_node('SUBTRACT', 1.0, hair)
     ult = inputs.outputs["Ult"]
-    suit = math_node('MULTIPLY', math_node('ADD', inputs.outputs["Sprint"], ult, clamp=True), body)
-    electric = _color(values.get("ElectricColor", "2BD8FF"))
+    strength = float(values.get("GlowStrength", 4.0))
+    cyan = (0.0364, 0.864, 1.0)
+    vertex = nodes.new("ShaderNodeVertexColor")
+    vertex.layer_name = "PSKVTXCOL_0"
+    vertex_rgb = separate(vertex.outputs["Color"])
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.3
+    fresnel = rim.outputs["Fresnel"]
 
+    # her body: the lines (R) and tattoo, the edges of her skin (G + vertex G) with the electricity moving over them
     masks = separate(texture("UltMasks").outputs[0])
-    masks_alpha = texture("UltMasks").outputs[1]
-    # her suit's strips, in their own blue-to-cyan colours, and its thin lines
-    add(emission(texture("UltColors").outputs[0], math_node('MULTIPLY', math_node('MULTIPLY', masks[2], suit), 3.0)))
-    add(emission(electric, math_node('MULTIPLY', math_node('MULTIPLY', masks[0], suit), 3.0)))
-    # Overdrive: electricity crawling over her skin (the vein texture, tiled and moving), her tattoo, a blue rim
+    tattoo = separate(texture("TattooMask").outputs[0])[0]
     uv = nodes.new("ShaderNodeUVMap")
     uv.uv_map = "UV_SINGLE"
     moving = nodes.new("ShaderNodeVectorMath")
     moving.operation = 'MULTIPLY_ADD'
     links.new(uv.outputs[0], moving.inputs[0])
-    moving.inputs[1].default_value = (6.0, 6.0, 1.0)
+    moving.inputs[1].default_value = (2.0, 2.0, 1.0)
     shift = nodes.new("ShaderNodeCombineXYZ")
-    links.new(math_node('MULTIPLY', inputs.outputs["Time"], 0.35), shift.inputs[0])
-    links.new(math_node('MULTIPLY', inputs.outputs["Time"], -0.6), shift.inputs[1])
+    links.new(math_node('MULTIPLY', inputs.outputs["Time"], -0.5), shift.inputs[1])
     links.new(shift.outputs[0], moving.inputs[2])
     veins = separate(texture("Bioelectricity", moving.outputs[0]).outputs[0])
-    flicker = math_node('ADD', 0.4, math_node('MULTIPLY', veins[1], 0.8))
-    skin = math_node('MULTIPLY', masks[1], masks_alpha)
-    crawl = math_node('MULTIPLY', math_node('MULTIPLY', math_node('POWER', veins[0], 2.0), flicker), 5.0)
-    add(emission(electric, math_node('MULTIPLY', math_node('MULTIPLY', crawl, skin), math_node('MULTIPLY', ult, body))))
-    tattoo = separate(texture("TattooMask").outputs[0])[0]
-    add(emission(electric, math_node('MULTIPLY', math_node('MULTIPLY', tattoo, ult), math_node('MULTIPLY', body, 4.0))))
-    rim = nodes.new("ShaderNodeLayerWeight")
-    rim.inputs["Blend"].default_value = 0.5
-    add(emission(_color(values.get("RimColor", "4FC8FF")),
-                 math_node('MULTIPLY', math_node('POWER', rim.outputs["Facing"], 3.0), math_node('MULTIPLY', ult, 0.6))))
-    # her hair: charged where its mask is bright, the electricity running through it
-    hair_mask = separate(texture("HairMask").outputs[0])[0]
-    charge = math_node('ADD', math_node('MULTIPLY', math_node('POWER', hair_mask, 2.0), 0.8), math_node('MULTIPLY', crawl, 0.3))
-    add(emission(electric, math_node('MULTIPLY', math_node('MULTIPLY', charge, ult), hair)))
-    links.new(result, output.inputs[0])
+    edge = nodes.new("ShaderNodeMapRange")
+    links.new(fresnel, edge.inputs[0])
+    edge.inputs[1].default_value, edge.inputs[2].default_value = 0.05, 0.3
+    skin = mix('MULTIPLY', 1.0, mix('ADD', 1.0, masks[1], vertex_rgb[1]), edge.outputs[0])
+    skin = mix('SOFT_LIGHT', 1.0, skin, mix('SOFT_LIGHT', 1.0, veins[1], veins[0]))
+    glow = mix('ADD', 1.0, mix('ADD', 1.0, masks[0], tattoo), skin)
+    colors = texture("UltColors").outputs[0]
+    body_color = mix('MIX', glow, colors, cyan)
+    # her sprint: the strips and lines only
+    sprint = math_node('MULTIPLY', inputs.outputs["Sprint"], body)
+    sprint_color = mix('MIX', masks[0], colors, cyan)
+
+    # her hair: blue roots to yellow tips (its mask is the way along each strand; the setup used the character select
+    # model's vertex colours, which the 3rd person hair doesn't have), with a faint rim in its own colours turned around
+    turned = nodes.new("ShaderNodeHueSaturation")
+    turned.inputs["Hue"].default_value = 0.5
+    turned.inputs["Saturation"].default_value = 2.0
+    links.new(inputs.outputs["Albedo"], turned.inputs["Color"])
+    hair_mask = separate(texture("HairMask").outputs[0])[0]  # dark at the roots, bright at the tips
+    along = ramp(hair_mask, (
+        (0.00, (0.0, 0.00402, 0.0369)), (0.12, (0.00121, 0.0151, 0.134)), (0.25, (0.00243, 0.0262, 0.231)),
+        (0.38, (0.0, 0.0765, 0.297)), (0.50, (0.0316, 0.171, 0.179)), (0.62, (0.13, 0.184, 0.013)),
+        (0.75, (0.462, 0.445, 0.0)), (0.88, (0.73, 0.708, 0.0)), (1.00, (1.0, 0.965, 0.0))))
+    hair_color = mix('ADD', 1.0, along, mix('MULTIPLY', 1.0, mix('MULTIPLY', 1.0, fresnel, turned.outputs[0]), (0.3, 0.3, 0.3)))
+
+    color = mix('MIX', hair, body_color, hair_color)
+    result = nodes.new("ShaderNodeAddShader")
+    links.new(inputs.outputs["Shader"], result.inputs[0])
+    links.new(emission(color, math_node('MULTIPLY', math_node('MULTIPLY', ult, strength), math_node('SUBTRACT', 1.0, math_node('MULTIPLY', hair, 0.4)))), result.inputs[1])
+    with_sprint = nodes.new("ShaderNodeAddShader")
+    links.new(result.outputs[0], with_sprint.inputs[0])
+    links.new(emission(sprint_color, math_node('MULTIPLY', sprint, strength * 0.75)),
+              with_sprint.inputs[1])
+    links.new(with_sprint.outputs[0], output.inputs[0])
     return group
 
 
@@ -866,7 +902,7 @@ AGENTS = {
     "sprinter": dict(
         node="VP Neon Glow", build=_build_neon_group, materials="sprinter",
         controls=[("Glow: sprint (E)", "Sprint", 0.0, "Neon's suit lighting up blue, as when she sprints (her E)"),
-                  ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit lit, electricity crawling over her skin, her tattoo and hair glowing")]),
+                  ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit, tattoo and the edges of her skin glowing cyan with electricity, her hair blue to yellow")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
