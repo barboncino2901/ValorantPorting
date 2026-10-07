@@ -2018,11 +2018,14 @@ def import_response(response, holder=None, use_selection=True):
                 Log.information(f"Glow added to {glowing} material(s), its controls on the armature")
         except Exception as e:
             Log.error(f"Could not add the agent's glow: {e}")
-    # an agent's ability particle effects (Neon's ultimate zaps and glows), on her bones, switched from her armature
+    # ability particle effects (Neon's ultimate zaps, the wind around Jett's knives), on their bones, switched from the armature
     if import_data.get("Effects"):
         try:
-            rig = next((o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
-                        and o.name.upper().startswith("TP")), None)
+            # the rig with the bones the effects hang on (an agent's 3rd person rig, Jett's knife rig)
+            sockets = {e.get("Socket") for e in import_data["Effects"]}
+            rigs = [o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
+                    and [b for b in sockets if b in o.data.bones]]
+            rig = next((o for o in rigs if o.name.upper().startswith("TP")), rigs[0] if rigs else None)
             made = agent_effects.apply(import_data["Effects"], rig, import_texture, attach_part_to_bone, new_collection)
             if made:
                 bpy.app.timers.register(agent_effects.revalidate, first_interval=0.05)

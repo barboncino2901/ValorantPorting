@@ -115,7 +115,7 @@ def schedule(emitter, seed):
         particles.append(dict(
             birth=-1.0 if forever else birth,
             life=1e9 if forever else life,
-            size=sample((size or {}).get("StartSize"), rng=rng, size=3)[0] * UNIT if size else 0.1,
+            size=(lambda xyz: (xyz[0] * UNIT, (xyz[1] or xyz[0]) * UNIT))(sample((size or {}).get("StartSize"), rng=rng, size=3)) if size else (0.1, 0.1),
             rotation=sample((rotation or {}).get("StartRotation"), rng=rng)[0] * 2 * math.pi if rotation else 0.0,
             location=_vector(sample((location or {}).get("StartLocation"), rng=rng, size=3)) if location else (0.0, 0.0, 0.0),
             velocity=_vector(sample((velocity or {}).get("StartVelocity"), rng=rng, size=3)) if velocity else (0.0, 0.0, 0.0),
@@ -159,7 +159,9 @@ def colour_over_life(emitter, steps=24):
 def _particle_mesh(name, particles):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata([p["location"] for p in particles], [], [])
-    for attribute, kind in (("vp_birth", 'FLOAT'), ("vp_life", 'FLOAT'), ("vp_size", 'FLOAT'), ("vp_rotation", 'FLOAT'),
+    for p in particles:  # (width, height) -> a vector
+        p["scale"] = (p["size"][0], p["size"][1], 1.0)
+    for attribute, kind in (("vp_birth", 'FLOAT'), ("vp_life", 'FLOAT'), ("vp_scale", 'FLOAT_VECTOR'), ("vp_rotation", 'FLOAT'),
                             ("vp_seed", 'FLOAT'), ("vp_velocity", 'FLOAT_VECTOR')):
         data = mesh.attributes.new(attribute, kind, 'POINT').data
         key = attribute[3:]
@@ -247,6 +249,25 @@ def _node_group():
     links.new(points.outputs[0], set_position.inputs["Geometry"])
     links.new(placed, set_position.inputs["Position"])
 
+    # size over life (the game's SizeMultiplyLife; flat at 1 unless set per emitter)
+    life_ratio = math_node('DIVIDE', age, life)
+    curves = []
+    for axis in "XY":
+        curve = nodes.new("ShaderNodeFloatCurve")
+        curve.name = "VP Size " + axis
+        curve.mapping.use_clip = False
+        curve.mapping.clip_min_y, curve.mapping.clip_max_y = -100.0, 100.0
+        points = curve.mapping.curves[0].points
+        points[0].location, points[1].location = (0.0, 1.0), (1.0, 1.0)
+        curve.mapping.update()
+        links.new(life_ratio, curve.inputs["Value"])
+        curves.append(curve.outputs[0])
+    over_life = nodes.new("ShaderNodeCombineXYZ")
+    links.new(curves[0], over_life.inputs[0])
+    links.new(curves[1], over_life.inputs[1])
+    over_life.inputs[2].default_value = 1.0
+    scale = vector_math('MULTIPLY', attribute("vp_scale", 'FLOAT_VECTOR'), over_life.outputs[0])
+
     store_age = nodes.new("GeometryNodeStoreNamedAttribute")
     store_age.data_type = 'FLOAT'
     store_age.domain = 'POINT'
@@ -271,19 +292,36 @@ def _node_group():
     facing = nodes.new("FunctionNodeAlignRotationToVector")
     facing.axis = 'Z'
     links.new(to_camera, facing.inputs["Vector"])
+    # locked to the emitter's X axis (the game's OrientationAxisLock ROTATE_X): along X, turned to the camera around it
+    along = nodes.new("FunctionNodeAlignRotationToVector")
+    along.axis = 'X'
+    along.inputs["Vector"].default_value = (1.0, 0.0, 0.0)
+    around = nodes.new("FunctionNodeAlignRotationToVector")
+    around.axis = 'Z'
+    around.pivot_axis = 'X'
+    links.new(along.outputs[0], around.inputs["Rotation"])
+    links.new(to_camera, around.inputs["Vector"])
+    lock = nodes.new("ShaderNodeValue")
+    lock.name = lock.label = "VP Axis Lock"
+    lock.outputs[0].default_value = 0.0
+    switch = nodes.new("GeometryNodeSwitch")
+    switch.input_type = 'ROTATION'
+    links.new(math_node('GREATER_THAN', lock.outputs[0], 0.5), switch.inputs["Switch"])
+    links.new(facing.outputs[0], switch.inputs["False"])
+    links.new(around.outputs[0], switch.inputs["True"])
     spin = nodes.new("FunctionNodeAxisAngleToRotation")
     spin.inputs["Axis"].default_value = (0.0, 0.0, 1.0)
     links.new(attribute("vp_rotation"), spin.inputs["Angle"])
     turned = nodes.new("FunctionNodeRotateRotation")
     turned.rotation_space = 'LOCAL'
-    links.new(facing.outputs[0], turned.inputs["Rotation"])
+    links.new(switch.outputs[0], turned.inputs["Rotation"])
     links.new(spin.outputs[0], turned.inputs["Rotate By"])
 
     instance = nodes.new("GeometryNodeInstanceOnPoints")
     links.new(store_age.outputs[0], instance.inputs["Points"])
     links.new(set_material.outputs[0], instance.inputs["Instance"])
     links.new(turned.outputs[0], instance.inputs["Rotation"])
-    links.new(attribute("vp_size"), instance.inputs["Scale"])
+    links.new(scale, instance.inputs["Scale"])
     links.new(instance.outputs[0], output.inputs[0])
     return group
 
@@ -333,6 +371,8 @@ def _material(emitter, images, name):
     # colour and alpha over life: a ramp of the game's values (scaled down to fit; the brightness put back after)
     stops = colour_over_life(emitter)
     brightest = max(max(rgb) for _, rgb, _ in stops) or 1.0
+    # the game's colours go far above 1 for its bloom (x1111 on Jett's knife flare): kept within what reads in Blender
+    BRIGHTEST = 12.0
     ramp = nodes.new("ShaderNodeValToRGB")
     elements = ramp.color_ramp.elements
     while len(elements) < min(len(stops), 32):
@@ -345,10 +385,45 @@ def _material(emitter, images, name):
     life_colour, life_alpha = ramp.outputs["Color"], ramp.outputs["Alpha"]
 
     scalars, vectors = spec.get("Scalars") or {}, spec.get("Vectors") or {}
-    texture_path = next(iter((spec.get("Textures") or {}).values()), None)
+    textures = spec.get("Textures") or {}
+    texture_path = next(iter(textures.values()), None)
     image = images.get(texture_path) if texture_path else None
     colour = None
-    if image is not None:
+    if "Emissive_Base" in textures or "Alpha_Base" in textures:
+        # the game's generic effect material (0_GenericA01_MAT): a colour texture and an alpha texture, each raised to
+        # a power, scaled and turned
+        def generic(role, power, multiply, turn):
+            img = images.get(textures.get(role))
+            if img is None:
+                return None
+            rotate = nodes.new("ShaderNodeVectorRotate")
+            rotate.rotation_type = 'Z_AXIS'
+            rotate.inputs["Center"].default_value = (0.5, 0.5, 0.0)
+            rotate.inputs["Angle"].default_value = float(scalars.get(turn, 0.0)) * 2 * math.pi
+            links.new(uv, rotate.inputs["Vector"])
+            node = nodes.new("ShaderNodeTexImage")
+            node.image = img
+            node.extension = 'CLIP'
+            links.new(rotate.outputs[0], node.inputs[0])
+            return node, float(scalars.get(power, 1.0)), float(scalars.get(multiply, 1.0))
+
+        emissive = generic("Emissive_Base", "Emissive_Base_Power", "Emissive_Base_Multiply", "Emissive_Rotate")
+        alpha_tex = generic("Alpha_Base", "Alpha_Base_Power", "Alpha_ColorMult", "Alpha_Rotate")
+        if emissive is not None:
+            node, power, multiply = emissive
+            raised = nodes.new("ShaderNodeVectorMath")
+            raised.operation = 'POWER' if hasattr(bpy.types, "ShaderNodeVectorMath") else 'MULTIPLY'
+            raised.inputs[1].default_value = (power, power, power)
+            links.new(node.outputs["Color"], raised.inputs[0])
+            colour = raised.outputs[0]
+        if alpha_tex is not None:
+            node, power, multiply = alpha_tex
+            channels = nodes.new("ShaderNodeSeparateColor")
+            links.new(node.outputs["Color"], channels.inputs[0])
+            mask = math_node('MULTIPLY', math_node('POWER', channels.outputs[0], power), multiply)
+        else:
+            mask = 1.0
+    elif image is not None:
         rows, columns = int(scalars.get("FlipbookRows") or 1), int(scalars.get("FlipbookColumns") or 1)
         frames = max(rows * columns, 1)
         if frames > 1:
@@ -408,7 +483,7 @@ def _material(emitter, images, name):
     glow = nodes.new("ShaderNodeEmission")
     links.new(tint.outputs[2], glow.inputs["Color"])
     opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False)
-    links.new(math_node('MULTIPLY', opacity, brightest), glow.inputs["Strength"])
+    links.new(math_node('MULTIPLY', opacity, min(brightest, BRIGHTEST)), glow.inputs["Strength"])
     see_through = nodes.new("ShaderNodeBsdfTransparent")
     if "Additive" in (spec.get("BlendMode") or ""):
         result = nodes.new("ShaderNodeAddShader")
@@ -514,6 +589,21 @@ def apply(effects, rig, load_image, attach, collection):
             modifier.node_group.name = f"VP Particles: {name[6:]}"
             modifier.node_group.nodes["VP Material"].inputs["Material"].default_value = material
             own = modifier.node_group
+            multiply = _module(emitter, "SizeMultiplyLife")
+            if multiply and multiply.get("LifeMultiplier"):
+                for i, axis in enumerate("XY"):
+                    if (axis == "X" and multiply.get("MultiplyX", True) is False) or (axis == "Y" and multiply.get("MultiplyY", True) is False):
+                        continue
+                    mapping = own.nodes["VP Size " + axis].mapping
+                    points = mapping.curves[0].points
+                    values = [sample(multiply["LifeMultiplier"], k / 8, size=3)[i] for k in range(9)]
+                    points[0].location, points[1].location = (0.0, values[0]), (1.0, values[-1])
+                    for k in range(1, 8):
+                        points.new(k / 8, values[k])
+                    mapping.update()
+            lock = _module(emitter, "OrientationAxisLock")
+            if lock and "ROTATE_X" in str(lock.get("LockAxisFlags", "")):
+                own.nodes["VP Axis Lock"].outputs[0].default_value = 1.0
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
             # seconds since the effect started (its delay), and on/off from the armature

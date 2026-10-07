@@ -292,7 +292,11 @@ public partial class MainViewModel : ObservableObject
         await ExportHelpers.ExportLock.WaitAsync(); // one export at a time (they share ExportHelpers.Tasks)
         try
         {
-            await Task.Run(() => data.Parts.AddRange(AbilityResolver.ExportParts(AppVM.CUE4ParseVM.Provider, item)));
+            await Task.Run(() =>
+            {
+                data.Parts.AddRange(AbilityResolver.ExportParts(AppVM.CUE4ParseVM.Provider, item));
+                data.Effects = AgentEffects.ForAbility(data.Parts); // (Jett's Blade Storm: wind around the knives)
+            });
             await Task.WhenAll(ExportHelpers.Tasks.ToArray());
             ExportHelpers.Tasks.Clear();
         }

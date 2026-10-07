@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Material;
+using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
@@ -29,6 +30,40 @@ public static class AgentEffects
 
     // systems left out: they don't look like the game in Blender (Neon's head glow, which the game hides with depth)
     private static readonly HashSet<string> Skipped = new(StringComparer.OrdinalIgnoreCase) { "Sprinter_X_Active_3P_Hair01" };
+
+    // ability models with effects on their bones: model name -> (control, particle system, bones)
+    private static readonly Dictionary<string, (string Control, string System, string[] Bones)> Abilities = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Jett's Blade Storm: wind swirling around each floating knife (Ability_Wushu_X_Dagger_Production)
+        ["ABTP_Wushu_S0_X_Skelmesh"] = ("FX: knives", "/Game/Characters/Wushu/S0/VFX/Ability_X/Wushu_X_3P_DaggerFloat",
+            ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"]),
+        // (the Abilities tab's animated set uses the 1st person rig, same bones)
+        ["AB_Wushu_S0_X_Skelmesh"] = ("FX: knives", "/Game/Characters/Wushu/S0/VFX/Ability_X/Wushu_X_3P_DaggerFloat",
+            ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"])
+    };
+
+    public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
+    {
+        var spawns = new List<Spawn>();
+        foreach (var part in parts)
+        {
+            var name = (part.MeshPath ?? "")[((part.MeshPath ?? "").LastIndexOf('.') + 1)..];
+            if (!Abilities.TryGetValue(name, out var effect)) continue;
+            try
+            {
+                if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(effect.System, out UObject system)) continue;
+                var emitters = Emitters(system);
+                if (emitters.Count == 0) continue;
+                foreach (var bone in effect.Bones)
+                    spawns.Add(new Spawn(effect.Control, system.Name, bone, FVector.ZeroVector, FRotator.ZeroRotator, 0f, emitters));
+            }
+            catch (Exception)
+            {
+                // missing from this game version: left out
+            }
+        }
+        return spawns.Count == 0 ? null : spawns;
+    }
 
     public static List<Spawn>? For(IEnumerable<ExportPart> parts)
     {
@@ -90,6 +125,15 @@ public static class AgentEffects
             };
             if (lod.TryGetValue(out UObject required, "RequiredModule") && required.TryGetValue(out UMaterialInterface material, "Material"))
                 description["Material"] = Material(material);
+            // mesh particles: their mesh (and, unless the emitter overrides it, its own material)
+            if (lod.TryGetValue(out UObject typeData, "TypeDataModule") && typeData.TryGetValue(out UStaticMesh mesh, "Mesh"))
+            {
+                ExportHelpers.Save(mesh);
+                description["Mesh"] = mesh.GetPathName();
+                if (!typeData.GetOrDefault<bool>("bOverrideMaterial") && mesh.Materials is { Length: > 0 } meshMaterials &&
+                    meshMaterials[0]?.TryLoad(out var meshMaterial) == true && meshMaterial is UMaterialInterface own)
+                    description["Material"] = Material(own);
+            }
             emitters.Add(description);
         }
         return emitters;
