@@ -218,6 +218,28 @@ def _build_group(images, values):
         links.new(add.outputs[0], more.inputs[0])
         links.new(glow_shader.outputs[0], more.inputs[1])
         add = more
+    # her hands glow magenta in her ult and Dismiss (HandBase FF00FF, white at the fingertips: HandHighlight): where her
+    # hand and finger bones move her ("vp_hands", made on import from her skin weights)
+    hands_attribute = nodes.new("ShaderNodeAttribute")
+    hands_attribute.attribute_name = HANDS_ATTRIBUTE
+    hands = math_node('POWER', hands_attribute.outputs["Fac"], 1.5)
+    hands_on = math_node('MAXIMUM', ult, inputs.outputs["Dismiss"])
+    hand_glow = nodes.new("ShaderNodeEmission")
+    # (magenta; a soft rim lighter at the edges, as the in-game glow blooms)
+    hand_rim = nodes.new("ShaderNodeLayerWeight")
+    hand_rim.inputs["Blend"].default_value = 0.5
+    links.new(mix_color('MIX', _color(values.get("HandColor", "FF00FF")), _color(values.get("HandHighlight", "FF7AFF")),
+                        math_node('POWER', hand_rim.outputs["Facing"], 2.0)), hand_glow.inputs["Color"])
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', hands, hands_on), math_node('MULTIPLY', not_hair, 1.6)),
+              hand_glow.inputs["Strength"])
+    with_hands = nodes.new("ShaderNodeAddShader")
+    links.new(add.outputs[0], with_hands.inputs[0])
+    links.new(hand_glow.outputs[0], with_hands.inputs[1])
+    add = with_hands
+    emission_and_hands = nodes.new("ShaderNodeAddShader")
+    links.new(emission.outputs[0], emission_and_hands.inputs[0])
+    links.new(hand_glow.outputs[0], emission_and_hands.inputs[1])
+
     # Dismiss (3P_Vampire_E_FX, translucent): she turns see-through deep purple, her outline glowing magenta (stronger
     # toward the edge: its Fresnel alpha 0.75), energy drifting over her (TextureD: Wraith_4Xtile90 tiled 3x, scrolling)
     dismiss = inputs.outputs["Dismiss"]
@@ -242,7 +264,7 @@ def _build_group(images, values):
     # her eyes and chest keep glowing through it, brighter (her Dismiss lights them: eye, HandBase colours)
     lit = nodes.new("ShaderNodeAddShader")
     links.new(ghost.outputs[0], lit.inputs[0])
-    links.new(emission.outputs[0], lit.inputs[1])
+    links.new(emission_and_hands.outputs[0], lit.inputs[1])
     ghost = lit.outputs[0]
     dismissed = nodes.new("ShaderNodeMixShader")
     links.new(dismiss, dismissed.inputs[0])
@@ -1112,7 +1134,7 @@ def _build_phoenix_group(images, values):
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
     "vampire": dict(
-        node=GROUP, build=_build_group, materials="vampire",
+        node=GROUP, build=_build_group, materials="vampire", hands=True,
         controls=[(HEART, "Heart", 1.0, CONTROLS[HEART][1]), (EYES, "Eyes", 0.0, CONTROLS[EYES][1]),
                   (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1]),
                   ("Glow: dismiss", "Dismiss", 0.0, "Reyna's Dismiss: she turns see-through purple with a glowing magenta outline")]),
@@ -1171,6 +1193,20 @@ def _armature_of(obj):
     return next((m.object for m in obj.modifiers if m.type == 'ARMATURE' and m.object), None)
 
 
+HANDS_ATTRIBUTE = "vp_hands"
+HAND_BONES = ("Hand", "Thumb", "Index", "Middle", "Ring", "Pinky")
+
+
+def _mark_hands(obj):
+    """A per-vertex attribute: how much its hand and finger bones move it (0..1), for hand glows."""
+    groups = [g.index for g in obj.vertex_groups
+              if g.name.split("_", 1)[-1].rstrip("0123456789") in HAND_BONES and g.name[:2] in ("L_", "R_")]
+    if not groups or HANDS_ATTRIBUTE in obj.data.attributes:
+        return
+    weights = [min(1.0, sum(e.weight for e in v.groups if e.group in groups)) for v in obj.data.vertices]
+    obj.data.attributes.new(HANDS_ATTRIBUTE, 'FLOAT', 'POINT').data.foreach_set("value", weights)
+
+
 def apply(glow, objects, load_image):
     """glow: what the app sent ({"Agent", "Textures": role -> game path, "Values"}); objects: the agent's new objects;
     load_image(game path) -> image. Adds the agent's glow layer to its own materials (body, hair; not the eye overlay
@@ -1178,6 +1214,10 @@ def apply(glow, objects, load_image):
     spec = AGENTS.get((glow or {}).get("Agent", "").lower())
     if spec is None:
         return 0
+    if spec.get("hands"):
+        for obj in objects:
+            if obj.type == 'MESH':
+                _mark_hands(obj)
     images = {}
     for role, path in (glow.get("Textures") or {}).items():
         try:
