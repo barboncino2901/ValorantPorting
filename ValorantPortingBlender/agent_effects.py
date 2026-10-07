@@ -682,6 +682,18 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
     attach(obj, rig, {"Bone", "Location", "Rotation"}): hangs an object on a bone with an Unreal offset;
     load_mesh(game path) -> object (mesh particles' meshes)."""
     meshes = {}
+    # effects whose emitters all play once (a cast burst): their control is how far through the burst (0 -> 1) they
+    # are, to keyframe; the others switch on (1) and keep going with the timeline
+    one_shot, lengths = {}, {}
+    for spawn in effects:
+        control = spawn.get("Effect") or "FX"
+        for emitter in spawn.get("Emitters") or []:
+            loops = int((_module(emitter, "Required") or {}).get("EmitterLoops") or 0)
+            one_shot[control] = one_shot.get(control, True) and loops > 0
+            if loops > 0:
+                particles = schedule(emitter, seed=0)
+                end = max((p["birth"] + min(p["life"], 10.0) for p in particles), default=0.0)
+                lengths[control] = max(lengths.get(control, 0.0), float(spawn.get("Delay") or 0.0) + end)
     if not effects or rig is None:
         return 0
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
@@ -695,13 +707,11 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
         control = spawn.get("Effect") or "FX"
         if control not in rig:
             rig[control] = 0.0
-            rig.id_properties_ui(control).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
-                                                 description="The agent's effect particles, as in game (1: on)")
-        start = control + " start"
-        if start not in rig:
-            # the frame the effect starts at (one-shot bursts play from there; looping ones run from there)
-            rig[start] = 1
-            rig.id_properties_ui(start).update(description="The frame this effect starts at (one-shot bursts, like a cast, play from here)")
+            rig.id_properties_ui(control).update(
+                min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+                description=("A burst that plays once: keyframe it from 0 (start) to 1 (over), over about "
+                             f"{max(lengths.get(control, 1.0), 0.1):.1f} s" if one_shot.get(control)
+                             else "The agent's effect particles, as in game: 1 on, 0 off"))
         anchor = bpy.data.objects.new(f"VP FX {spawn.get('System')} ({socket})", None)
         anchor.empty_display_size = 0.05
         collection.objects.link(anchor)
@@ -797,9 +807,17 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
             # seconds since the effect started (its delay), and on/off from the armature
-            _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, start,
-                   f"(frame - start) / {fps:g} - {float(spawn.get('Delay') or 0.0):g}", variables=[("start", start)])
-            _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control)
+            delay = float(spawn.get('Delay') or 0.0)
+            if one_shot.get(control):
+                # how far through the burst: 0 -> 1 over its length (shown while between)
+                length = max(lengths.get(control, 1.0), 0.1)
+                _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, control,
+                       f"value * {length:g} - {delay:g} - (value <= 0.0) * 1000.0")  # (a simple expression: no Python needed)
+                _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control, "(value > 0.0) * (value < 1.0)")
+            else:
+                _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, control, f"frame / {fps:g} - {delay:g}",
+                       variables=[])
+                _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control)
             made += 1
     rig.update_tag()
     return made

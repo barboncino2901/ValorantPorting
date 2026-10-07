@@ -63,7 +63,7 @@ def _build_group(images, values):
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
     face.new_socket("MRAE", in_out='INPUT', socket_type='NodeSocketColor')
     face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor')
-    for name, default in (("Heart", 1.0), ("Eyes", 0.0), ("Ultimate", 0.0), ("Time", 0.0), ("Hair", 0.0)):
+    for name, default in (("Heart", 1.0), ("Eyes", 0.0), ("Ultimate", 0.0), ("Time", 0.0), ("Hair", 0.0), ("Dismiss", 0.0)):
         socket = face.new_socket(name, in_out='INPUT', socket_type='NodeSocketFloat')
         socket.default_value = default
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
@@ -88,7 +88,10 @@ def _build_group(images, values):
         node = nodes.new("ShaderNodeMix")
         node.data_type = 'RGBA'
         node.blend_type = op
-        node.inputs[0].default_value = factor
+        if isinstance(factor, (int, float)):
+            node.inputs[0].default_value = factor
+        else:
+            links.new(factor, node.inputs[0])
         for socket, v in ((node.inputs[6], a), (node.inputs[7], b)):
             if isinstance(v, tuple):
                 socket.default_value = (*v, 1.0)
@@ -162,7 +165,7 @@ def _build_group(images, values):
         # the mask is a disc over the whole eye: in her colour texture the iris is a purple ring between the grey white
         # and the black pupil, so only what's purple (red and blue both above green) glows, as in game
         iris = math_node('MULTIPLY', math_node('SUBTRACT', math_node('MINIMUM', albedo[0], albedo[2]), albedo[1]), 8.0, clamp=True)
-        eyes_on = math_node('MAXIMUM', inputs.outputs["Eyes"], ult)
+        eyes_on = math_node('MAXIMUM', math_node('MAXIMUM', inputs.outputs["Eyes"], ult), inputs.outputs["Dismiss"])
         amount = math_node('ADD', amount, math_node('MULTIPLY', math_node('MULTIPLY', math_node('MULTIPLY', xe.outputs[1], iris), eyes_on), 2.5))
 
     # the ultimate: tattoo lines lit by energy flowing through them (3P_Vampire_X_FX: TextureA tiled 3x, scrolling -0.1)
@@ -215,7 +218,37 @@ def _build_group(images, values):
         links.new(add.outputs[0], more.inputs[0])
         links.new(glow_shader.outputs[0], more.inputs[1])
         add = more
-    links.new(add.outputs[0], output.inputs[0])
+    # Dismiss (3P_Vampire_E_FX, translucent): she turns see-through deep purple, her outline glowing magenta (stronger
+    # toward the edge: its Fresnel alpha 0.75), energy drifting over her (TextureD: Wraith_4Xtile90 tiled 3x, scrolling)
+    dismiss = inputs.outputs["Dismiss"]
+    facing = nodes.new("ShaderNodeLayerWeight")
+    facing.inputs["Blend"].default_value = 0.5
+    rim_amount = facing.outputs["Facing"]
+    drift = texture("Energy", (3.0, 3.0), (0.0, -0.1))
+    drift_value = separate(drift.outputs[0])[0] if drift is not None else 0.5
+    # (in game she reads pale and very see-through: the purple shows mostly at her outline)
+    ghost_color = mix_color('MIX', _color(values.get("DismissBaseColor", "B48CFF")), _color(values.get("DismissRimColor", "FF4DFF")),
+                            math_node('POWER', rim_amount, 1.5))
+    ghost_glow = nodes.new("ShaderNodeEmission")
+    links.new(ghost_color, ghost_glow.inputs["Color"])
+    links.new(math_node('ADD', math_node('MULTIPLY', math_node('POWER', rim_amount, 2.0), 2.0),
+                        math_node('MULTIPLY', drift_value, 0.25)), ghost_glow.inputs["Strength"])
+    see_through = nodes.new("ShaderNodeBsdfTransparent")
+    ghost_opacity = math_node('ADD', 0.08, math_node('MULTIPLY', math_node('POWER', rim_amount, 1.5), 0.5), clamp=True)
+    ghost = nodes.new("ShaderNodeMixShader")
+    links.new(ghost_opacity, ghost.inputs[0])
+    links.new(see_through.outputs[0], ghost.inputs[1])
+    links.new(ghost_glow.outputs[0], ghost.inputs[2])
+    # her eyes and chest keep glowing through it, brighter (her Dismiss lights them: eye, HandBase colours)
+    lit = nodes.new("ShaderNodeAddShader")
+    links.new(ghost.outputs[0], lit.inputs[0])
+    links.new(emission.outputs[0], lit.inputs[1])
+    ghost = lit.outputs[0]
+    dismissed = nodes.new("ShaderNodeMixShader")
+    links.new(dismiss, dismissed.inputs[0])
+    links.new(add.outputs[0], dismissed.inputs[1])
+    links.new(ghost, dismissed.inputs[2])
+    links.new(dismissed.outputs[0], output.inputs[0])
     return group
 
 
@@ -1081,7 +1114,8 @@ AGENTS = {
     "vampire": dict(
         node=GROUP, build=_build_group, materials="vampire",
         controls=[(HEART, "Heart", 1.0, CONTROLS[HEART][1]), (EYES, "Eyes", 0.0, CONTROLS[EYES][1]),
-                  (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1])]),
+                  (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1]),
+                  ("Glow: dismiss", "Dismiss", 0.0, "Reyna's Dismiss: she turns see-through purple with a glowing magenta outline")]),
     "sequoia": dict(
         node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip=("hair",),
         controls=[("Glow: outfit", "Outfit", 0.0, "Iso's outfit lines glowing"),

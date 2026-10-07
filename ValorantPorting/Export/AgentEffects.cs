@@ -29,9 +29,9 @@ public static class AgentEffects
         ["Sprinter"] = [("FX: ultimate", "/Game/Characters/Sprinter/S0/Ability_X/FXC_Sprinter_X_UltimateActive_Cosmetics")],
         // Reyna: her ultimate (Empress: chest flare, wisps on her chest, head and shoulders, eye trail), its cast
         // burst, and Dismiss (chest flare, eye trail)
+        // (her Dismiss is a material: rebuilt as a shader, "Glow: dismiss")
         ["Vampire"] = [("FX: ultimate", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_WorldPostProcess"),
-                       ("FX: ultimate cast", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_Cast"),
-                       ("FX: dismiss", "/Game/Characters/Vampire/S0/Ability_E/FXC_Vampire_E_Escape_Active_InvulnOnly")],
+                       ("FX: ultimate cast", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_Cast")],
         // Phoenix: flames on his shoulders and elbows in his ultimate, embers on his shoulders while healing in his fire
         ["Phoenix"] = [("FX: ultimate", "/Game/Characters/Phoenix/S0/Ability_X/Production/FXC_Phoenix_X_Active_Production"),
                        ("FX: heal", "/Game/Characters/Phoenix/S0/Passive_Fire/Production/FXC_Phoenix_HealingFire_Production")]
@@ -63,7 +63,10 @@ public static class AgentEffects
         ["Vampire_E_3p_ChestFlare|radianite"] = (1.5f, 0.7f, "FF3FD2"),
         ["Vampire_X_3p_ChestFlare|a"] = (0f, 0f, null),
         ["Vampire_X_Wisp_Chest|None"] = (1f, 1f, "C23BFF"),
-        ["Vampire_X_Wisp_Head|None"] = (1f, 1f, "C23BFF")
+        ["Vampire_X_Wisp_Head|None"] = (1f, 1f, "C23BFF"),
+        // her cast's flat background glow and goo cylinder draw as grey rectangles / a white streak in Blender
+        ["Vampire_X_Intro|GlowBackground"] = (0f, 0f, null),
+        ["Vampire_X_Intro|None|Vampire_X_Goo_Inst"] = (0f, 0f, null)
     };
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
@@ -150,7 +153,9 @@ public static class AgentEffects
             };
             if (lod.TryGetValue(out UObject required, "RequiredModule") && required.TryGetValue(out UMaterialInterface material, "Material"))
                 description["Material"] = Material(material);
-            if (EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}", out var tweak))
+            var materialName = description["Material"]?["Name"]?.ToString() ?? "";
+            if (EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}|{materialName}", out var tweak) ||
+                EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}", out tweak))
             {
                 if (tweak.Boost <= 0f) continue; // left out
                 description["Boost"] = tweak.Boost;
