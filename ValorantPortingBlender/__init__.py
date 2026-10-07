@@ -66,6 +66,11 @@ class Receiver(threading.Thread):
 
     def run(self):
         host, port = 'localhost', 24283
+        try:
+            # room for a whole export while Blender is busy (the system default, ~64 KB, drops the rest)
+            self.socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+        except OSError:
+            pass
         self.socket_server.bind((host, port))
         self.socket_server.settimeout(3.0)
         Log.information(f"ValorantPorting Server Listening at {host}:{port}")
@@ -79,7 +84,17 @@ class Receiver(threading.Thread):
                         if data == "MessageFinished":
                             break
                         data_string += data
-                self.messages.put(json.loads(data_string))
+                message = json.loads(data_string)
+                if isinstance(message, dict) and message.get("MessageFile"):
+                    # a big export, written to a file by the app (UDP loses pieces of big messages)
+                    path = message["MessageFile"]
+                    with open(path, encoding='utf-8') as file:
+                        message = json.load(file)
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                self.messages.put(message)
                 self.event.set()
 
             except OSError:

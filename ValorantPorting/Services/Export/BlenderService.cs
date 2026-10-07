@@ -1,4 +1,5 @@
-﻿using System;
+﻿using System.IO;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
@@ -109,11 +110,32 @@ public class BlenderService : SocketServiceBase
         }));
     }
 
-    private static void SendMessage(string message)
+    private const int LargeMessage = 48 * 1024;
+
+        private static void SendMessage(string message)
     {
         if (DateTime.Now - BlenderSelectionListener.LastHeard > TimeSpan.FromSeconds(10))
             AppLog.Warning("No sign of the Blender add-on: is Blender open with the Valorant Porting add-on enabled? " +
                            "If you just updated the app, install the add-on from the \"Blender Add-ons\" folder again and restart Blender.");
+
+        // Big messages (agents with particle effects: several hundred KB) lose pieces over UDP whenever Blender is
+        // busy for a moment (the system keeps ~64 KB for it), and then nothing arrives. Those go through a file:
+        // Blender gets its path and reads it.
+        if (message.Length > LargeMessage)
+        {
+            try
+            {
+                var folder = Path.Combine(Path.GetTempPath(), "ValorantPorting");
+                Directory.CreateDirectory(folder);
+                var file = Path.Combine(folder, $"message-{Guid.NewGuid():N}.json");
+                File.WriteAllText(file, message, new UTF8Encoding(false));
+                message = JsonConvert.SerializeObject(new { MessageFile = file.Replace("\\", "/") });
+            }
+            catch (Exception e)
+            {
+                AppLog.Warning($"Could not write the export for Blender to a file ({e.Message}); sending it directly.");
+            }
+        }
 
         var messageBytes = Encoding.ASCII.GetBytes(message);
         SendSpliced(Client, messageBytes, Globals.BUFFER_SIZE);
