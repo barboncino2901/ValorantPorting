@@ -43,6 +43,12 @@ public static class AgentEffects
             ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"], 3f)
     };
 
+    // single emitters drawn brighter / bigger than the rest of their effect: "system|emitter" -> (brightness, size)
+    private static readonly Dictionary<string, (float Boost, float Scale)> EmitterTweaks = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Wushu_X_3P_DaggerFloat|GlowFlareLoop"] = (3f, 1.5f) // the glow at each knife's ring
+    };
+
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
     {
         var spawns = new List<Spawn>();
@@ -118,14 +124,20 @@ public static class AgentEffects
             foreach (var moduleIndex in lod.GetOrDefault("Modules", Array.Empty<FPackageIndex>()))
                 if (moduleIndex.TryLoad(out var module) && module.GetOrDefault("bEnabled", true)) modules.Add(Module(module));
 
+            var emitterName = emitter.GetOrDefault<FName>("EmitterName").Text;
             var description = new JObject
             {
-                ["Name"] = emitter.GetOrDefault<FName>("EmitterName").Text,
+                ["Name"] = emitterName,
                 ["Type"] = emitter.ExportType,
                 ["Modules"] = modules
             };
             if (lod.TryGetValue(out UObject required, "RequiredModule") && required.TryGetValue(out UMaterialInterface material, "Material"))
                 description["Material"] = Material(material);
+            if (EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}", out var tweak))
+            {
+                description["Boost"] = tweak.Boost;
+                description["Scale"] = tweak.Scale;
+            }
             // mesh particles: their mesh (and, unless the emitter overrides it, its own material)
             if (lod.TryGetValue(out UObject typeData, "TypeDataModule") && typeData.TryGetValue(out UStaticMesh mesh, "Mesh"))
             {

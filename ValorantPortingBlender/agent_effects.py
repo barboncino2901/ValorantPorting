@@ -579,12 +579,15 @@ def apply(effects, rig, load_image, attach, collection):
                         images[path] = None
             # the same particles every time (Python's hash() changes between runs)
             particles = schedule(emitter, seed=zlib.crc32(f"{spawn.get('System')}|{socket}|{emitter.get('Name')}|{number}".encode()))
+            grow = float(emitter.get("Scale") or 1.0)
+            for particle in particles:
+                particle["size"] = (particle["size"][0] * grow, particle["size"][1] * grow)
             if not particles:
                 continue
             obj = bpy.data.objects.new(name, _particle_mesh(name, particles))
             collection.objects.link(obj)
             obj.parent = anchor
-            material = _material(emitter, images, name, float(spawn.get("Boost") or 1.0))
+            material = _material(emitter, images, name, float(spawn.get("Boost") or 1.0) * float(emitter.get("Boost") or 1.0))
             obj.data.materials.append(material)
             modifier = obj.modifiers.new("VP Particles", 'NODES')
             modifier.node_group = group.copy()
