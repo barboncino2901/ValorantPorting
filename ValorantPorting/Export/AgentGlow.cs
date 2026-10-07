@@ -8,7 +8,7 @@ using ValorantPorting.AppUtils;
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Jett's wind on her arms; Neon's suit and Overdrive; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Jett's wind on her arms; Phoenix's flames; Neon's suit and Overdrive; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -130,6 +130,19 @@ public static class AgentGlow
                 new Dictionary<string, object>
                 {
                     ["WindColor"] = "45E6F2", ["WindStrength"] = 1.5, ["ArmIslandU"] = 0.208, ["ArmIslandV"] = 0.2534
+                }),
+            // Phoenix: his ultimate's / healing fire's overlay (body_Overlays_MI, Phoenix_Body_Overlay_Heal_MI): the
+            // tex_tile_07 flames scrolling over him where ULT_Masks R is, the chest honeycomb (G) glowing
+            ["Phoenix"] = (
+                new Dictionary<string, string>
+                {
+                    ["Masks"] = "/Game/Characters/Phoenix/S0/3P/Materials/ULT_overlays/ULT_Masks.ULT_Masks",
+                    ["Flames"] = "/Game/Characters/Phoenix/S0/VFX/Textures/tex_tile_07.tex_tile_07"
+                },
+                new Dictionary<string, object>
+                {
+                    ["FlameScaleU"] = 3.0, ["FlameScaleV"] = 5.0, ["FlameSpeed"] = 0.275, ["FlamePower"] = 6.0,
+                    ["FlameColorA"] = "FFC24A", ["FlameColorB"] = "FF6A1A"
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's

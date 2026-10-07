@@ -53,7 +53,7 @@ def sample(distribution, time=0.0, rng=None, size=1):
     j = min(i + 1, len(entries) - 1)
     f = min(max(position - i, 0.0), 1.0)
     entry = [a + (b - a) * f for a, b in zip(entries[i], entries[j])]
-    if op == 2 and sub and len(entry) >= 2 * sub:  # a random value between two sets
+    if op in (2, 3) and sub and len(entry) >= 2 * sub:  # a random value between two sets (3: "extreme", near enough)
         t = rng.random() if rng else 0.5
         low, high = entry[:sub], entry[sub:2 * sub]
         entry = [a + (b - a) * t for a, b in zip(low, high)]
@@ -108,6 +108,9 @@ def schedule(emitter, seed):
     rotation = _module(emitter, "Rotation")
     location = _module(emitter, "Location")
     velocity = _module(emitter, "Velocity")
+    acceleration = _module(emitter, "Acceleration")
+    drag = _module(emitter, "AccelerationDrag")
+    sphere = _module(emitter, "LocationPrimitiveSphere")
     particles = []
     for birth in births:
         life = sample((lifetime or {}).get("Lifetime"), rng=rng)[0] if lifetime else 1.0
@@ -119,7 +122,21 @@ def schedule(emitter, seed):
             rotation=sample((rotation or {}).get("StartRotation"), rng=rng)[0] * 2 * math.pi if rotation else 0.0,
             location=_vector(sample((location or {}).get("StartLocation"), rng=rng, size=3)) if location else (0.0, 0.0, 0.0),
             velocity=_vector(sample((velocity or {}).get("StartVelocity"), rng=rng, size=3)) if velocity else (0.0, 0.0, 0.0),
+            acceleration=_vector(sample((acceleration or {}).get("Acceleration"), rng=rng, size=3)) if acceleration else (0.0, 0.0, 0.0),
+            drag=sample((drag or {}).get("DragCoefficientRaw") or (drag or {}).get("DragCoefficient"), rng=rng)[0] if drag else 0.0,
             seed=rng.random()))
+        if sphere:
+            # somewhere in a sphere around the emitter (and moving out of it, if the module says so)
+            radius = sample(sphere.get("StartRadius"), rng=rng)[0] * UNIT
+            while True:
+                d = (rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1))
+                if 0.0 < sum(c * c for c in d) <= 1.0:
+                    break
+            p = particles[-1]
+            p["location"] = tuple(a + c * radius for a, c in zip(p["location"], d))
+            if sphere.get("bVelocity"):
+                scale = sample(sphere.get("VelocityScale"), rng=rng)[0] if sphere.get("VelocityScale") else 1.0
+                p["velocity"] = tuple(v + c * radius * scale for v, c in zip(p["velocity"], d))
     return particles
 
 
@@ -162,7 +179,7 @@ def _particle_mesh(name, particles):
     for p in particles:  # (width, height) -> a vector
         p["scale"] = (p["size"][0], p["size"][1], 1.0)
     for attribute, kind in (("vp_birth", 'FLOAT'), ("vp_life", 'FLOAT'), ("vp_scale", 'FLOAT_VECTOR'), ("vp_rotation", 'FLOAT'),
-                            ("vp_seed", 'FLOAT'), ("vp_velocity", 'FLOAT_VECTOR')):
+                            ("vp_seed", 'FLOAT'), ("vp_velocity", 'FLOAT_VECTOR'), ("vp_acceleration", 'FLOAT_VECTOR'), ("vp_drag", 'FLOAT')):
         data = mesh.attributes.new(attribute, kind, 'POINT').data
         key = attribute[3:]
         if kind == 'FLOAT':
@@ -238,7 +255,18 @@ def _node_group():
 
     # moving with its velocity; pulled toward the camera by the game's camera offset
     position = nodes.new("GeometryNodeInputPosition")
-    moved = vector_math('ADD', position.outputs[0], vector_math('SCALE', attribute("vp_velocity", 'FLOAT_VECTOR'), scale=age))
+    # moved by its velocity (slowed by drag: v (1 - e^-kt) / k) and its acceleration (a t^2 / 2)
+    drag = attribute("vp_drag")
+    dragged = math_node('DIVIDE', math_node('SUBTRACT', 1.0, math_node('EXPONENT', math_node('MULTIPLY', math_node('MULTIPLY', drag, -1.0), age))),
+                        math_node('MAXIMUM', drag, 0.0001))
+    travel = nodes.new("GeometryNodeSwitch")
+    travel.input_type = 'FLOAT'
+    links.new(math_node('GREATER_THAN', drag, 0.0001), travel.inputs["Switch"])
+    links.new(age, travel.inputs["False"])
+    links.new(dragged, travel.inputs["True"])
+    moved = vector_math('ADD', position.outputs[0], vector_math('SCALE', attribute("vp_velocity", 'FLOAT_VECTOR'), scale=travel.outputs[0]))
+    moved = vector_math('ADD', moved, vector_math('SCALE', attribute("vp_acceleration", 'FLOAT_VECTOR'),
+                                                  scale=math_node('MULTIPLY', math_node('MULTIPLY', age, age), 0.5)))
     camera = nodes.new("GeometryNodeInputActiveCamera")
     camera_info = nodes.new("GeometryNodeObjectInfo")
     camera_info.transform_space = 'RELATIVE'
@@ -295,7 +323,16 @@ def _node_group():
     # locked to the emitter's X axis (the game's OrientationAxisLock ROTATE_X): along X, turned to the camera around it
     along = nodes.new("FunctionNodeAlignRotationToVector")
     along.axis = 'X'
-    along.inputs["Vector"].default_value = (1.0, 0.0, 0.0)
+    # (or along its velocity: the game's velocity-aligned sprites)
+    by_velocity = nodes.new("ShaderNodeValue")
+    by_velocity.name = by_velocity.label = "VP Velocity Aligned"
+    by_velocity.outputs[0].default_value = 0.0
+    lock_axis = nodes.new("ShaderNodeMix")
+    lock_axis.data_type = 'VECTOR'
+    links.new(by_velocity.outputs[0], lock_axis.inputs[0])
+    lock_axis.inputs[4].default_value = (1.0, 0.0, 0.0)
+    links.new(attribute("vp_velocity", 'FLOAT_VECTOR'), lock_axis.inputs[5])
+    links.new(lock_axis.outputs[1], along.inputs["Vector"])
     around = nodes.new("FunctionNodeAlignRotationToVector")
     around.axis = 'Z'
     around.pivot_axis = 'X'
@@ -318,7 +355,13 @@ def _node_group():
     links.new(spin.outputs[0], turned.inputs["Rotate By"])
 
     instance = nodes.new("GeometryNodeInstanceOnPoints")
-    links.new(store_age.outputs[0], instance.inputs["Points"])
+    store_seed = nodes.new("GeometryNodeStoreNamedAttribute")
+    store_seed.data_type = 'FLOAT'
+    store_seed.domain = 'POINT'
+    store_seed.inputs["Name"].default_value = "vp_random"
+    links.new(store_age.outputs[0], store_seed.inputs["Geometry"])
+    links.new(attribute("vp_seed"), store_seed.inputs["Value"])
+    links.new(store_seed.outputs[0], instance.inputs["Points"])
     links.new(set_material.outputs[0], instance.inputs["Instance"])
     links.new(turned.outputs[0], instance.inputs["Rotation"])
     links.new(scale, instance.inputs["Scale"])
@@ -385,6 +428,30 @@ def _material(emitter, images, name, boost=1.0):
     life_colour, life_alpha = ramp.outputs["Color"], ramp.outputs["Alpha"]
 
     scalars, vectors = spec.get("Scalars") or {}, spec.get("Vectors") or {}
+    # flipbook frames: the emitter's own grid (SubImages), else the material's; in order over the particle's life
+    # (up to the last frame its SubUV module reaches), or one at random
+    required = _module(emitter, "Required") or {}
+    columns = int(required.get("SubImages_Horizontal") or scalars.get("FlipbookColumns") or 1)
+    rows = int(required.get("SubImages_Vertical") or scalars.get("FlipbookRows") or 1)
+    frames = max(rows * columns, 1)
+    if frames > 1:
+        subuv = _module(emitter, "SubUV")
+        last = frames - 1
+        if subuv and _table(subuv.get("SubImageIndex"))[0]:
+            last = min(int(round(max(_table(subuv.get("SubImageIndex"))[0]))), frames - 1)
+        if "Random" in str(required.get("InterpolationMethod", "")):
+            frame = math_node('FLOOR', math_node('MULTIPLY', instancer("vp_random").outputs["Fac"], frames - 0.001))
+        else:
+            frame = math_node('MINIMUM', math_node('FLOOR', math_node('MULTIPLY', age, last + 1)), last)
+        column = math_node('FLOORED_MODULO', frame, columns)
+        row = math_node('SUBTRACT', rows - 1, math_node('FLOOR', math_node('DIVIDE', frame, columns)))
+        split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(uv, split.inputs[0])
+        combine = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('DIVIDE', math_node('ADD', split.outputs[0], column), columns), combine.inputs[0])
+        links.new(math_node('DIVIDE', math_node('ADD', split.outputs[1], row), rows), combine.inputs[1])
+        uv = combine.outputs[0]
+
     textures = spec.get("Textures") or {}
     texture_path = next(iter(textures.values()), None)
     image = images.get(texture_path) if texture_path else None
@@ -424,19 +491,6 @@ def _material(emitter, images, name, boost=1.0):
         else:
             mask = 1.0
     elif image is not None:
-        rows, columns = int(scalars.get("FlipbookRows") or 1), int(scalars.get("FlipbookColumns") or 1)
-        frames = max(rows * columns, 1)
-        if frames > 1:
-            # the frame for the particle's age, left to right, top to bottom
-            frame = math_node('MINIMUM', math_node('FLOOR', math_node('MULTIPLY', age, frames)), frames - 1)
-            column = math_node('FLOORED_MODULO', frame, columns)
-            row = math_node('SUBTRACT', rows - 1, math_node('FLOOR', math_node('DIVIDE', frame, columns)))
-            split = nodes.new("ShaderNodeSeparateXYZ")
-            links.new(uv, split.inputs[0])
-            combine = nodes.new("ShaderNodeCombineXYZ")
-            links.new(math_node('DIVIDE', math_node('ADD', split.outputs[0], column), columns), combine.inputs[0])
-            links.new(math_node('DIVIDE', math_node('ADD', split.outputs[1], row), rows), combine.inputs[1])
-            uv = combine.outputs[0]
         texture = nodes.new("ShaderNodeTexImage")
         texture.image = image
         texture.extension = 'CLIP'
@@ -475,6 +529,17 @@ def _material(emitter, images, name, boost=1.0):
     tint.data_type = 'RGBA'
     tint.blend_type = 'MULTIPLY'
     tint.inputs[0].default_value = 1.0
+    if emitter.get("Tint"):
+        # (a grey texture the game colours inside its material)
+        hex_ = emitter["Tint"]
+        rgb = [((int(hex_[i:i + 2], 16) / 255.0 + 0.055) / 1.055) ** 2.4 for i in (0, 2, 4)]
+        tinted = nodes.new("ShaderNodeMix")
+        tinted.data_type = 'RGBA'
+        tinted.blend_type = 'MULTIPLY'
+        tinted.inputs[0].default_value = 1.0
+        links.new(life_colour, tinted.inputs[6])
+        tinted.inputs[7].default_value = (*rgb, 1.0)
+        life_colour = tinted.outputs[2]
     links.new(life_colour, tint.inputs[6])
     if colour is not None:
         links.new(colour, tint.inputs[7])
@@ -609,6 +674,9 @@ def apply(effects, rig, load_image, attach, collection):
             lock = _module(emitter, "OrientationAxisLock")
             if lock and "ROTATE_X" in str(lock.get("LockAxisFlags", "")):
                 own.nodes["VP Axis Lock"].outputs[0].default_value = 1.0
+            if "PSA_Velocity" in str((_module(emitter, "Required") or {}).get("ScreenAlignment", "")):
+                own.nodes["VP Axis Lock"].outputs[0].default_value = 1.0
+                own.nodes["VP Velocity Aligned"].outputs[0].default_value = 1.0
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
             # seconds since the effect started (its delay), and on/off from the armature

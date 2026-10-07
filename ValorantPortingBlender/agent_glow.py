@@ -16,6 +16,7 @@ legs glowing with her C ("Glow: legs (C)").
 Neon ("Sprinter"): her suit lit when she sprints ("Glow: sprint (E)"); in her ultimate her suit, tattoo and the edges of
 her skin glow cyan with electricity, her hair blue to yellow ("Glow: ultimate"; after a Blender setup made for her).
 Jett ("Wushu"): her arms streaming cyan wind in her ultimate ("Glow: arms (ult)").
+Phoenix: flames over him in his ultimate ("Glow: ultimate") and while healing in his fire ("Glow: heal").
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
@@ -956,6 +957,107 @@ def _build_jett_group(images, values):
     return group
 
 
+def _build_phoenix_group(images, values):
+    """Phoenix: his ultimate (Run It Back) and his healing fire (body_Overlays_MI / Phoenix_Body_Overlay_Heal_MI):
+    flames crawling over him (tex_tile_07 tiled 3 x 5, scrolling, raised to the 6th power so only the wisps' cores
+    show; ULT_Masks R: where), the honeycomb on his chest glowing (ULT_Masks G), his outline glowing; orange to
+    yellow. Ult: his ultimate; Heal: standing in his fire (softer, redder)."""
+    name = "VP Phoenix Fire"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name in ("Ult", "Heal", "Time", "Hair"):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def emission(color, strength):
+        node = nodes.new("ShaderNodeEmission")
+        node.inputs["Color"].default_value = (*color, 1.0)
+        links.new(strength, node.inputs["Strength"])
+        return node.outputs[0]
+
+    uv = nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "UV_SINGLE"
+    fire = math_node('MAXIMUM', inputs.outputs["Ult"], math_node('MULTIPLY', inputs.outputs["Heal"], 0.5))
+    body = math_node('SUBTRACT', 1.0, inputs.outputs["Hair"])
+
+    # the flames: the tile scrolled up and sideways over time, wobbled by a second, slower copy
+    def scrolled(scale, speed):
+        node = nodes.new("ShaderNodeVectorMath")
+        node.operation = 'MULTIPLY_ADD'
+        links.new(uv.outputs[0], node.inputs[0])
+        node.inputs[1].default_value = (*scale, 1.0)
+        shift = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', inputs.outputs["Time"], speed[0]), shift.inputs[0])
+        links.new(math_node('MULTIPLY', inputs.outputs["Time"], speed[1]), shift.inputs[1])
+        links.new(shift.outputs[0], node.inputs[2])
+        return node.outputs[0]
+
+    tile = float(values.get("FlameScaleU", 3.0)), float(values.get("FlameScaleV", 5.0))
+    speed = float(values.get("FlameSpeed", 0.275))
+    wobble = nodes.new("ShaderNodeTexImage")
+    wobble.image = _image(images, "Flames")
+    links.new(scrolled((tile[0] * 0.5, tile[1] * 0.5), (-speed * 0.7, -speed * 1.3)), wobble.inputs[0])
+    flame_uv = nodes.new("ShaderNodeVectorMath")
+    flame_uv.operation = 'MULTIPLY_ADD'
+    links.new(wobble.outputs["Color"], flame_uv.inputs[0])
+    flame_uv.inputs[1].default_value = (0.15, 0.15, 0.0)
+    links.new(scrolled(tile, (speed * 2.5, speed)), flame_uv.inputs[2])
+    flames_tex = nodes.new("ShaderNodeTexImage")
+    flames_tex.image = _image(images, "Flames")
+    links.new(flame_uv.outputs[0], flames_tex.inputs[0])
+    # thin wisps: where the moving flame texture crosses a level (its contour lines), brighter where it is brighter
+    level = math_node('ABSOLUTE', math_node('SUBTRACT', flames_tex.outputs["Color"], 0.62))
+    wisps = math_node('POWER', math_node('SUBTRACT', 1.0, math_node('MULTIPLY', level, 22.0), clamp=True), 2.0)
+    # only in patches (where the slower copy is bright), so they come and go over him
+    patches = math_node('MULTIPLY', math_node('SUBTRACT', wobble.outputs["Color"], 0.6), 3.0, clamp=True)
+    wisps = math_node('MULTIPLY', wisps, patches)
+
+    masks = nodes.new("ShaderNodeTexImage")
+    masks.image = _image(images, "Masks")
+    links.new(uv.outputs[0], masks.inputs[0])
+    channels = nodes.new("ShaderNodeSeparateColor")
+    links.new(masks.outputs["Color"], channels.inputs[0])
+    where, honeycomb = channels.outputs[0], channels.outputs[1]
+
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.4
+    edge = math_node('POWER', rim.outputs["Facing"], 2.5)
+
+    hot = _color(values.get("FlameColorA", "FFC24A"))
+    deep = _color(values.get("FlameColorB", "FF6A1A"))
+    flames = emission(hot, math_node('MULTIPLY', math_node('MULTIPLY', math_node('MULTIPLY', wisps, where), fire), math_node('MULTIPLY', body, 4.0)))
+    glow = emission(deep, math_node('MULTIPLY', math_node('MULTIPLY', honeycomb, fire), math_node('MULTIPLY', body, 4.0)))
+    outline = emission(deep, math_node('MULTIPLY', math_node('MULTIPLY', edge, fire), math_node('MULTIPLY', where, 0.6)))
+
+    result = inputs.outputs["Shader"]
+    for shader in (flames, glow, outline):
+        add = nodes.new("ShaderNodeAddShader")
+        links.new(result, add.inputs[0])
+        links.new(shader, add.inputs[1])
+        result = add.outputs[0]
+    links.new(result, output.inputs[0])
+    return group
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -989,6 +1091,10 @@ AGENTS = {
     "wushu": dict(
         node="VP Jett Tattoos", build=_build_jett_group, materials="wushu_s0_tattoo",
         controls=[("Glow: arms (ult)", "Loop", 0.0, "Jett's arms streaming wind, as while her ultimate is up")]),
+    "phoenix": dict(
+        node="VP Phoenix Fire", build=_build_phoenix_group, materials="phoenix_s0",
+        controls=[("Glow: ultimate", "Ult", 0.0, "Phoenix's ultimate (Run It Back): flames crawling over him, his chest glowing"),
+                  ("Glow: heal", "Heal", 0.0, "Phoenix healing in his own fire: softer flames over him")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),

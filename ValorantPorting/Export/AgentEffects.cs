@@ -26,7 +26,10 @@ public static class AgentEffects
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
     {
         // Neon's Overdrive: zaps on her elbow and hands, light in her hands
-        ["Sprinter"] = [("FX: ultimate", "/Game/Characters/Sprinter/S0/Ability_X/FXC_Sprinter_X_UltimateActive_Cosmetics")]
+        ["Sprinter"] = [("FX: ultimate", "/Game/Characters/Sprinter/S0/Ability_X/FXC_Sprinter_X_UltimateActive_Cosmetics")],
+        // Phoenix: flames on his shoulders and elbows in his ultimate, embers on his shoulders while healing in his fire
+        ["Phoenix"] = [("FX: ultimate", "/Game/Characters/Phoenix/S0/Ability_X/Production/FXC_Phoenix_X_Active_Production"),
+                       ("FX: heal", "/Game/Characters/Phoenix/S0/Passive_Fire/Production/FXC_Phoenix_HealingFire_Production")]
     };
 
     // systems left out: they don't look like the game in Blender (Neon's head glow, which the game hides with depth)
@@ -43,10 +46,12 @@ public static class AgentEffects
             ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"], 3f)
     };
 
-    // single emitters drawn brighter / bigger than the rest of their effect: "system|emitter" -> (brightness, size)
-    private static readonly Dictionary<string, (float Boost, float Scale)> EmitterTweaks = new(StringComparer.OrdinalIgnoreCase)
+    // single emitters drawn differently from the game's values: "system|emitter" -> (brightness, size, tint as hex
+    // or null). Tints are for materials that colour a grey texture inside their (unreadable) graph
+    private static readonly Dictionary<string, (float Boost, float Scale, string? Tint)> EmitterTweaks = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Wushu_X_3P_DaggerFloat|GlowFlareLoop"] = (3f, 1.5f) // the glow at each knife's ring
+        ["Wushu_X_3P_DaggerFloat|GlowFlareLoop"] = (3f, 1.5f, null), // the glow at each knife's ring
+        ["ULT_LimbFlames|None"] = (2f, 1f, "FF8A2E") // Phoenix's flames on his shoulders and elbows (solar_flare_4x4: grey)
     };
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
@@ -137,6 +142,7 @@ public static class AgentEffects
             {
                 description["Boost"] = tweak.Boost;
                 description["Scale"] = tweak.Scale;
+                if (tweak.Tint != null) description["Tint"] = tweak.Tint;
             }
             // mesh particles: their mesh (and, unless the emitter overrides it, its own material)
             if (lod.TryGetValue(out UObject typeData, "TypeDataModule") && typeData.TryGetValue(out UStaticMesh mesh, "Mesh"))
