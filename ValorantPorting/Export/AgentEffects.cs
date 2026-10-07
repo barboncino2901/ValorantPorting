@@ -1,0 +1,165 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Exports.Material;
+using CUE4Parse.UE4.Assets.Exports.Texture;
+using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Objects.UObject;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using ValorantPorting.AppUtils;
+
+namespace ValorantPorting.Export;
+
+// An agent's ability particle effects (Cascade particle systems), as the game spawns them on her bones: which system,
+// on which bone (offset, rotation, start delay), its emitters' modules as the game stores them (spawn rate and bursts,
+// lifetime, size, colour over life, ... with their baked value tables) and their materials. The Blender add-on
+// rebuilds them as particles on the agent's rig.
+public static class AgentEffects
+{
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters);
+
+    // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
+    private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Neon's Overdrive: zaps on her elbow, glows on her head, light in her hands
+        ["Sprinter"] = [("FX: ultimate", "/Game/Characters/Sprinter/S0/Ability_X/FXC_Sprinter_X_UltimateActive_Cosmetics")]
+    };
+
+    public static List<Spawn>? For(IEnumerable<ExportPart> parts)
+    {
+        var path = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
+        if (path is null) return null;
+        var codename = path[(path.IndexOf("/Characters/", StringComparison.OrdinalIgnoreCase) + "/Characters/".Length)..].Split('/')[0];
+        if (!Agents.TryGetValue(codename, out var containers)) return null;
+
+        var spawns = new List<Spawn>();
+        foreach (var (control, container) in containers)
+        {
+            try
+            {
+                foreach (var export in AppVM.CUE4ParseVM.Provider.LoadPackageObjects(container))
+                {
+                    if (!export.ExportType.StartsWith("Comp_FXC_SpawnParticle", StringComparison.Ordinal)) continue;
+                    if (!export.TryGetValue(out UObject system, "EmitterTemplate3P")) continue;
+                    var emitters = Emitters(system);
+                    if (emitters.Count == 0) continue;
+                    spawns.Add(new Spawn(control, system.Name, export.GetOrDefault<FName>("AttachPoint3P").Text,
+                        export.GetOrDefault("EmitterOffset3P", FVector.ZeroVector),
+                        export.GetOrDefault("EmitterRotation3P", FRotator.ZeroRotator),
+                        Delay(export), emitters));
+                }
+            }
+            catch (Exception)
+            {
+                // missing from this game version: left out
+            }
+        }
+        return spawns.Count == 0 ? null : spawns;
+    }
+
+    // seconds after the effect starts (stored as a float or a double)
+    private static float Delay(UObject spawn) =>
+        spawn.TryGetValue(out double asDouble, "ParticleStartDelay3P") ? (float) asDouble : spawn.GetOrDefault<float>("ParticleStartDelay3P");
+
+    private static List<JObject> Emitters(UObject system)
+    {
+        var emitters = new List<JObject>();
+        foreach (var emitterIndex in system.GetOrDefault("Emitters", Array.Empty<FPackageIndex>()))
+        {
+            if (!emitterIndex.TryLoad(out var emitter)) continue;
+            var lods = emitter.GetOrDefault("LODLevels", Array.Empty<FPackageIndex>());
+            if (lods.Length == 0 || !lods[0].TryLoad(out var lod)) continue;
+            if (!lod.GetOrDefault("bEnabled", true)) continue;
+
+            var modules = new JArray();
+            foreach (var name in new[] { "RequiredModule", "SpawnModule", "TypeDataModule" })
+                if (lod.TryGetValue(out UObject module, name)) modules.Add(Module(module));
+            foreach (var moduleIndex in lod.GetOrDefault("Modules", Array.Empty<FPackageIndex>()))
+                if (moduleIndex.TryLoad(out var module) && module.GetOrDefault("bEnabled", true)) modules.Add(Module(module));
+
+            var description = new JObject
+            {
+                ["Name"] = emitter.GetOrDefault<FName>("EmitterName").Text,
+                ["Type"] = emitter.ExportType,
+                ["Modules"] = modules
+            };
+            if (lod.TryGetValue(out UObject required, "RequiredModule") && required.TryGetValue(out UMaterialInterface material, "Material"))
+                description["Material"] = Material(material);
+            emitters.Add(description);
+        }
+        return emitters;
+    }
+
+    private static JObject Module(UObject module)
+    {
+        var json = JObject.Parse(JsonConvert.SerializeObject(module));
+        return new JObject { ["Type"] = module.ExportType, ["Properties"] = json["Properties"] ?? new JObject() };
+    }
+
+    // its name, how it's drawn, its parameters (an instance's, then its base material's defaults) and its textures
+    private static JObject Material(UMaterialInterface material)
+    {
+        var result = new JObject { ["Name"] = material.Name };
+        var textures = new JObject();
+        var scalars = new JObject();
+        var vectors = new JObject();
+        UMaterialInterface current = material;
+        for (var depth = 0; depth < 16; depth++)
+        {
+            var json = JObject.Parse(JsonConvert.SerializeObject(current));
+            var properties = json["Properties"] as JObject ?? new JObject();
+            if (result["BlendMode"] == null)
+            {
+                var overrides = properties["BasePropertyOverrides"];
+                if (overrides?["bOverride_BlendMode"]?.Value<bool>() == true) result["BlendMode"] = overrides["BlendMode"]?.ToString();
+            }
+            if (current is UMaterialInstanceConstant instance)
+            {
+                var (instanceTextures, instanceScalars, instanceVectors) = ExportHelpers.MaterialParameters(instance);
+                foreach (var t in instanceTextures) textures[t.Name] ??= t.Value;
+                foreach (var s in instanceScalars) scalars[s.Name] ??= s.Value;
+                foreach (var v in instanceVectors) vectors[v.Name] ??= new JArray(v.Value.R, v.Value.G, v.Value.B, v.Value.A);
+            }
+            if (current is UMaterial baseMaterial)
+            {
+                result["BaseMaterial"] = baseMaterial.Name;
+                result["BlendMode"] ??= properties["BlendMode"]?.ToString() ?? "EBlendMode::BLEND_Opaque";
+                result["ShadingModel"] = properties["ShadingModel"]?.ToString();
+                result["TwoSided"] = properties["TwoSided"]?.Value<bool>() ?? false;
+                // the base material's own parameter defaults (names in the order of its value lists)
+                var cached = (json["CachedExpressionData"] ?? properties["CachedExpressionData"]) as JObject;
+                if (cached != null)
+                {
+                    var names = new List<List<string>>();
+                    foreach (var key in cached.Properties().Select(p => p.Name).Where(n => n.StartsWith("RuntimeEntries")).OrderBy(n => n.Length).ThenBy(n => n))
+                        names.Add(cached[key]?["ParameterInfoSet"]?.Select(p => p["Name"]?.ToString() ?? "").ToList() ?? []);
+                    if (names.Count > 1)
+                    {
+                        var scalarValues = cached["ScalarValues"] as JArray ?? [];
+                        for (var i = 0; i < Math.Min(names[0].Count, scalarValues.Count); i++) scalars[names[0][i]] ??= scalarValues[i];
+                        var vectorValues = cached["VectorValues"] as JArray ?? [];
+                        for (var i = 0; i < Math.Min(names[1].Count, vectorValues.Count); i++)
+                            vectors[names[1][i]] ??= new JArray(vectorValues[i]["R"], vectorValues[i]["G"], vectorValues[i]["B"], vectorValues[i]["A"]);
+                    }
+                }
+                foreach (var reference in baseMaterial.ReferencedTextures)
+                {
+                    if (reference is null || !reference.TryLoad(out UTexture2D texture)) continue;
+                    if (texture.Name.StartsWith("Debug", StringComparison.OrdinalIgnoreCase) || texture.Name.StartsWith("Default", StringComparison.OrdinalIgnoreCase) ||
+                        texture.GetPathName().StartsWith("/Engine/", StringComparison.OrdinalIgnoreCase)) continue;
+                    ExportHelpers.Save(texture);
+                    textures[texture.Name] ??= texture.GetPathName();
+                }
+                break;
+            }
+            if (current is not UMaterialInstance next || next.Parent == null || !next.Parent.TryLoad(out var parent) || parent is not UMaterialInterface parentMaterial) break;
+            current = parentMaterial;
+        }
+        result["Textures"] = textures;
+        result["Scalars"] = scalars;
+        result["Vectors"] = vectors;
+        return result;
+    }
+}

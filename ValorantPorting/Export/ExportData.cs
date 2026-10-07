@@ -16,6 +16,7 @@ public class ExportData
     public List<ExportPart> Parts = new();
     public string Type;
     public AgentGlow.Spec? Glow; // an agent's in-game glow (Reyna's heart, her ultimate's tattoos), rebuilt in Blender
+    public List<AgentEffects.Spawn>? Effects; // an agent's ability particle effects, rebuilt in Blender
 
     public static async Task<UObject> CreateUiData(UBlueprintGeneratedClass asset)
     {
@@ -54,6 +55,7 @@ public class ExportData
                     ExportHelpers.Character(data.Parts, asset, choices.Models);
                     AgentGlow.AddUltForm(data.Parts);
                     data.Glow = AgentGlow.For(data.Parts);
+                    data.Effects = AgentEffects.For(data.Parts);
                     break;
                 case EAssetType.Weapon:
                     ExportHelpers.Weapon(data.Parts, style, choices.WeaponLevel);

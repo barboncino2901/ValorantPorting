@@ -16,6 +16,7 @@ import math
 from .valorant_psk_psa_b5 import pskimport, psaimport
 from .valorant_shaders import rebuild_materials, add_default_vertex_colors, merge_duplicate_materials, find_material_info
 from . import agent_glow
+from . import agent_effects
 
 bl_info = {
     "name": "Valorant Porting",
@@ -2017,6 +2018,17 @@ def import_response(response, holder=None, use_selection=True):
                 Log.information(f"Glow added to {glowing} material(s), its controls on the armature")
         except Exception as e:
             Log.error(f"Could not add the agent's glow: {e}")
+    # an agent's ability particle effects (Neon's ultimate zaps and glows), on her bones, switched from her armature
+    if import_data.get("Effects"):
+        try:
+            rig = next((o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
+                        and o.name.upper().startswith("TP")), None)
+            made = agent_effects.apply(import_data["Effects"], rig, import_texture, attach_part_to_bone, new_collection)
+            if made:
+                bpy.app.timers.register(agent_effects.revalidate, first_interval=0.05)
+                Log.information(f"Effects added: {made} emitter(s), switched on from the armature")
+        except Exception as e:
+            Log.error(f"Could not add the agent's effects: {e} ({traceback.format_exc(limit=-1).strip().splitlines()[-2].strip()})")
     if main is not None and holder is not None:
         if import_type == "Weapon":
             attach_to_bone(main, holder, WEAPON_SOCKET_BONE, WEAPON_SOCKET_ROTATION, "hand")
