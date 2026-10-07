@@ -15,7 +15,7 @@ Clove ("Smonk"): her ultimate's ghost (her resurrection model) fading in, then h
 legs glowing with her C ("Glow: legs (C)").
 Neon ("Sprinter"): her suit lit when she sprints ("Glow: sprint (E)"); in her ultimate her suit, tattoo and the edges of
 her skin glow cyan with electricity, her hair blue to yellow ("Glow: ultimate"; after a Blender setup made for her).
-Jett ("Wushu"): her arms streaming wind ("Glow: arms (ult)") and a burst up them ("Burst: arms").
+Jett ("Wushu"): her arms streaming cyan wind in her ultimate ("Glow: arms (ult)").
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
@@ -947,7 +947,7 @@ def _build_jett_group(images, values):
 
     amount = math_node('MULTIPLY', arm, math_node('ADD', math_node('MULTIPLY', smoke, inputs.outputs["Loop"]), burst))
     glow = nodes.new("ShaderNodeEmission")
-    glow.inputs["Color"].default_value = (*_color(values.get("WindColor", "DDF6FF")), 1.0)
+    glow.inputs["Color"].default_value = (*_color(values.get("WindColor", "45E6F2")), 1.0)
     links.new(math_node('MULTIPLY', amount, float(values.get("WindStrength", 1.5))), glow.inputs["Strength"])
     add = nodes.new("ShaderNodeAddShader")
     links.new(inputs.outputs["Shader"], add.inputs[0])
@@ -988,8 +988,7 @@ AGENTS = {
                   ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit, tattoo and the edges of her skin glowing cyan with electricity, her hair blue to yellow")]),
     "wushu": dict(
         node="VP Jett Tattoos", build=_build_jett_group, materials="wushu_s0_tattoo",
-        controls=[("Glow: arms (ult)", "Loop", 0.0, "Jett's arms streaming wind, as while her ultimate is up"),
-                  ("Burst: arms", "Burst", 0.0, "A burst of wind running up Jett's arms (animate 0 to 1), as when she casts")]),
+        controls=[("Glow: arms (ult)", "Loop", 0.0, "Jett's arms streaming wind, as while her ultimate is up")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),

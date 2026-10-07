@@ -129,7 +129,7 @@ public static class AgentGlow
                 },
                 new Dictionary<string, object>
                 {
-                    ["WindColor"] = "DDF6FF", ["WindStrength"] = 1.5, ["ArmIslandU"] = 0.208, ["ArmIslandV"] = 0.2534
+                    ["WindColor"] = "45E6F2", ["WindStrength"] = 1.5, ["ArmIslandU"] = 0.208, ["ArmIslandV"] = 0.2534
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
