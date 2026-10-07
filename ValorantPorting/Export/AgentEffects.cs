@@ -19,7 +19,8 @@ namespace ValorantPorting.Export;
 // rebuilds them as particles on the agent's rig.
 public static class AgentEffects
 {
-    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters);
+    // Boost: how much brighter than the game's values it's drawn in Blender (the game adds bloom; some effects need it)
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f);
 
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
@@ -32,14 +33,14 @@ public static class AgentEffects
     private static readonly HashSet<string> Skipped = new(StringComparer.OrdinalIgnoreCase) { "Sprinter_X_Active_3P_Hair01" };
 
     // ability models with effects on their bones: model name -> (control, particle system, bones)
-    private static readonly Dictionary<string, (string Control, string System, string[] Bones)> Abilities = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, (string Control, string System, string[] Bones, float Boost)> Abilities = new(StringComparer.OrdinalIgnoreCase)
     {
         // Jett's Blade Storm: wind swirling around each floating knife (Ability_Wushu_X_Dagger_Production)
         ["ABTP_Wushu_S0_X_Skelmesh"] = ("FX: knives", "/Game/Characters/Wushu/S0/VFX/Ability_X/Wushu_X_3P_DaggerFloat",
-            ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"]),
+            ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"], 3f),
         // (the Abilities tab's animated set uses the 1st person rig, same bones)
         ["AB_Wushu_S0_X_Skelmesh"] = ("FX: knives", "/Game/Characters/Wushu/S0/VFX/Ability_X/Wushu_X_3P_DaggerFloat",
-            ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"])
+            ["Knife1", "Knife2", "Knife3", "Knife4", "Knife5"], 3f)
     };
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
@@ -55,7 +56,7 @@ public static class AgentEffects
                 var emitters = Emitters(system);
                 if (emitters.Count == 0) continue;
                 foreach (var bone in effect.Bones)
-                    spawns.Add(new Spawn(effect.Control, system.Name, bone, FVector.ZeroVector, FRotator.ZeroRotator, 0f, emitters));
+                    spawns.Add(new Spawn(effect.Control, system.Name, bone, FVector.ZeroVector, FRotator.ZeroRotator, 0f, emitters, effect.Boost));
             }
             catch (Exception)
             {

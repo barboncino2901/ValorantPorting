@@ -326,7 +326,7 @@ def _node_group():
     return group
 
 
-def _material(emitter, images, name):
+def _material(emitter, images, name, boost=1.0):
     """The emitter's look: its colour and alpha over life (the game's tables, as a ramp on the sprite's age), its
     texture (a flipbook played over the particle's life, coloured by the material's own colours when it has them),
     or a soft radial glow; added on top of what's behind (additive) or blended over it."""
@@ -483,7 +483,9 @@ def _material(emitter, images, name):
     glow = nodes.new("ShaderNodeEmission")
     links.new(tint.outputs[2], glow.inputs["Color"])
     opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False)
-    links.new(math_node('MULTIPLY', opacity, min(brightest, BRIGHTEST)), glow.inputs["Strength"])
+    links.new(math_node('MULTIPLY', opacity, min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
+    if boost > 1.0:
+        opacity = math_node('MULTIPLY', opacity, min(boost, 2.0))  # (and less see-through)
     see_through = nodes.new("ShaderNodeBsdfTransparent")
     if "Additive" in (spec.get("BlendMode") or ""):
         result = nodes.new("ShaderNodeAddShader")
@@ -582,7 +584,7 @@ def apply(effects, rig, load_image, attach, collection):
             obj = bpy.data.objects.new(name, _particle_mesh(name, particles))
             collection.objects.link(obj)
             obj.parent = anchor
-            material = _material(emitter, images, name)
+            material = _material(emitter, images, name, float(spawn.get("Boost") or 1.0))
             obj.data.materials.append(material)
             modifier = obj.modifiers.new("VP Particles", 'NODES')
             modifier.node_group = group.copy()
