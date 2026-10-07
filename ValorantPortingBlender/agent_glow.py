@@ -147,7 +147,8 @@ def _build_group(images, values):
     pulse = math_node('MULTIPLY_ADD', math_node('SINE', math_node('MULTIPLY', t, 2 * math.pi * float(values.get("HeartPulseSpeed", 0.4)))), 0.35)
     pulse.node.inputs[2].default_value = 0.65
     heart_on = math_node('MULTIPLY', inputs.outputs["Heart"], pulse)
-    amount = math_node('MULTIPLY', math_node('MULTIPLY', gem, heart_on), 10.0)
+    dismiss_in = inputs.outputs["Dismiss"]
+    amount = math_node('MULTIPLY', math_node('MULTIPLY', gem, math_node('ADD', heart_on, math_node('MULTIPLY', dismiss_in, 2.0))), 10.0)
 
     # the chest flare: the game's flare texture as a thin vertical streak over the heart (where on her UVs: the heart's
     # centre, the streak's width and height), brighter in the ultimate
@@ -155,7 +156,7 @@ def _build_group(images, values):
     fw, fh = float(values.get("FlareWidth", 0.03)), float(values.get("FlareHeight", 0.09))
     flare = texture("ChestFlare", (1 / fw, 1 / fh), location=(0.5 - cu / fw, 0.5 - cv / fh), clip=True)
     if flare is not None:
-        flare_on = math_node('ADD', heart_on, math_node('MULTIPLY', ult, 0.8))
+        flare_on = math_node('ADD', math_node('ADD', heart_on, math_node('MULTIPLY', ult, 0.8)), math_node('MULTIPLY', dismiss_in, 2.0))
         amount = math_node('ADD', amount, math_node('MULTIPLY', math_node('MULTIPLY', separate(flare.outputs[0])[0], flare_on), 12.0))
 
     # the eyes: iris and pupil (the alpha of the mask set, on her body's UVs); the ultimate lights them too
@@ -175,8 +176,9 @@ def _build_group(images, values):
         energy = texture("Energy", (tile, tile), (0.0, float(values.get("EnergyScrollV", -0.1))))
         lit = math_node('ADD', separate(energy.outputs[0])[0], 0.35) if energy else 1.0
         strength = 1.0 * float(values.get("UltTattooMultiply", 3.0))
+        tattoos_on = math_node('MAXIMUM', ult, math_node('MULTIPLY', dismiss_in, 1.5))
         amount = math_node('ADD', amount, math_node('MULTIPLY', math_node('MULTIPLY', separate(tattoo.outputs[0])[0], lit),
-                                                    math_node('MULTIPLY', ult, strength)))
+                                                    math_node('MULTIPLY', tattoos_on, strength)))
     # (no finger glow: the mask set's finger shapes are gradients for an effect of their own; as a glow they streak
     # along the fingers)
     total = mix_color('MULTIPLY', glow, math_node('MULTIPLY', amount, not_hair))
@@ -222,15 +224,15 @@ def _build_group(images, values):
     # hand and finger bones move her ("vp_hands", made on import from her skin weights)
     hands_attribute = nodes.new("ShaderNodeAttribute")
     hands_attribute.attribute_name = HANDS_ATTRIBUTE
-    hands = math_node('POWER', hands_attribute.outputs["Fac"], 1.5)
-    hands_on = math_node('MAXIMUM', ult, inputs.outputs["Dismiss"])
+    hands = hands_attribute.outputs["Fac"]
+    hands_on = inputs.outputs["Dismiss"]  # (not in her ult)
     hand_glow = nodes.new("ShaderNodeEmission")
     # (magenta; a soft rim lighter at the edges, as the in-game glow blooms)
     hand_rim = nodes.new("ShaderNodeLayerWeight")
     hand_rim.inputs["Blend"].default_value = 0.5
-    links.new(mix_color('MIX', _color(values.get("HandColor", "FF00FF")), _color(values.get("HandHighlight", "FF7AFF")),
+    links.new(mix_color('MIX', _color(values.get("HandColor", "E600FF")), _color(values.get("HandHighlight", "FF40FF")),
                         math_node('POWER', hand_rim.outputs["Facing"], 2.0)), hand_glow.inputs["Color"])
-    links.new(math_node('MULTIPLY', math_node('MULTIPLY', hands, hands_on), math_node('MULTIPLY', not_hair, 1.6)),
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', hands, hands_on), math_node('MULTIPLY', not_hair, 0.55)),
               hand_glow.inputs["Strength"])
     with_hands = nodes.new("ShaderNodeAddShader")
     links.new(add.outputs[0], with_hands.inputs[0])
@@ -249,14 +251,14 @@ def _build_group(images, values):
     drift = texture("Energy", (3.0, 3.0), (0.0, -0.1))
     drift_value = separate(drift.outputs[0])[0] if drift is not None else 0.5
     # (in game she reads pale and very see-through: the purple shows mostly at her outline)
-    ghost_color = mix_color('MIX', _color(values.get("DismissBaseColor", "B48CFF")), _color(values.get("DismissRimColor", "FF4DFF")),
-                            math_node('POWER', rim_amount, 1.5))
+    ghost_color = mix_color('MIX', _color(values.get("DismissBaseColor", "2A0E5E")), _color(values.get("DismissRimColor", "E01CFF")),
+                            math_node('POWER', rim_amount, 2.0))
     ghost_glow = nodes.new("ShaderNodeEmission")
     links.new(ghost_color, ghost_glow.inputs["Color"])
-    links.new(math_node('ADD', math_node('MULTIPLY', math_node('POWER', rim_amount, 2.0), 2.0),
-                        math_node('MULTIPLY', drift_value, 0.25)), ghost_glow.inputs["Strength"])
+    links.new(math_node('ADD', math_node('ADD', math_node('MULTIPLY', math_node('POWER', rim_amount, 3.0), 1.5), 0.12),
+                        math_node('MULTIPLY', drift_value, 0.15)), ghost_glow.inputs["Strength"])
     see_through = nodes.new("ShaderNodeBsdfTransparent")
-    ghost_opacity = math_node('ADD', 0.08, math_node('MULTIPLY', math_node('POWER', rim_amount, 1.5), 0.5), clamp=True)
+    ghost_opacity = math_node('ADD', 0.65, math_node('MULTIPLY', math_node('POWER', rim_amount, 1.5), 0.3), clamp=True)
     ghost = nodes.new("ShaderNodeMixShader")
     links.new(ghost_opacity, ghost.inputs[0])
     links.new(see_through.outputs[0], ghost.inputs[1])
@@ -1203,7 +1205,9 @@ def _mark_hands(obj):
               if g.name.split("_", 1)[-1].rstrip("0123456789") in HAND_BONES and g.name[:2] in ("L_", "R_")]
     if not groups or HANDS_ATTRIBUTE in obj.data.attributes:
         return
-    weights = [min(1.0, sum(e.weight for e in v.groups if e.group in groups)) for v in obj.data.vertices]
+    hand_only = {g.index for g in obj.vertex_groups if g.name in ("L_Hand", "R_Hand")}
+    weights = [min(1.0, sum(e.weight * (0.35 if e.group in hand_only else 1.0) for e in v.groups if e.group in groups))
+               for v in obj.data.vertices]
     obj.data.attributes.new(HANDS_ATTRIBUTE, 'FLOAT', 'POINT').data.foreach_set("value", weights)
 
 
