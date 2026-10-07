@@ -8,7 +8,7 @@ using ValorantPorting.AppUtils;
 namespace ValorantPorting.Export;
 
 // Glow some agents have in game but not in their base materials: Reyna's pulsing heart and her ultimate's tattoos,
-// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Neon's suit and Overdrive; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
+// eyes and hair; Iso's glowing outfit lines and hands; Chamber's gold tattoo; Waylay's glowing crystal tattoos; Clove's ultimate (ghost, then glowing) and legs; Jett's wind on her arms; Neon's suit and Overdrive; Veto's ultimate form fading in over him. The game swaps in effect materials for those (3P_Vampire_X_FX for Empress, ...);
 // their textures and values are sent with the agent, and the Blender add-on adds a glow layer to her materials, with
 // sliders (heart, ultimate) to animate. The values come from those effect materials; how they combine is rebuilt.
 public static class AgentGlow
@@ -117,6 +117,19 @@ public static class AgentGlow
                 new Dictionary<string, object>
                 {
                     ["ElectricColor"] = "2BD8FF", ["RimColor"] = "4FC8FF"
+                }),
+            // Jett: her arms' wind tattoos (her own material, TP_Wushu_S0_Tattoo: Loop_Anim while her ultimate is up,
+            // Burst_Anim as she casts): smoke streams and a burst of wisps on her bare arms (TP_Wushu_S0_Mask G)
+            ["Wushu"] = (
+                new Dictionary<string, string>
+                {
+                    ["Mask"] = "/Game/Characters/Wushu/S0/VFX/Textures/TP_Wushu_S0_Mask.TP_Wushu_S0_Mask",
+                    ["Smoke"] = "/Game/Characters/Wushu/S0/VFX/Textures/SmokeStream_9x2_TFX.SmokeStream_9x2_TFX",
+                    ["Burst"] = "/Game/Characters/Wushu/S0/VFX/Textures/Arm_Tattoo_Burst.Arm_Tattoo_Burst"
+                },
+                new Dictionary<string, object>
+                {
+                    ["WindColor"] = "DDF6FF", ["WindStrength"] = 1.5, ["ArmIslandU"] = 0.208, ["ArmIslandV"] = 0.2534
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's

@@ -15,6 +15,7 @@ Clove ("Smonk"): her ultimate's ghost (her resurrection model) fading in, then h
 legs glowing with her C ("Glow: legs (C)").
 Neon ("Sprinter"): her suit lit when she sprints ("Glow: sprint (E)"); in her ultimate her suit, tattoo and the edges of
 her skin glow cyan with electricity, her hair blue to yellow ("Glow: ultimate"; after a Blender setup made for her).
+Jett ("Wushu"): her arms streaming wind ("Glow: arms (ult)") and a burst up them ("Burst: arms").
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
@@ -873,6 +874,88 @@ def _build_neon_group(images, values):
     return group
 
 
+def _build_jett_group(images, values):
+    """Jett: her arms' wind tattoos (TP_Wushu_S0_Tattoo: "Loop_Anim" while her ultimate is up, "Burst_Anim" as she
+    casts). On her bare arms (TP_Wushu_S0_Mask G; one unwrapped arm, wrist to shoulder, shared by both): smoke streams
+    (SmokeStream_9x2_TFX, 18 frames played over time) rising from the wrist, and a burst of wisps
+    (Arm_Tattoo_Burst) running up the arm. How the game lays them on the arm isn't in its files: rebuilt by eye."""
+    name = "VP Jett Tattoos"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name in ("Loop", "Burst", "Time"):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def sample(role, u, v, extension='CLIP'):
+        combine = nodes.new("ShaderNodeCombineXYZ")
+        links.new(u, combine.inputs[0])
+        links.new(v, combine.inputs[1])
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = _image(images, role)
+        node.extension = extension
+        links.new(combine.outputs[0], node.inputs[0])
+        return node
+
+    uv = nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "UV_SINGLE"
+    split = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(uv.outputs[0], split.inputs[0])
+    mask = nodes.new("ShaderNodeTexImage")
+    mask.image = _image(images, "Mask")
+    links.new(uv.outputs[0], mask.inputs[0])
+    arms = nodes.new("ShaderNodeSeparateColor")
+    links.new(mask.outputs[0], arms.inputs[0])
+    arm = math_node('MULTIPLY', math_node('SUBTRACT', arms.outputs[1], 0.5), 2.0, clamp=True)  # (its grey elsewhere is not arm)
+
+    # the arm's own coordinates: around it (0..1) and along it (0 wrist .. 1 shoulder)
+    island_u, island_v = float(values.get("ArmIslandU", 0.208)), float(values.get("ArmIslandV", 0.2534))
+    around = math_node('DIVIDE', split.outputs[0], island_u)
+    along = math_node('DIVIDE', math_node('SUBTRACT', split.outputs[1], 1.0 - island_v), island_v)
+
+    # smoke streams: three around the arm, the flipbook's 18 frames (9 x 2) played at 15 per second
+    frame = math_node('FLOORED_MODULO', math_node('FLOOR', math_node('MULTIPLY', inputs.outputs["Time"], 15.0)), 18.0)
+    column = math_node('FLOORED_MODULO', frame, 9.0)
+    row = math_node('FLOOR', math_node('DIVIDE', frame, 9.0))
+    cell_u = math_node('DIVIDE', math_node('ADD', math_node('FRACT', math_node('MULTIPLY', around, 3.0)), column), 9.0)
+    cell_v = math_node('DIVIDE', math_node('ADD', math_node('MINIMUM', math_node('MAXIMUM', along, 0.0), 0.999), math_node('SUBTRACT', 1.0, row)), 2.0)
+    smoke = sample("Smoke", cell_u, cell_v).outputs["Alpha"]
+    # the burst: its wisps around the arm, a wave running from the wrist to the shoulder as it goes 0 -> 1, fading
+    burst_v = math_node('ADD', math_node('MULTIPLY', math_node('SUBTRACT', along, math_node('SUBTRACT', math_node('MULTIPLY', inputs.outputs["Burst"], 1.4), 0.4)), 0.5), 0.5)
+    wisps = sample("Burst", math_node('FRACT', around), burst_v).outputs["Alpha"]
+    wisps = math_node('MULTIPLY', wisps, math_node('MULTIPLY', math_node('GREATER_THAN', burst_v, 0.5), math_node('LESS_THAN', burst_v, 1.0)))
+    burst = math_node('MULTIPLY', wisps, math_node('MULTIPLY', math_node('SUBTRACT', 1.0, inputs.outputs["Burst"]),
+                                                   math_node('GREATER_THAN', inputs.outputs["Burst"], 0.0)))
+
+    amount = math_node('MULTIPLY', arm, math_node('ADD', math_node('MULTIPLY', smoke, inputs.outputs["Loop"]), burst))
+    glow = nodes.new("ShaderNodeEmission")
+    glow.inputs["Color"].default_value = (*_color(values.get("WindColor", "DDF6FF")), 1.0)
+    links.new(math_node('MULTIPLY', amount, float(values.get("WindStrength", 1.5))), glow.inputs["Strength"])
+    add = nodes.new("ShaderNodeAddShader")
+    links.new(inputs.outputs["Shader"], add.inputs[0])
+    links.new(glow.outputs[0], add.inputs[1])
+    links.new(add.outputs[0], output.inputs[0])
+    return group
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -903,6 +986,10 @@ AGENTS = {
         node="VP Neon Glow", build=_build_neon_group, materials="sprinter",
         controls=[("Glow: sprint (E)", "Sprint", 0.0, "Neon's suit lighting up blue, as when she sprints (her E)"),
                   ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit, tattoo and the edges of her skin glowing cyan with electricity, her hair blue to yellow")]),
+    "wushu": dict(
+        node="VP Jett Tattoos", build=_build_jett_group, materials="wushu_s0_tattoo",
+        controls=[("Glow: arms (ult)", "Loop", 0.0, "Jett's arms streaming wind, as while her ultimate is up"),
+                  ("Burst: arms", "Burst", 0.0, "A burst of wind running up Jett's arms (animate 0 to 1), as when she casts")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),

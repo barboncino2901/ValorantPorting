@@ -23,9 +23,12 @@ public static class AgentEffects
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Neon's Overdrive: zaps on her elbow, glows on her head, light in her hands
+        // Neon's Overdrive: zaps on her elbow and hands, light in her hands
         ["Sprinter"] = [("FX: ultimate", "/Game/Characters/Sprinter/S0/Ability_X/FXC_Sprinter_X_UltimateActive_Cosmetics")]
     };
+
+    // systems left out: they don't look like the game in Blender (Neon's head glow, which the game hides with depth)
+    private static readonly HashSet<string> Skipped = new(StringComparer.OrdinalIgnoreCase) { "Sprinter_X_Active_3P_Hair01" };
 
     public static List<Spawn>? For(IEnumerable<ExportPart> parts)
     {
@@ -42,7 +45,7 @@ public static class AgentEffects
                 foreach (var export in AppVM.CUE4ParseVM.Provider.LoadPackageObjects(container))
                 {
                     if (!export.ExportType.StartsWith("Comp_FXC_SpawnParticle", StringComparison.Ordinal)) continue;
-                    if (!export.TryGetValue(out UObject system, "EmitterTemplate3P")) continue;
+                    if (!export.TryGetValue(out UObject system, "EmitterTemplate3P") || Skipped.Contains(system.Name)) continue;
                     var emitters = Emitters(system);
                     if (emitters.Count == 0) continue;
                     spawns.Add(new Spawn(control, system.Name, export.GetOrDefault<FName>("AttachPoint3P").Text,
