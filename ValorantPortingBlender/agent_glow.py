@@ -198,6 +198,23 @@ def _build_group(images, values):
     add = nodes.new("ShaderNodeAddShader")
     links.new(mix.outputs[0], add.inputs[0])
     links.new(emission.outputs[0], add.inputs[1])
+    # her outline in the ultimate: cyan at the edge (3P_Vampire_X_FX: BaseHighlightB, Fresnel power 3), magenta just
+    # inside it (BaseHighlight)
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.5
+    edge = math_node('POWER', rim.outputs["Facing"], 6.0)
+    inner = math_node('SUBTRACT', math_node('POWER', rim.outputs["Facing"], 3.0), edge, clamp=True)
+    cyan = nodes.new("ShaderNodeEmission")
+    cyan.inputs["Color"].default_value = (*_color(values.get("UltRimColor", "00FFFF")), 1.0)
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', edge, ult), math_node('MULTIPLY', not_hair, 1.5)), cyan.inputs["Strength"])
+    magenta = nodes.new("ShaderNodeEmission")
+    magenta.inputs["Color"].default_value = (*_color(values.get("UltInnerColor", "CF00FF")), 1.0)
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', inner, ult), math_node('MULTIPLY', not_hair, 0.4)), magenta.inputs["Strength"])
+    for glow_shader in (cyan, magenta):
+        more = nodes.new("ShaderNodeAddShader")
+        links.new(add.outputs[0], more.inputs[0])
+        links.new(glow_shader.outputs[0], more.inputs[1])
+        add = more
     links.new(add.outputs[0], output.inputs[0])
     return group
 

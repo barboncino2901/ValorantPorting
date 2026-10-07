@@ -27,6 +27,11 @@ public static class AgentEffects
     {
         // Neon's Overdrive: zaps on her elbow and hands, light in her hands
         ["Sprinter"] = [("FX: ultimate", "/Game/Characters/Sprinter/S0/Ability_X/FXC_Sprinter_X_UltimateActive_Cosmetics")],
+        // Reyna: her ultimate (Empress: chest flare, wisps on her chest, head and shoulders, eye trail), its cast
+        // burst, and Dismiss (chest flare, eye trail)
+        ["Vampire"] = [("FX: ultimate", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_WorldPostProcess"),
+                       ("FX: ultimate cast", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_Cast"),
+                       ("FX: dismiss", "/Game/Characters/Vampire/S0/Ability_E/FXC_Vampire_E_Escape_Active_InvulnOnly")],
         // Phoenix: flames on his shoulders and elbows in his ultimate, embers on his shoulders while healing in his fire
         ["Phoenix"] = [("FX: ultimate", "/Game/Characters/Phoenix/S0/Ability_X/Production/FXC_Phoenix_X_Active_Production"),
                        ("FX: heal", "/Game/Characters/Phoenix/S0/Passive_Fire/Production/FXC_Phoenix_HealingFire_Production")]
@@ -51,7 +56,14 @@ public static class AgentEffects
     private static readonly Dictionary<string, (float Boost, float Scale, string? Tint)> EmitterTweaks = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Wushu_X_3P_DaggerFloat|GlowFlareLoop"] = (3f, 1.5f, null), // the glow at each knife's ring
-        ["ULT_LimbFlames|None"] = (2f, 1f, "FF8A2E") // Phoenix's flames on his shoulders and elbows (solar_flare_4x4: grey)
+        ["ULT_LimbFlames|None"] = (2f, 1f, "FF8A2E"), // Phoenix's flames on his shoulders and elbows (solar_flare_4x4: grey)
+        // Reyna: grey flipbooks her materials colour pink
+        // (her ult's big radianite scribbles and star sparkle don't look like the game in Blender: left out)
+        ["Vampire_X_3p_ChestFlare|radianite"] = (0f, 0f, null),
+        ["Vampire_E_3p_ChestFlare|radianite"] = (1.5f, 0.7f, "FF3FD2"),
+        ["Vampire_X_3p_ChestFlare|a"] = (0f, 0f, null),
+        ["Vampire_X_Wisp_Chest|None"] = (1f, 1f, "C23BFF"),
+        ["Vampire_X_Wisp_Head|None"] = (1f, 1f, "C23BFF")
     };
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
@@ -140,6 +152,7 @@ public static class AgentEffects
                 description["Material"] = Material(material);
             if (EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}", out var tweak))
             {
+                if (tweak.Boost <= 0f) continue; // left out
                 description["Boost"] = tweak.Boost;
                 description["Scale"] = tweak.Scale;
                 if (tweak.Tint != null) description["Tint"] = tweak.Tint;

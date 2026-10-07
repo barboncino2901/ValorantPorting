@@ -111,6 +111,7 @@ def schedule(emitter, seed):
     acceleration = _module(emitter, "Acceleration")
     drag = _module(emitter, "AccelerationDrag")
     sphere = _module(emitter, "LocationPrimitiveSphere")
+    mesh_rotation = _module(emitter, "MeshRotation")
     particles = []
     for birth in births:
         life = sample((lifetime or {}).get("Lifetime"), rng=rng)[0] if lifetime else 1.0
@@ -124,7 +125,9 @@ def schedule(emitter, seed):
             velocity=_vector(sample((velocity or {}).get("StartVelocity"), rng=rng, size=3)) if velocity else (0.0, 0.0, 0.0),
             acceleration=_vector(sample((acceleration or {}).get("Acceleration"), rng=rng, size=3)) if acceleration else (0.0, 0.0, 0.0),
             drag=sample((drag or {}).get("DragCoefficientRaw") or (drag or {}).get("DragCoefficient"), rng=rng)[0] if drag else 0.0,
-            seed=rng.random()))
+            seed=rng.random(),
+            mesh_rotation=(lambda r: (r[0] * 2 * math.pi, -r[1] * 2 * math.pi, -r[2] * 2 * math.pi))(
+                sample(mesh_rotation.get("StartRotation"), rng=rng, size=3)) if mesh_rotation else (0.0, 0.0, 0.0)))
         if sphere:
             # somewhere in a sphere around the emitter (and moving out of it, if the module says so)
             radius = sample(sphere.get("StartRadius"), rng=rng)[0] * UNIT
@@ -179,7 +182,7 @@ def _particle_mesh(name, particles):
     for p in particles:  # (width, height) -> a vector
         p["scale"] = (p["size"][0], p["size"][1], 1.0)
     for attribute, kind in (("vp_birth", 'FLOAT'), ("vp_life", 'FLOAT'), ("vp_scale", 'FLOAT_VECTOR'), ("vp_rotation", 'FLOAT'),
-                            ("vp_seed", 'FLOAT'), ("vp_velocity", 'FLOAT_VECTOR'), ("vp_acceleration", 'FLOAT_VECTOR'), ("vp_drag", 'FLOAT')):
+                            ("vp_seed", 'FLOAT'), ("vp_velocity", 'FLOAT_VECTOR'), ("vp_acceleration", 'FLOAT_VECTOR'), ("vp_drag", 'FLOAT'), ("vp_mesh_rotation", 'FLOAT_VECTOR')):
         data = mesh.attributes.new(attribute, kind, 'POINT').data
         key = attribute[3:]
         if kind == 'FLOAT':
@@ -241,11 +244,20 @@ def _node_group():
         return node.outputs["Vector"] if op != 'LENGTH' else node.outputs["Value"]
 
     # the time within the cycle (the second half of what was made, so particles born before it are there too)
-    time = math_node('ADD', CYCLE, math_node('FLOORED_MODULO', values["Time"], CYCLE))
+    looped = math_node('ADD', CYCLE, math_node('FLOORED_MODULO', values["Time"], CYCLE))
+    loop = nodes.new("ShaderNodeValue")
+    loop.name = loop.label = "VP Loop"  # 0: a one-shot emitter (played once from its start)
+    loop.outputs[0].default_value = 1.0
+    timing = nodes.new("GeometryNodeSwitch")
+    timing.input_type = 'FLOAT'
+    links.new(math_node('GREATER_THAN', loop.outputs[0], 0.5), timing.inputs["Switch"])
+    links.new(values["Time"], timing.inputs["False"])
+    links.new(looped, timing.inputs["True"])
+    time = timing.outputs[0]
     age = math_node('SUBTRACT', time, attribute("vp_birth"))
     life = attribute("vp_life")
     alive = math_node('MULTIPLY', math_node('MULTIPLY', math_node('GREATER_THAN', age, 0.0), math_node('LESS_THAN', age, life)),
-                      math_node('GREATER_THAN', values["Active"], 0.5))
+                      math_node('MULTIPLY', math_node('GREATER_THAN', values["Active"], 0.5), math_node('GREATER_THAN', values["Time"], -0.0001)))
     delete = nodes.new("GeometryNodeDeleteGeometry")
     delete.domain = 'POINT'
     links.new(inputs.outputs["Geometry"], delete.inputs["Geometry"])
@@ -313,9 +325,31 @@ def _node_group():
     store_uv.inputs["Name"].default_value = "vp_uv"
     links.new(card.outputs["Mesh"], store_uv.inputs["Geometry"])
     links.new(card.outputs["UV Map"], store_uv.inputs["Value"])
+    # (or the emitter's mesh: mesh particles; object and UV map name set per emitter)
+    mesh_info = nodes.new("GeometryNodeObjectInfo")
+    mesh_info.name = "VP Mesh"
+    mesh_info.transform_space = 'ORIGINAL'
+    mesh_uv = nodes.new("GeometryNodeInputNamedAttribute")
+    mesh_uv.name = "VP Mesh UV"
+    mesh_uv.data_type = 'FLOAT_VECTOR'
+    mesh_uv.inputs["Name"].default_value = "UVMap"
+    store_mesh_uv = nodes.new("GeometryNodeStoreNamedAttribute")
+    store_mesh_uv.data_type = 'FLOAT2'
+    store_mesh_uv.domain = 'CORNER'
+    store_mesh_uv.inputs["Name"].default_value = "vp_uv"
+    links.new(mesh_info.outputs["Geometry"], store_mesh_uv.inputs["Geometry"])
+    links.new(mesh_uv.outputs["Attribute"], store_mesh_uv.inputs["Value"])
+    use_mesh = nodes.new("ShaderNodeValue")
+    use_mesh.name = use_mesh.label = "VP Use Mesh"
+    use_mesh.outputs[0].default_value = 0.0
+    shape = nodes.new("GeometryNodeSwitch")
+    shape.input_type = 'GEOMETRY'
+    links.new(math_node('GREATER_THAN', use_mesh.outputs[0], 0.5), shape.inputs["Switch"])
+    links.new(store_uv.outputs[0], shape.inputs["False"])
+    links.new(store_mesh_uv.outputs[0], shape.inputs["True"])
     set_material = nodes.new("GeometryNodeSetMaterial")
     set_material.name = "VP Material"  # set per emitter (each has its own copy of this group)
-    links.new(store_uv.outputs[0], set_material.inputs["Geometry"])
+    links.new(shape.outputs[0], set_material.inputs["Geometry"])
 
     facing = nodes.new("FunctionNodeAlignRotationToVector")
     facing.axis = 'Z'
@@ -363,10 +397,43 @@ def _node_group():
     links.new(attribute("vp_seed"), store_seed.inputs["Value"])
     links.new(store_seed.outputs[0], instance.inputs["Points"])
     links.new(set_material.outputs[0], instance.inputs["Instance"])
-    links.new(turned.outputs[0], instance.inputs["Rotation"])
+    fixed = nodes.new("ShaderNodeValue")
+    fixed.name = fixed.label = "VP Mesh Fixed"  # 1: a mesh not turned to the camera (its own start rotation)
+    fixed.outputs[0].default_value = 0.0
+    own_rotation = nodes.new("FunctionNodeEulerToRotation")
+    links.new(attribute("vp_mesh_rotation", 'FLOAT_VECTOR'), own_rotation.inputs[0])
+    orient = nodes.new("GeometryNodeSwitch")
+    orient.input_type = 'ROTATION'
+    links.new(math_node('GREATER_THAN', fixed.outputs[0], 0.5), orient.inputs["Switch"])
+    links.new(turned.outputs[0], orient.inputs["False"])
+    links.new(own_rotation.outputs[0], orient.inputs["True"])
+    links.new(orient.outputs[0], instance.inputs["Rotation"])
     links.new(scale, instance.inputs["Scale"])
     links.new(instance.outputs[0], output.inputs[0])
     return group
+
+
+_alpha_cache = {}
+
+
+def _has_alpha(image):
+    """Whether an image's alpha holds a shape (else its brightness does: smoke, wisps)."""
+    if image is None:
+        return False
+    if image.name in _alpha_cache:
+        return _alpha_cache[image.name]
+    found = False
+    try:
+        if image.channels == 4 and image.size[0] > 0:
+            import numpy
+            pixels = numpy.empty(image.size[0] * image.size[1] * 4, dtype=numpy.float32)
+            image.pixels.foreach_get(pixels)
+            alpha = pixels[3::4]
+            found = bool(alpha.min() < 0.9)
+    except Exception:
+        found = True
+    _alpha_cache[image.name] = found
+    return found
 
 
 def _material(emitter, images, name, boost=1.0):
@@ -495,9 +562,11 @@ def _material(emitter, images, name, boost=1.0):
         texture.image = image
         texture.extension = 'CLIP'
         links.new(uv, texture.inputs[0])
-        mask = texture.outputs["Alpha"]
         channels = nodes.new("ShaderNodeSeparateColor")
         links.new(texture.outputs["Color"], channels.inputs[0])
+        # its shape: the alpha, or (a texture without one) its brightness
+        # (its dark background, often a dark grey, left out)
+        mask = texture.outputs["Alpha"] if _has_alpha(image) else             math_node('MULTIPLY', math_node('SUBTRACT', channels.outputs[0], 0.25), 1.333, clamp=True)
         shades = [vectors.get(k) for k in ("Color0_Shadow", "Color0_Mid", "Color0_Highlight")]
         if all(shades):
             # the material's own colours from shadow to highlight, by the texture's brightness
@@ -570,36 +639,49 @@ _pending = []
 
 
 def revalidate():
-    """Blender's evaluated copy of the armature doesn't have its new controls until the import is over; drivers that
-    read them before that are marked invalid. Re-checks them (as a timer: once)."""
-    while _pending:
-        rig, curve = _pending.pop()
+    """Connects the effects to their controls once the import is over: Blender's evaluated copy of the armature
+    doesn't have its new controls until then, and drivers made before that are marked invalid (and stay so).
+    (As a timer: runs once.)"""
+    rigs = {id(rig): rig for rig, *_ in _pending}
+    for rig in rigs.values():
         try:
             rig.update_tag()
-            curve.driver.is_valid = True
+        except ReferenceError:
+            pass
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
+    while _pending:
+        rig, target, path, variables, expression = _pending.pop(0)
+        try:
+            curve = target.driver_add(path)
+            driver = curve.driver
+            driver.type = 'SCRIPTED'
+            for name, prop in variables:
+                var = driver.variables.new()
+                var.name = name
+                var.type = 'SINGLE_PROP'
+                var.targets[0].id_type = 'OBJECT'
+                var.targets[0].id = rig
+                var.targets[0].data_path = f'["{prop}"]'
+            driver.expression = expression
+            driver.is_valid = True
         except ReferenceError:
             pass
     return None
 
 
-def _drive(target, path, armature, prop, expression="value"):
-    curve = target.driver_add(path)
-    driver = curve.driver
-    driver.type = 'SCRIPTED'
-    var = driver.variables.new()
-    var.name = "value"
-    var.type = 'SINGLE_PROP'
-    var.targets[0].id_type = 'OBJECT'
-    var.targets[0].id = armature
-    var.targets[0].data_path = f'["{prop}"]'
-    driver.expression = expression
-    _pending.append((armature, curve))
-    return curve
+def _drive(target, path, armature, prop, expression="value", variables=None):
+    """A driver from the armature's control, made once the import is over (see revalidate)."""
+    _pending.append((armature, target, path, variables or [("value", prop)], expression))
 
 
-def apply(effects, rig, load_image, attach, collection):
+def apply(effects, rig, load_image, attach, collection, load_mesh=None):
     """effects: what the app sent (spawns); rig: the agent's armature; load_image(game path) -> image;
-    attach(obj, rig, {"Bone", "Location", "Rotation"}): hangs an object on a bone with an Unreal offset."""
+    attach(obj, rig, {"Bone", "Location", "Rotation"}): hangs an object on a bone with an Unreal offset;
+    load_mesh(game path) -> object (mesh particles' meshes)."""
+    meshes = {}
     if not effects or rig is None:
         return 0
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
@@ -615,6 +697,11 @@ def apply(effects, rig, load_image, attach, collection):
             rig[control] = 0.0
             rig.id_properties_ui(control).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
                                                  description="The agent's effect particles, as in game (1: on)")
+        start = control + " start"
+        if start not in rig:
+            # the frame the effect starts at (one-shot bursts play from there; looping ones run from there)
+            rig[start] = 1
+            rig.id_properties_ui(start).update(description="The frame this effect starts at (one-shot bursts, like a cast, play from here)")
         anchor = bpy.data.objects.new(f"VP FX {spawn.get('System')} ({socket})", None)
         anchor.empty_display_size = 0.05
         collection.objects.link(anchor)
@@ -644,6 +731,25 @@ def apply(effects, rig, load_image, attach, collection):
                         images[path] = None
             # the same particles every time (Python's hash() changes between runs)
             particles = schedule(emitter, seed=zlib.crc32(f"{spawn.get('System')}|{socket}|{emitter.get('Name')}|{number}".encode()))
+            mesh_object = None
+            if emitter.get("Mesh") and load_mesh is not None:
+                if emitter["Mesh"] not in meshes:
+                    try:
+                        meshes[emitter["Mesh"]] = load_mesh(emitter["Mesh"])
+                        if meshes[emitter["Mesh"]] is not None:
+                            source = meshes[emitter["Mesh"]]
+                            source.hide_viewport = source.hide_render = True
+                            source.name = "VP FX mesh " + source.name
+                            for users in list(source.users_collection):
+                                users.objects.unlink(source)
+                            collection.objects.link(source)
+                    except Exception:
+                        meshes[emitter["Mesh"]] = None
+                mesh_object = meshes.get(emitter["Mesh"])
+                if mesh_object is not None:
+                    # a mesh's size is a scale of the mesh (not cm)
+                    for particle in particles:
+                        particle["size"] = (particle["size"][0] / UNIT, particle["size"][1] / UNIT)
             grow = float(emitter.get("Scale") or 1.0)
             for particle in particles:
                 particle["size"] = (particle["size"][0] * grow, particle["size"][1] * grow)
@@ -677,11 +783,22 @@ def apply(effects, rig, load_image, attach, collection):
             if "PSA_Velocity" in str((_module(emitter, "Required") or {}).get("ScreenAlignment", "")):
                 own.nodes["VP Axis Lock"].outputs[0].default_value = 1.0
                 own.nodes["VP Velocity Aligned"].outputs[0].default_value = 1.0
+            if mesh_object is not None:
+                own.nodes["VP Mesh"].inputs["Object"].default_value = mesh_object
+                if mesh_object.data.uv_layers:
+                    own.nodes["VP Mesh UV"].inputs["Name"].default_value = mesh_object.data.uv_layers[0].name
+                own.nodes["VP Use Mesh"].outputs[0].default_value = 1.0
+                type_data = _module(emitter, "TypeDataMesh") or {}
+                if not type_data.get("bCameraFacing"):
+                    own.nodes["VP Mesh Fixed"].outputs[0].default_value = 1.0
+            loops = int((_module(emitter, "Required") or {}).get("EmitterLoops") or 0)
+            if loops > 0:
+                own.nodes["VP Loop"].outputs[0].default_value = 0.0
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
             # seconds since the effect started (its delay), and on/off from the armature
-            curve = own.driver_add('nodes["VP Time"].outputs[0].default_value')
-            curve.driver.expression = f"frame / {fps:g} - {float(spawn.get('Delay') or 0.0):g}"
+            _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, start,
+                   f"(frame - start) / {fps:g} - {float(spawn.get('Delay') or 0.0):g}", variables=[("start", start)])
             _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control)
             made += 1
     rig.update_tag()

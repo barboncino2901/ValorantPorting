@@ -2041,7 +2041,8 @@ def import_response(response, holder=None, use_selection=True):
             rigs = [o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
                     and [b for b in sockets if b in o.data.bones]]
             rig = next((o for o in rigs if o.name.upper().startswith("TP")), rigs[0] if rigs else None)
-            made = agent_effects.apply(import_data["Effects"], rig, import_texture, attach_part_to_bone, new_collection)
+            made = agent_effects.apply(import_data["Effects"], rig, import_texture, attach_part_to_bone, new_collection,
+                                       load_mesh=import_mesh)
             if made:
                 bpy.app.timers.register(agent_effects.revalidate, first_interval=0.05)
                 Log.information(f"Effects added: {made} emitter(s), switched on from the armature")
