@@ -102,6 +102,11 @@ def schedule(emitter, seed):
     if loops and births:
         # a one-shot emitter (a glow that stays): shown the whole time
         pass
+    receiver = _module(emitter, "EventReceiverSpawn")
+    if receiver and not births:
+        # spawned by another emitter's event (a loop that follows its start, as that one dies):
+        # here simply there, for as long as the effect is on
+        births = [0.0] * max(int(round(sample(receiver.get("SpawnCount"))[0])), 1)
 
     lifetime = _module(emitter, "Lifetime")
     size = _module(emitter, "Size")
@@ -114,7 +119,7 @@ def schedule(emitter, seed):
     mesh_rotation = _module(emitter, "MeshRotation")
     particles = []
     for birth in births:
-        life = sample((lifetime or {}).get("Lifetime"), rng=rng)[0] if lifetime else 1.0
+        life = sample((lifetime or {}).get("Lifetime"), rng=rng)[0] if lifetime else (0.0 if receiver else 1.0)
         forever = life <= 0.0
         particles.append(dict(
             birth=-1.0 if forever else birth,
@@ -522,8 +527,9 @@ def _material(emitter, images, name, boost=1.0):
 
     textures = spec.get("Textures") or {}
     # its sprite: the first texture that isn't a normal map (Reyna's ult embers list a sphere normal first)
-    texture_path = next((path for key, path in textures.items() if "normal" not in (key + path).lower()),
-                        next(iter(textures.values()), None))
+    # (and not a colour gradient when it has a shape texture too: KAY/O's sparks list their gradient first)
+    shapes = [path for key, path in textures.items() if "normal" not in (key + path).lower()]
+    texture_path = next((path for path in shapes if "gradient" not in path.lower()), next(iter(shapes), next(iter(textures.values()), None)))
     image = images.get(texture_path) if texture_path else None
     colour = None
     # smoke (Reyna's ult wisps: Vampire_Wisp_Smoke_B): the game shapes it with a flow map in its shader; here a soft
@@ -752,9 +758,11 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
         control = spawn.get("Effect") or "FX"
         for emitter in spawn.get("Emitters") or []:
             loops = int((_module(emitter, "Required") or {}).get("EmitterLoops") or 0)
-            one_shot[control] = one_shot.get(control, True) and loops > 0
+            particles = schedule(emitter, seed=0) if loops > 0 else []
+            # (one whose particles stay, held as long as the effect is on: an on/off effect)
+            stays = any(p["life"] >= 1e8 for p in particles)
+            one_shot[control] = one_shot.get(control, True) and loops > 0 and not stays
             if loops > 0:
-                particles = schedule(emitter, seed=0)
                 end = max((p["birth"] + min(p["life"], 10.0) for p in particles), default=0.0)
                 lengths[control] = max(lengths.get(control, 0.0), float(spawn.get("Delay") or 0.0) + end)
     if not effects or rig is None:

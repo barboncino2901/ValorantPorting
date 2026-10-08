@@ -33,6 +33,12 @@ public static class AgentEffects
         // (her Dismiss is a material: rebuilt as a shader, "Glow: dismiss")
         ["Vampire"] = [("FX: ultimate", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_WorldPostProcess"),
                        ("FX: ultimate cast", "/Game/Characters/Vampire/S0/Ability_X/FXC_Vampire_X_Frenzy_Cast")],
+        // KAY/O: the nanogel on his elbows while he holds an ability (each its own colour), and in his ultimate with
+        // sparkles
+        ["Grenadier"] = [("FX: flash (Q)", "/Game/Characters/Grenadier/S0/Ability_4/FXC_Grenadier_FlashEquip_MaterialSwap"),
+                         ("FX: frag (C)", "/Game/Characters/Grenadier/S0/Ability_Q/FXC_Grenadier_StickyEquip_MaterialSwap"),
+                         ("FX: knife (E)", "/Game/Characters/Grenadier/S0/Ability_E/FXC_Grenadier_E_Equip_MaterialSwap"),
+                         ("FX: ultimate", "/Game/Characters/Grenadier/S0/Ability_X/FXC_Grenadier_X_Empowered")],
         // Phoenix: flames on his shoulders and elbows in his ultimate, embers on his shoulders while healing in his fire
         ["Phoenix"] = [("FX: ultimate", "/Game/Characters/Phoenix/S0/Ability_X/Production/FXC_Phoenix_X_Active_Production"),
                        ("FX: heal", "/Game/Characters/Phoenix/S0/Passive_Fire/Production/FXC_Phoenix_HealingFire_Production")]
@@ -54,7 +60,9 @@ public static class AgentEffects
     };
 
     // systems left out: they don't look like the game in Blender (Neon's head glow, which the game hides with depth)
-    private static readonly HashSet<string> Skipped = new(StringComparer.OrdinalIgnoreCase) { "Sprinter_X_Active_3P_Hair01" };
+    private static readonly HashSet<string> Skipped = new(StringComparer.OrdinalIgnoreCase) { "Sprinter_X_Active_3P_Hair01",
+        // (KAY/O's frag gel on the grenade in his hand: on his weapon socket, which isn't at his hand in Blender)
+        "ps_nanoGel_02" };
 
     // ability models with effects on their bones: model name -> (control, particle system, bones)
     private static readonly Dictionary<string, (string Control, string System, string[] Bones, float Boost)> Abilities = new(StringComparer.OrdinalIgnoreCase)
@@ -84,7 +92,16 @@ public static class AgentEffects
         ["Vampire_X_Wisp_Shoulder|None"] = (1f, 1.3f, "2A1838"),
         // her cast's flat background glow and goo cylinder draw as grey rectangles / a white streak in Blender
         ["Vampire_X_Intro|GlowBackground"] = (0f, 0f, null),
-        ["Vampire_X_Intro|None|Vampire_X_Goo_Inst"] = (0f, 0f, null)
+        ["Vampire_X_Intro|None|Vampire_X_Goo_Inst"] = (0f, 0f, null),
+        // KAY/O: his sparks (m_lightning_damage colours a grey flipbook with a gradient): his frag blue, his flash
+        // lime, his ultimate violet
+        ["ps_C_equipElements_3P|None"] = (3f, 1f, "5A8CFF"),
+        ["ps_C_equipElements_3P|None|mi_lightning_damage_08"] = (0f, 0f, null), // (a filled blob in Blender)
+        ["ps_trail_equip_3P|None"] = (3f, 1f, "B6FF3A"),
+        ["ps_nanogel_R_3P|EtherBurst_Right"] = (3f, 1.2f, "B48CFF"),
+        ["ps_nanogel_L_3P|EtherBurst_Right"] = (3f, 1.2f, "B48CFF"),
+        ["ps_sparkles|Glow"] = (3f, 1.5f, "C8A8FF"),
+        ["ps_sparkles1|Glow"] = (3f, 1.5f, "C8A8FF")
     };
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
@@ -139,6 +156,8 @@ public static class AgentEffects
                 foreach (var export in AppVM.CUE4ParseVM.Provider.LoadPackageObjects(container))
                 {
                     if (!export.ExportType.StartsWith("Comp_FXC_SpawnParticle", StringComparison.Ordinal)) continue;
+                    // (on the held ability model, not on the agent)
+                    if (export.ExportType.Contains("Equippable", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!export.TryGetValue(out UObject system, "EmitterTemplate3P") || Skipped.Contains(system.Name)) continue;
                     var emitters = Emitters(system);
                     if (emitters.Count == 0) continue;
@@ -186,6 +205,8 @@ public static class AgentEffects
             if (lod.TryGetValue(out UObject required, "RequiredModule") && required.TryGetValue(out UMaterialInterface material, "Material"))
                 description["Material"] = Material(material);
             var materialName = description["Material"]?["Name"]?.ToString() ?? "";
+            // KAY/O's nanogel: its shards are pushed out of his forearm by its shader (flat panes in Blender)
+            if ((description["Material"]?["BaseMaterial"]?.ToString() ?? "").StartsWith("m_nanogel", StringComparison.OrdinalIgnoreCase)) continue;
             if (EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}|{materialName}", out var tweak) ||
                 EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}", out tweak))
             {
