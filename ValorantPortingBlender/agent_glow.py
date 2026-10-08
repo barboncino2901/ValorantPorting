@@ -63,7 +63,7 @@ def _build_group(images, values):
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
     face.new_socket("MRAE", in_out='INPUT', socket_type='NodeSocketColor')
     face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor')
-    for name, default in (("Heart", 1.0), ("Eyes", 0.0), ("Ultimate", 0.0), ("Time", 0.0), ("Hair", 0.0), ("Dismiss", 0.0)):
+    for name, default in (("Heart", 1.0), ("Eyes", 0.0), ("Ultimate", 0.0), ("Time", 0.0), ("Hair", 0.0), ("Dismiss", 0.0), ("Tattoos", 0.0)):
         socket = face.new_socket(name, in_out='INPUT', socket_type='NodeSocketFloat')
         socket.default_value = default
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
@@ -176,7 +176,7 @@ def _build_group(images, values):
         energy = texture("Energy", (tile, tile), (0.0, float(values.get("EnergyScrollV", -0.1))))
         lit = math_node('ADD', separate(energy.outputs[0])[0], 0.35) if energy else 1.0
         strength = 1.0 * float(values.get("UltTattooMultiply", 3.0))
-        tattoos_on = math_node('MAXIMUM', ult, math_node('MULTIPLY', dismiss_in, 1.5))
+        tattoos_on = math_node('MAXIMUM', math_node('MAXIMUM', ult, inputs.outputs["Tattoos"]), math_node('MULTIPLY', dismiss_in, 1.5))
         amount = math_node('ADD', amount, math_node('MULTIPLY', math_node('MULTIPLY', separate(tattoo.outputs[0])[0], lit),
                                                     math_node('MULTIPLY', tattoos_on, strength)))
     # (no finger glow: the mask set's finger shapes are gradients for an effect of their own; as a glow they streak
@@ -1139,7 +1139,8 @@ AGENTS = {
         node=GROUP, build=_build_group, materials="vampire", hands=True,
         controls=[(HEART, "Heart", 1.0, CONTROLS[HEART][1]), (EYES, "Eyes", 0.0, CONTROLS[EYES][1]),
                   (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1]),
-                  ("Glow: dismiss", "Dismiss", 0.0, "Reyna's Dismiss: she turns see-through purple with a glowing magenta outline")]),
+                  ("Glow: dismiss", "Dismiss", 0.0, "Reyna's Dismiss: she turns see-through purple with a glowing magenta outline"),
+                  ("Glow: tattoos", "Tattoos", 0.0, "Reyna's arm tattoos glowing on their own (1 on, 0 off), without her ultimate or Dismiss")]),
     "sequoia": dict(
         node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip=("hair",),
         controls=[("Glow: outfit", "Outfit", 0.0, "Iso's outfit lines glowing"),

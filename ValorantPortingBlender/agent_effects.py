@@ -520,10 +520,38 @@ def _material(emitter, images, name, boost=1.0):
         uv = combine.outputs[0]
 
     textures = spec.get("Textures") or {}
-    texture_path = next(iter(textures.values()), None)
+    # its sprite: the first texture that isn't a normal map (Reyna's ult embers list a sphere normal first)
+    texture_path = next((path for key, path in textures.items() if "normal" not in (key + path).lower()),
+                        next(iter(textures.values()), None))
     image = images.get(texture_path) if texture_path else None
     colour = None
-    if "Emissive_Base" in textures or "Alpha_Base" in textures:
+    # smoke (Reyna's ult wisps: Vampire_Wisp_Smoke_B): the game shapes it with a flow map in its shader; here a soft
+    # round puff of its noise texture, drifting up over the puff's life, and dark
+    noise_path = next((path for path in textures.values() if "NoiseDissolve" in path and images.get(path) is not None), None)
+    smoke = "Smoke" in (spec.get("BaseMaterial") or "") and noise_path is not None
+    if smoke:
+        centre = nodes.new("ShaderNodeVectorMath")
+        centre.operation = 'DISTANCE'
+        links.new(uv, centre.inputs[0])
+        centre.inputs[1].default_value = (0.5, 0.5, 0.0)
+        puff = math_node('POWER', math_node('SUBTRACT', 1.0, math_node('DIVIDE', centre.outputs["Value"], 0.5), clamp=True), 1.5)
+        random = instancer("vp_random").outputs["Fac"]
+        shift = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', random, 7.31), shift.inputs[0])
+        links.new(math_node('SUBTRACT', math_node('MULTIPLY', random, 3.17), math_node('MULTIPLY', age, 0.6)), shift.inputs[1])
+        moved = nodes.new("ShaderNodeVectorMath")
+        moved.operation = 'MULTIPLY_ADD'
+        links.new(uv, moved.inputs[0])
+        moved.inputs[1].default_value = (1.5, 1.5, 1.0)
+        links.new(shift.outputs[0], moved.inputs[2])
+        noise = nodes.new("ShaderNodeTexImage")
+        noise.image = images[noise_path]
+        links.new(moved.outputs[0], noise.inputs[0])
+        channels = nodes.new("ShaderNodeSeparateColor")
+        links.new(noise.outputs["Color"], channels.inputs[0])
+        wisps = math_node('MULTIPLY', math_node('SUBTRACT', channels.outputs[0], 0.15), 1.6, clamp=True)
+        mask = math_node('MULTIPLY', math_node('MULTIPLY', puff, wisps), float(emitter.get("Opacity") or 1.0))
+    elif "Emissive_Base" in textures or "Alpha_Base" in textures:
         # the game's generic effect material (0_GenericA01_MAT): a colour texture and an alpha texture, each raised to
         # a power, scaled and turned
         def generic(role, power, multiply, turn):
@@ -617,7 +645,8 @@ def _material(emitter, images, name, boost=1.0):
     glow = nodes.new("ShaderNodeEmission")
     links.new(tint.outputs[2], glow.inputs["Color"])
     opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False)
-    links.new(math_node('MULTIPLY', opacity, min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
+    # (smoke: barely lit, it darkens what's behind it)
+    links.new(math_node('MULTIPLY', opacity, 0.04 if smoke else min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
     if boost > 1.0:
         opacity = math_node('MULTIPLY', opacity, min(boost, 2.0))  # (and less see-through)
     see_through = nodes.new("ShaderNodeBsdfTransparent")
