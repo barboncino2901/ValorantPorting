@@ -64,7 +64,7 @@ public static class AgentEffects
         ["Vampire_X_3p_ChestFlare|a"] = (0f, 0f, null),
         // her ult's wisps: faint dark smoke off her body (rebuilt as smoke puffs in Blender)
         ["Vampire_X_Wisp_Chest|None"] = (1f, 1.3f, "2A1838"),
-        ["Vampire_X_Wisp_Head|None"] = (1f, 1.3f, "2A1838"),
+        ["Vampire_X_Wisp_Head|None"] = (0f, 0f, null), // (not over her head)
         ["Vampire_X_Wisp_Shoulder|None"] = (1f, 1.3f, "2A1838"),
         // her cast's flat background glow and goo cylinder draw as grey rectangles / a white streak in Blender
         ["Vampire_X_Intro|GlowBackground"] = (0f, 0f, null),
