@@ -56,6 +56,14 @@ public static class AgentEffects
             ("Face: frag (C)", "/Game/Characters/Grenadier/S0/VFX/ps_C_faceExpression_01", "Head", false),
             ("Face: knife (E)", "/Game/Characters/Grenadier/S0/VFX/ps_E_faceExpression_01", "Head", false),
             ("Face: ultimate", "/Game/Characters/Grenadier/S0/VFX/ps_X_faceExpression_01", "Head", false)
+        ],
+        // Omen's ultimate (FXC_Wraith_X_GlobalTeleport_Equip / _Depart, the ghost's arrival): the shadow orb in his
+        // hand while he holds it, the shadows swirling round him as he casts it, and as his ghost arrives
+        ["Wraith"] =
+        [
+            ("FX: ult hold", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_EquipLoop_ALLY", "Root", false),
+            ("FX: ult cast", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_Activate_ALLY", "Root", false),
+            ("FX: ult arrive", "/Game/Characters/Wraith/S0/VFX/Ability_X/Specter_Arrive", "Root", false)
         ]
     };
 
@@ -205,6 +213,8 @@ public static class AgentEffects
             if (lod.TryGetValue(out UObject required, "RequiredModule") && required.TryGetValue(out UMaterialInterface material, "Material"))
                 description["Material"] = Material(material);
             var materialName = description["Material"]?["Name"]?.ToString() ?? "";
+            // decals (they colour the ground under them in game: boxes in Blender)
+            if (description["Material"]?["Vectors"]?["DecalColor"] != null) continue;
             // KAY/O's nanogel: its shards are pushed out of his forearm by its shader (flat panes in Blender)
             if ((description["Material"]?["BaseMaterial"]?.ToString() ?? "").StartsWith("m_nanogel", StringComparison.OrdinalIgnoreCase)) continue;
             if (EmitterTweaks.TryGetValue($"{system.Name}|{emitterName}|{materialName}", out var tweak) ||

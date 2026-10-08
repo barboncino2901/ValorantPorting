@@ -157,6 +157,24 @@ public static class AgentGlow
                     ["FlashColor"] = "8CE81A" /* (A4BC00 in game: its bloom reads lime) */, ["IdleColor"] = "00E8C6", ["FragColor"] = "2841FF", ["KnifeColor"] = "9550FF", ["KnifeFresnel"] = "9500EE",
                     ["UltColor"] = "9570FF"
                 }),
+            // Omen: his ultimate (From the Shadows). Cast: Omen_Overlay_Ally_MI turns him into shadow (Spectre colours)
+            // with cyan cracks (TP_Wraith_S0_MAT_Emissive, Emissive_Color_A/B) and dissolves him; his ghost (the ethereal
+            // form, a second model: see UltForms) drawn by Ethereal_Form_ALLY: lavender to indigo, a dark hood, cyan
+            // eyes, tearing away into shadow at its bottom
+            ["Wraith"] = (
+                new Dictionary<string, string>
+                {
+                    ["Cracks"] = "/Game/Characters/Wraith/S0/3P/Materials/Omen_Overlays/TP_Wraith_S0_MAT_Emissive.TP_Wraith_S0_MAT_Emissive",
+                    ["Dissolve"] = "/Game/VFX/Textures/NoiseDissolve/Wraith_4Xtile_Grayscale.Wraith_4Xtile_Grayscale",
+                    ["GhostEyes"] = "/Game/Characters/Wraith/S0/Ability_X/3P/VFX/Textures/eyes_mask.eyes_mask",
+                    ["GhostNoise"] = "/Game/Characters/Wraith/S0/VFX/Textures/Wraith_4Xtile90.Wraith_4Xtile90"
+                },
+                new Dictionary<string, object>
+                {
+                    ["SpectreColor"] = "180E20", ["SpectreColorB"] = "463059", ["CrackColorA"] = "00FFFF", ["CrackColorB"] = "2AB3FF",
+                    ["BodyColorLower"] = "9598BC", ["BodyColorUpper"] = "4E4D89", ["HeadColorBottom"] = "30316C",
+                    ["HeadColorTop"] = "151434", ["EyeColor"] = "00FFFF", ["TearawayColor"] = "090D19"
+                }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
             // colours: dark, orange, gold)
@@ -177,6 +195,8 @@ public static class AgentGlow
     private static readonly Dictionary<string, string> UltForms = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Pine"] = "/Game/Characters/Pine/S0/3P/Models/TP_Pine_Sym_S0_Skelmesh.TP_Pine_Sym_S0_Skelmesh",
+        // Omen's ghost as he arrives (FXC_Wraith_X_SwapMesh, Ethereal_Form_ALLY)
+        ["Wraith"] = "/Game/Characters/Wraith/S0/Ability_X/3P/Models/ABTP_Wraith_S0_X_New_Skelmesh.ABTP_Wraith_S0_X_New_Skelmesh",
         // Clove's ghost as she comes back (drawn by the game with 3P_SMO_X_Dismiss-Formless_MAT)
         ["Smonk"] = "/Game/Characters/Smonk/S0/Ability_X/3P/Models/AB_Smonk_S0_X_Resurrection_Skelmesh.AB_Smonk_S0_X_Resurrection_Skelmesh"
     };

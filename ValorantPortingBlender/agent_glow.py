@@ -557,7 +557,8 @@ def _put_form_on_rig(objects, form_word, codename, offset=0.0):
     eye overlay a copy of its own (named after the agent, so it gets the layer)."""
     meshes = [o for o in objects if o.type == 'MESH' and not o.name.upper().startswith("FP_")]
     form = next((o for o in meshes if form_word in o.name.lower()), None)
-    body = next((o for o in meshes if o is not form and _armature_of(o) is not None), None)
+    body = next((o for o in sorted(meshes, key=lambda o: 0 if o.name.upper().startswith("TP") else 1)
+                 if o is not form and _armature_of(o) is not None), None)  # (the 3rd person model, not character select)
     if body is not None:
         for slot in body.material_slots:
             if slot.material is not None and codename not in slot.material.name.lower() and slot.material.name != "None":
@@ -806,6 +807,181 @@ def _swap_clove_albedo(tree, node, name, images):
         tree.links.new(mix.outputs[2], target)
     tree.links.new(found.outputs[0], mix.inputs[6])
     tree.links.new(ult.outputs[0], mix.inputs[7])
+
+
+def _build_omen_group(images, values):
+    """Omen: his ultimate (From the Shadows).
+    Cast: 0 -> 0.5 he turns to shadow (Omen_Overlay_Ally_MI: Spectre colours, his markings glowing cyan), 0.5 -> 1 he
+    dissolves away, the edge glowing cyan. Ghost: 0 -> 1 his ghost (the ethereal form, a second model on his rig;
+    Ethereal_Form_ALLY) takes his place, dissolving in; back to 0 he comes back. The ghost: lavender to indigo, a dark
+    hood, cyan eyes, its bottom tearing away into shadow, drifting (Wraith_4Xtile90 scrolling down).
+    Reveal: 1 on his ghost's material."""
+    name = "VP Omen Ult"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    for socket_name, default in (("Cast", 0.0), ("Ghost", 0.0), ("Time", 0.0), ("Reveal", 0.0)):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    uv = nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "UV_SINGLE"
+
+    def texture(role, vector=None, extension='REPEAT'):
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = _image(images, role)
+        node.extension = extension
+        links.new(vector if vector is not None else uv.outputs[0], node.inputs[0])
+        return node
+
+    def separate(color_socket):
+        node = nodes.new("ShaderNodeSeparateColor")
+        links.new(color_socket, node.inputs[0])
+        return node.outputs
+
+    def mix_color(factor, a, b):
+        node = nodes.new("ShaderNodeMix")
+        node.data_type = 'RGBA'
+        if isinstance(factor, (int, float)):
+            node.inputs[0].default_value = factor
+        else:
+            links.new(factor, node.inputs[0])
+        for socket, value in ((node.inputs[6], a), (node.inputs[7], b)):
+            if isinstance(value, tuple):
+                socket.default_value = (*value, 1.0)
+            else:
+                links.new(value, socket)
+        return node.outputs[2]
+
+    def emission(color, strength):
+        node = nodes.new("ShaderNodeEmission")
+        if isinstance(color, tuple):
+            node.inputs["Color"].default_value = (*color, 1.0)
+        else:
+            links.new(color, node.inputs["Color"])
+        if isinstance(strength, (int, float)):
+            node.inputs["Strength"].default_value = strength
+        else:
+            links.new(strength, node.inputs["Strength"])
+        return node.outputs[0]
+
+    def add(a, b):
+        node = nodes.new("ShaderNodeAddShader")
+        links.new(a, node.inputs[0])
+        links.new(b, node.inputs[1])
+        return node.outputs[0]
+
+    def mix_shader(fac, a, b):
+        node = nodes.new("ShaderNodeMixShader")
+        links.new(fac, node.inputs[0])
+        links.new(a, node.inputs[1])
+        links.new(b, node.inputs[2])
+        return node.outputs[0]
+
+    def scrolled(scale, speed):
+        node = nodes.new("ShaderNodeVectorMath")
+        node.operation = 'MULTIPLY_ADD'
+        links.new(uv.outputs[0], node.inputs[0])
+        node.inputs[1].default_value = (*scale, 1.0)
+        shift = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', inputs.outputs["Time"], speed[0]), shift.inputs[0])
+        links.new(math_node('MULTIPLY', inputs.outputs["Time"], speed[1]), shift.inputs[1])
+        links.new(shift.outputs[0], node.inputs[2])
+        return node.outputs[0]
+
+    t_cast, ghost, reveal = inputs.outputs["Cast"], inputs.outputs["Ghost"], inputs.outputs["Reveal"]
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.5
+    facing = rim.outputs["Facing"]
+    coords = nodes.new("ShaderNodeTexCoord")
+    height = separate(coords.outputs["Generated"])[2]  # 0 feet .. 1 head (the model's own box)
+
+    # his cast: shadow (Spectre colours, lighter at his outline), his markings glowing cyan to blue
+    spectre_in = math_node('MULTIPLY', t_cast, 2.0, clamp=True)
+    shadow = emission(mix_color(math_node('POWER', facing, 1.5), _color(values.get("SpectreColor", "180E20")),
+                                _color(values.get("SpectreColorB", "463059"))), 1.0)
+    marks = separate(texture("Cracks").outputs["Color"])[0]
+    crack_colour = mix_color(math_node('SINE', math_node('MULTIPLY', inputs.outputs["Time"], 3.0)),
+                             _color(values.get("CrackColorA", "00FFFF")), _color(values.get("CrackColorB", "2AB3FF")))
+    cracks = emission(crack_colour, math_node('MULTIPLY', math_node('MULTIPLY', marks, spectre_in), 8.0))
+    body = add(mix_shader(math_node('MULTIPLY', spectre_in, 0.9), inputs.outputs["Shader"], shadow), cracks)
+
+    # his ghost: Specter_Diff's shading in his colours (lavender low on him, indigo higher, a dark hood), darker at
+    # its outline, cyan eyes; unlit (shaded softly: Specter_Diff's shading doesn't fit all of this model's parts)
+    shade = math_node('SUBTRACT', 1.0, math_node('MULTIPLY', facing, 0.6))
+    gradient = math_node('DIVIDE', math_node('SUBTRACT', height, 0.25), 0.55, clamp=True)
+    body_colour = mix_color(gradient, _color(values.get("BodyColorLower", "9598BC")), _color(values.get("BodyColorUpper", "4E4D89")))
+    hood = math_node('DIVIDE', math_node('SUBTRACT', height, 0.82), 0.05, clamp=True)
+    head_colour = mix_color(math_node('DIVIDE', math_node('SUBTRACT', height, 0.85), 0.12, clamp=True),
+                            _color(values.get("HeadColorBottom", "30316C")), _color(values.get("HeadColorTop", "151434")))
+    colour = mix_color(hood, body_colour, head_colour)
+    lit = math_node('MULTIPLY', math_node('ADD', math_node('MULTIPLY', shade, 0.55), 0.15),
+                    math_node('SUBTRACT', 1.0, math_node('MULTIPLY', math_node('POWER', facing, 2.0), float(values.get("OutlineDarkness", 0.8)))))
+    # its bottom tears away: drifting noise against its height (the game fades it down its UVs, Limbs_Fade2; its
+    # arms' UVs run the other way: by height here), dark at the torn edge
+    # (on the model's own box: its UVs are cut in small pieces)
+    generated = separate(coords.outputs["Generated"])
+    drift = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('ADD', generated[0], generated[1]), drift.inputs[0])
+    links.new(math_node('ADD', math_node('MULTIPLY', generated[2], 1.5), math_node('MULTIPLY', inputs.outputs["Time"], 0.25)), drift.inputs[1])
+    noise = separate(texture("GhostNoise", drift.outputs[0]).outputs["Color"])[0]
+    keep = math_node('ADD', math_node('MULTIPLY', height, 1.6), math_node('MULTIPLY', noise, 0.7))
+    keep = math_node('MULTIPLY', math_node('SUBTRACT', keep, 0.78), 1.6, clamp=True)
+    torn = math_node('SUBTRACT', 1.0, keep)
+    colour = mix_color(math_node('POWER', torn, 0.6), colour, _color(values.get("TearawayColor", "090D19")))
+    eyes = separate(texture("GhostEyes").outputs["Color"])[0]
+    ghost_look = add(emission(colour, lit), emission(_color(values.get("EyeColor", "00FFFF")), math_node('MULTIPLY', eyes, 12.0)))
+    ghost_alpha = math_node('MAXIMUM', math_node('MULTIPLY', math_node('MULTIPLY', keep, 2.5, clamp=True), 0.95), math_node('MULTIPLY', eyes, 3.0, clamp=True))
+    see_through = nodes.new("ShaderNodeBsdfTransparent")
+    ghost_look = mix_shader(ghost_alpha, see_through.outputs[0], ghost_look)
+    result = mix_shader(reveal, body, ghost_look)
+
+    # which is shown: he dissolves away in the second half of his cast; "Ghost" swaps him for his ghost (each
+    # dissolving through the other); the dissolving edge glows cyan
+    dissolve = separate(texture("Dissolve", scrolled((2.0, 2.0), (0.0, 0.05))).outputs["Color"])[0]
+    width = 0.04
+    gone_cast = math_node('MULTIPLY', math_node('SUBTRACT', math_node('MULTIPLY', t_cast, 2.0), 1.0), 1.0, clamp=True)
+    him_out = math_node('MAXIMUM', gone_cast, ghost)  # how far he is gone
+    ghost_out = math_node('SUBTRACT', 1.0, ghost)  # how far his ghost is gone
+    amount = nodes.new("ShaderNodeMix")
+    amount.data_type = 'FLOAT'
+    links.new(reveal, amount.inputs[0])
+    links.new(him_out, amount.inputs[2])
+    links.new(ghost_out, amount.inputs[3])
+    out_amount = amount.outputs[0]
+    # (shown where the noise is above the threshold; 0 shows all, 1 none)
+    side = math_node('SUBTRACT', dissolve, math_node('SUBTRACT', math_node('MULTIPLY', out_amount, 1.0 + 2.0 * width), width))
+    shown = math_node('GREATER_THAN', side, 0.0)
+    edge = math_node('POWER', math_node('SUBTRACT', 1.0, math_node('DIVIDE', math_node('ABSOLUTE', side), width), clamp=True), 3.0)
+    edge = math_node('MULTIPLY', edge, math_node('MULTIPLY', math_node('GREATER_THAN', out_amount, 0.001), math_node('LESS_THAN', out_amount, 0.999)))
+    sparks = emission(_color(values.get("CrackColorA", "00FFFF")), math_node('MULTIPLY', edge, 6.0))
+    gone = nodes.new("ShaderNodeBsdfTransparent")
+    result = mix_shader(shown, gone.outputs[0], add(result, sparks))
+    links.new(result, output.inputs[0])
+    return group
+
+
+def _prepare_omen(objects):
+    """His ghost (the ethereal form) on his rig."""
+    return _put_form_on_rig(objects, "x_new", "wraith")
 
 
 def _build_neon_group(images, values):
@@ -1294,6 +1470,10 @@ AGENTS = {
                   ("Glow: frag (C)", "Frag", 0.0, "KAY/O holding his frag: his panels glow blue"),
                   ("Glow: knife (E)", "Knife", 0.0, "KAY/O holding his knife: his panels glow purple, a purple outline"),
                   ("Glow: ultimate", "Ult", 0.0, "KAY/O's ultimate (NULL/cmd): his panels violet and flickering, a violet outline")]),
+    "wraith": dict(
+        node="VP Omen Ult", build=_build_omen_group, materials=("wraith", "ethereal"), prepare=_prepare_omen, see_through=True,
+        controls=[("Ult: cast", "Cast", 0.0, "Omen casting his ultimate: 0 -> 0.5 he turns to shadow, his markings glowing cyan; 0.5 -> 1 he dissolves away"),
+                  ("Ult: ghost", "Ghost", 0.0, "Omen's ghost (his ethereal form as he arrives): 0 -> 1 it takes his place; back to 0 he comes back")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),

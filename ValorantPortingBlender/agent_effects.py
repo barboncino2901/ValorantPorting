@@ -452,6 +452,11 @@ def _has_alpha(image):
     return found
 
 
+# Omen's shadow smoke materials (their look is made in their shaders: see _material)
+SHADOW_MATERIALS = {"ground_power", "ground_power_activate_ALLY", "back_power", "specter_ground_tether", "Radial_Mesh",
+                    "air_splitting"}
+
+
 def _material(emitter, images, name, boost=1.0):
     """The emitter's look: its colour and alpha over life (the game's tables, as a ramp on the sprite's age), its
     texture (a flipbook played over the particle's life, coloured by the material's own colours when it has them),
@@ -546,8 +551,38 @@ def _material(emitter, images, name, boost=1.0):
     # smoke (Reyna's ult wisps: Vampire_Wisp_Smoke_B): the game shapes it with a flow map in its shader; here a soft
     # round puff of its noise texture, drifting up over the puff's life, and dark
     noise_path = next((path for path in textures.values() if "NoiseDissolve" in path and images.get(path) is not None), None)
+    # Omen's shadow (his ult's smoke meshes: a shape mask, wisps of noise drifting through it), dark violet
+    shadow = (spec.get("BaseMaterial") or "") in SHADOW_MATERIALS
     smoke = "Smoke" in (spec.get("BaseMaterial") or "") and noise_path is not None
-    if smoke:
+    if shadow:
+        mask_path = next((path for key, path in textures.items() if "mask" in key.lower() and "body" not in key.lower()
+                          and "arm" not in key.lower() and images.get(path) is not None), None) or             next((path for path in textures.values() if images.get(path) is not None), None)
+        wisp_path = next((path for key, path in textures.items() if key.lower().startswith("wraith_4xtile") and images.get(path) is not None), None)
+        shape = nodes.new("ShaderNodeTexImage")
+        shape.image = images.get(mask_path)
+        shape.extension = 'CLIP'
+        links.new(uv, shape.inputs[0])
+        mask = nodes.new("ShaderNodeSeparateColor")
+        links.new(shape.outputs["Color"], mask.inputs[0])
+        mask = math_node('MULTIPLY', mask.outputs[0], shape.outputs["Alpha"]) if _has_alpha(shape.image) else mask.outputs[0]
+        if wisp_path is not None:
+            moved = nodes.new("ShaderNodeVectorMath")
+            moved.operation = 'MULTIPLY_ADD'
+            links.new(uv, moved.inputs[0])
+            moved.inputs[1].default_value = (1.0, 1.0, 1.0)
+            shift = nodes.new("ShaderNodeCombineXYZ")
+            links.new(math_node('ADD', math_node('MULTIPLY', instancer("vp_random").outputs["Fac"], 3.7), math_node('MULTIPLY', age, 0.3)), shift.inputs[0])
+            links.new(math_node('MULTIPLY', age, -0.6), shift.inputs[1])
+            links.new(shift.outputs[0], moved.inputs[2])
+            wisps = nodes.new("ShaderNodeTexImage")
+            wisps.image = images[wisp_path]
+            links.new(moved.outputs[0], wisps.inputs[0])
+            channels = nodes.new("ShaderNodeSeparateColor")
+            links.new(wisps.outputs["Color"], channels.inputs[0])
+            mask = math_node('MULTIPLY', mask, math_node('POWER', math_node('MULTIPLY', math_node('SUBTRACT', channels.outputs[0], 0.35), 2.5, clamp=True), 1.5))
+        mask = math_node('MULTIPLY', mask, 0.85)
+        colour = None
+    elif smoke:
         centre = nodes.new("ShaderNodeVectorMath")
         centre.operation = 'DISTANCE'
         links.new(uv, centre.inputs[0])
@@ -677,6 +712,8 @@ def _material(emitter, images, name, boost=1.0):
     tint.data_type = 'RGBA'
     tint.blend_type = 'MULTIPLY'
     tint.inputs[0].default_value = 1.0
+    if shadow and not emitter.get("Tint"):
+        emitter = dict(emitter, Tint="241433")  # (his Spectre colours)
     if emitter.get("Tint"):
         # (a grey texture the game colours inside its material)
         hex_ = emitter["Tint"]
@@ -700,7 +737,7 @@ def _material(emitter, images, name, boost=1.0):
     links.new(tint.outputs[2], glow.inputs["Color"])
     opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False)
     # (smoke: barely lit, it darkens what's behind it)
-    links.new(math_node('MULTIPLY', opacity, 0.04 if smoke else min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
+    links.new(math_node('MULTIPLY', opacity, 0.04 if smoke else 0.15 if shadow else min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
     if boost > 1.0:
         opacity = math_node('MULTIPLY', opacity, min(boost, 2.0))  # (and less see-through)
     see_through = nodes.new("ShaderNodeBsdfTransparent")
@@ -760,6 +797,15 @@ def _drive(target, path, armature, prop, expression="value", variables=None):
     _pending.append((armature, target, path, variables or [("value", prop)], expression))
 
 
+def _bone(rig, name):
+    """The rig's bone of that name, whatever its case (the game says "root" for "Root")."""
+    if not name:
+        return None
+    if name in rig.data.bones:
+        return name
+    return next((bone.name for bone in rig.data.bones if bone.name.lower() == name.lower()), None)
+
+
 def apply(effects, rig, load_image, attach, collection, load_mesh=None):
     """effects: what the app sent (spawns); rig: the agent's armature; load_image(game path) -> image;
     attach(obj, rig, {"Bone", "Location", "Rotation"}): hangs an object on a bone with an Unreal offset;
@@ -786,8 +832,8 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
     images = {}
     made = 0
     for number, spawn in enumerate(effects):
-        socket = spawn.get("Socket")
-        if socket not in rig.data.bones:
+        socket = _bone(rig, spawn.get("Socket"))
+        if socket is None:
             continue
         control = spawn.get("Effect") or "FX"
         if control not in rig:
@@ -850,9 +896,23 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
                 particle["size"] = (particle["size"][0] * grow, particle["size"][1] * grow)
             if not particles:
                 continue
+            # (on a bone of its own: the game's LocationBoneSocket, e.g. Omen's orb in his hand, his ult's smoke on
+            # his back; there, its own start location left out)
+            bone_socket = ((_module(emitter, "LocationBoneSocket") or {}).get("SourceLocations") or [{}])[0]
+            own_bone = _bone(rig, bone_socket.get("BoneSocketName"))
+            if own_bone is not None:
+                for particle in particles:
+                    particle["location"] = (0.0, 0.0, 0.0)
             obj = bpy.data.objects.new(name, _particle_mesh(name, particles))
             collection.objects.link(obj)
-            obj.parent = anchor
+            if own_bone is not None:
+                bone_anchor = bpy.data.objects.new(f"VP FX {emitter.get('Name')} ({own_bone})", None)
+                bone_anchor.empty_display_size = 0.05
+                collection.objects.link(bone_anchor)
+                attach(bone_anchor, rig, {"Bone": own_bone, "Location": bone_socket.get("Offset"), "Rotation": spawn.get("Rotation")})
+                obj.parent = bone_anchor
+            else:
+                obj.parent = anchor
             material = _material(emitter, images, name, float(spawn.get("Boost") or 1.0) * float(emitter.get("Boost") or 1.0))
             obj.data.materials.append(material)
             modifier = obj.modifiers.new("VP Particles", 'NODES')
