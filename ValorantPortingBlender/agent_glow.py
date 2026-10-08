@@ -1132,6 +1132,122 @@ def _build_phoenix_group(images, values):
     return group
 
 
+def _build_kayo_group(images, values):
+    """KAY/O: his teal panels glowing (where his colour texture is teal, green or magenta), in their own colour at
+    idle; each ability's overlay recolours them (m_overlay_3P_01: ColorStable): flash lime, frag blue, knife purple
+    with a purple outline; his ultimate violet, flickering with scanlines (tex_pixels_01), a violet outline."""
+    name = "VP KAYO Glow"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor').default_value = (0.0, 0.0, 0.0, 1.0)
+    for socket_name, default in (("Idle", 1.0), ("Flash", 0.0), ("Frag", 0.0), ("Knife", 0.0), ("Ult", 0.0), ("Time", 0.0)):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def mix_color(factor, a, b):
+        node = nodes.new("ShaderNodeMix")
+        node.data_type = 'RGBA'
+        if isinstance(factor, (int, float)):
+            node.inputs[0].default_value = factor
+        else:
+            links.new(factor, node.inputs[0])
+        for socket, value in ((node.inputs[6], a), (node.inputs[7], b)):
+            if isinstance(value, tuple):
+                socket.default_value = (*value, 1.0)
+            else:
+                links.new(value, socket)
+        return node.outputs[2]
+
+    channels = nodes.new("ShaderNodeSeparateColor")
+    links.new(inputs.outputs["Albedo"], channels.inputs[0])
+    r, g, b = channels.outputs[0], channels.outputs[1], channels.outputs[2]
+    # where he glows: clearly teal/green (green above red), or magenta (red and blue above green: his chest core)
+    teal = math_node('SUBTRACT', math_node('MULTIPLY', math_node('SUBTRACT', g, r), 4.0), 0.4, clamp=True)
+    magenta = math_node('SUBTRACT', math_node('MULTIPLY', math_node('SUBTRACT', math_node('MINIMUM', r, b), g), 4.0), 0.4, clamp=True)
+    panels = math_node('MAXIMUM', teal, magenta)
+
+    # its colour: his own (brightened to full) at idle, each ability's over it
+    brightest = math_node('MAXIMUM', math_node('MAXIMUM', r, g), math_node('MAXIMUM', b, 0.05))
+    own = nodes.new("ShaderNodeVectorMath")
+    own.operation = 'DIVIDE'
+    links.new(inputs.outputs["Albedo"], own.inputs[0])
+    combine = nodes.new("ShaderNodeCombineXYZ")
+    for i in range(3):
+        links.new(brightest, combine.inputs[i])
+    links.new(combine.outputs[0], own.inputs[1])
+    # (his panels' own colour, saturated: the game's glow is a stronger teal than the texture)
+    colour = mix_color(0.6, own.outputs[0], _color(values.get("IdleColor", "00E8C6")))
+    for socket, key, fallback in (("Flash", "FlashColor", "8CE81A"), ("Frag", "FragColor", "2841FF"),
+                                  ("Knife", "KnifeColor", "9550FF"), ("Ult", "UltColor", "9570FF")):
+        colour = mix_color(inputs.outputs[socket], colour, _color(values.get(key, fallback)))
+    ability = math_node('MAXIMUM', math_node('MAXIMUM', inputs.outputs["Flash"], inputs.outputs["Frag"]),
+                        math_node('MAXIMUM', inputs.outputs["Knife"], inputs.outputs["Ult"]))
+    # brighter in an ability; the core of the glow whiter
+    strength = math_node('ADD', math_node('MULTIPLY', inputs.outputs["Idle"], float(values.get("IdleStrength", 1.4))),
+                         math_node('MULTIPLY', ability, float(values.get("AbilityStrength", 2.4))))
+
+    # the ultimate flickers: scanlines running up him, and the whole glow stuttering
+    t = inputs.outputs["Time"]
+    pixels = _image(images, "Pixels")
+    flicker = math_node('ADD', 0.8, math_node('MULTIPLY', math_node('SINE', math_node('MULTIPLY', t, 23.0)),
+                                              math_node('MULTIPLY', math_node('SINE', math_node('MULTIPLY', t, 7.0)), 0.25)))
+    if pixels is not None:
+        uv = nodes.new("ShaderNodeUVMap")
+        moved = nodes.new("ShaderNodeVectorMath")
+        moved.operation = 'MULTIPLY_ADD'
+        links.new(uv.outputs[0], moved.inputs[0])
+        moved.inputs[1].default_value = (6.0, 3.0, 1.0)
+        shift = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', t, -0.6), shift.inputs[1])
+        links.new(shift.outputs[0], moved.inputs[2])
+        lines = nodes.new("ShaderNodeTexImage")
+        lines.image = pixels
+        links.new(moved.outputs[0], lines.inputs[0])
+        flicker = math_node('ADD', flicker, math_node('MULTIPLY', lines.outputs["Color"], 0.8))
+    strength = math_node('MULTIPLY', strength, math_node('ADD', math_node('MULTIPLY', inputs.outputs["Ult"], math_node('SUBTRACT', flicker, 1.0)), 1.0))
+    glow = nodes.new("ShaderNodeEmission")
+    links.new(colour, glow.inputs["Color"])
+    links.new(math_node('MULTIPLY', panels, strength), glow.inputs["Strength"])
+
+    # the knife's and the ultimate's outline (ColorFresnel / StableUnstable)
+    facing = nodes.new("ShaderNodeLayerWeight")
+    facing.inputs["Blend"].default_value = 0.45
+    edge = math_node('POWER', facing.outputs["Facing"], 4.0)
+    rim_colour = mix_color(inputs.outputs["Ult"], _color(values.get("KnifeFresnel", "9500EE")), _color(values.get("UltColor", "9570FF")))
+    rim = nodes.new("ShaderNodeEmission")
+    links.new(rim_colour, rim.inputs["Color"])
+    links.new(math_node('MULTIPLY', edge, math_node('MAXIMUM', math_node('MULTIPLY', inputs.outputs["Knife"], 0.4),
+                                                    math_node('MULTIPLY', inputs.outputs["Ult"], 0.7))), rim.inputs["Strength"])
+
+    result = inputs.outputs["Shader"]
+    for shader in (glow.outputs[0], rim.outputs[0]):
+        add = nodes.new("ShaderNodeAddShader")
+        links.new(result, add.inputs[0])
+        links.new(shader, add.inputs[1])
+        result = add.outputs[0]
+    links.new(result, output.inputs[0])
+    return group
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -1171,6 +1287,13 @@ AGENTS = {
         node="VP Phoenix Fire", build=_build_phoenix_group, materials="phoenix_s0",
         controls=[("Glow: ultimate", "Ult", 0.0, "Phoenix's ultimate (Run It Back): flames crawling over him, his chest glowing"),
                   ("Glow: heal", "Heal", 0.0, "Phoenix healing in his own fire: softer flames over him")]),
+    "grenadier": dict(
+        node="VP KAYO Glow", build=_build_kayo_group, materials="grenadier", first_person=True,
+        controls=[("Glow: idle", "Idle", 1.0, "KAY/O's teal panels glowing, as always in game"),
+                  ("Glow: flash (Q)", "Flash", 0.0, "KAY/O holding his flash: his panels glow lime"),
+                  ("Glow: frag (C)", "Frag", 0.0, "KAY/O holding his frag: his panels glow blue"),
+                  ("Glow: knife (E)", "Knife", 0.0, "KAY/O holding his knife: his panels glow purple, a purple outline"),
+                  ("Glow: ultimate", "Ult", 0.0, "KAY/O's ultimate (NULL/cmd): his panels violet and flickering, a violet outline")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
@@ -1234,12 +1357,13 @@ def apply(glow, objects, load_image):
         objects = spec["prepare"](objects)
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
     done = 0
-    for obj in objects:
+    # the 3rd person model first: a material it shares with the character select model is driven by its rig
+    for obj in sorted(objects, key=lambda o: 0 if o.name.upper().startswith("TP") else 1):
         if obj.type != 'MESH':
             continue
         armature = _armature_of(obj)
-        if armature is None or obj.name.upper().startswith("FP_"):
-            continue  # the 1st person arms have their own layouts (not done yet)
+        if armature is None or (obj.name.upper().startswith("FP_") and not spec.get("first_person")):
+            continue  # the 1st person arms have their own layouts (done for some agents)
         for prop, _, default, description in spec["controls"]:
             if prop not in armature:
                 armature[prop] = default

@@ -20,7 +20,8 @@ namespace ValorantPorting.Export;
 public static class AgentEffects
 {
     // Boost: how much brighter than the game's values it's drawn in Blender (the game adds bloom; some effects need it)
-    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f);
+    // On: its control starts switched on (an idle effect always there in game)
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false);
 
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
@@ -35,6 +36,21 @@ public static class AgentEffects
         // Phoenix: flames on his shoulders and elbows in his ultimate, embers on his shoulders while healing in his fire
         ["Phoenix"] = [("FX: ultimate", "/Game/Characters/Phoenix/S0/Ability_X/Production/FXC_Phoenix_X_Active_Production"),
                        ("FX: heal", "/Game/Characters/Phoenix/S0/Passive_Fire/Production/FXC_Phoenix_HealingFire_Production")]
+    };
+
+    // particle systems the game spawns from its own code (not an effect container): agent codename -> (control, system,
+    // bone, starts on)
+    private static readonly Dictionary<string, (string Control, string System, string Bone, bool On)[]> Systems = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // KAY/O's face screen (Comp_Grenadier_FaceTracking plays one by what he does): idle, then each ability's
+        ["Grenadier"] =
+        [
+            ("Face: idle", "/Game/Characters/Grenadier/S0/VFX/ps_Idle_faceExpression_02", "Head", true),
+            ("Face: flash (Q)", "/Game/Characters/Grenadier/S0/VFX/ps_Q_faceExpression_01", "Head", false),
+            ("Face: frag (C)", "/Game/Characters/Grenadier/S0/VFX/ps_C_faceExpression_01", "Head", false),
+            ("Face: knife (E)", "/Game/Characters/Grenadier/S0/VFX/ps_E_faceExpression_01", "Head", false),
+            ("Face: ultimate", "/Game/Characters/Grenadier/S0/VFX/ps_X_faceExpression_01", "Head", false)
+        ]
     };
 
     // systems left out: they don't look like the game in Blender (Neon's head glow, which the game hides with depth)
@@ -99,9 +115,23 @@ public static class AgentEffects
         var path = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
         if (path is null) return null;
         var codename = path[(path.IndexOf("/Characters/", StringComparison.OrdinalIgnoreCase) + "/Characters/".Length)..].Split('/')[0];
-        if (!Agents.TryGetValue(codename, out var containers)) return null;
+        var containers = Agents.GetValueOrDefault(codename) ?? [];
 
         var spawns = new List<Spawn>();
+        foreach (var (control, systemPath, bone, on) in Systems.GetValueOrDefault(codename) ?? [])
+        {
+            try
+            {
+                if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(systemPath, out UObject system)) continue;
+                var emitters = Emitters(system);
+                if (emitters.Count > 0)
+                    spawns.Add(new Spawn(control, system.Name, bone, FVector.ZeroVector, FRotator.ZeroRotator, 0f, emitters, 1f, on));
+            }
+            catch (Exception)
+            {
+                // missing from this game version: left out
+            }
+        }
         foreach (var (control, container) in containers)
         {
             try

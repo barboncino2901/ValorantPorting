@@ -498,8 +498,9 @@ def _material(emitter, images, name, boost=1.0):
     # flipbook frames: the emitter's own grid (SubImages), else the material's; in order over the particle's life
     # (up to the last frame its SubUV module reaches), or one at random
     required = _module(emitter, "Required") or {}
-    columns = int(required.get("SubImages_Horizontal") or scalars.get("FlipbookColumns") or 1)
-    rows = int(required.get("SubImages_Vertical") or scalars.get("FlipbookRows") or 1)
+    face = (spec.get("BaseMaterial") or "").lower().startswith("m_faceexpressions")
+    columns = int(required.get("SubImages_Horizontal") or scalars.get("FlipbookColumns") or (scalars.get("Columns") if face else 0) or 1)
+    rows = int(required.get("SubImages_Vertical") or scalars.get("FlipbookRows") or (scalars.get("Rows") if face else 0) or 1)
     frames = max(rows * columns, 1)
     if frames > 1:
         subuv = _module(emitter, "SubUV")
@@ -551,6 +552,39 @@ def _material(emitter, images, name, boost=1.0):
         links.new(noise.outputs["Color"], channels.inputs[0])
         wisps = math_node('MULTIPLY', math_node('SUBTRACT', channels.outputs[0], 0.15), 1.6, clamp=True)
         mask = math_node('MULTIPLY', math_node('MULTIPLY', puff, wisps), float(emitter.get("Opacity") or 1.0))
+    elif face and images.get(textures.get("Flipbook")) is not None:
+        # KAY/O's face screen (m_faceExpressions_flipbook): the expression's lines (R) and their halo (G) in ColorA, on
+        # a round purple glow (ColorRadialGradient, Radius); his face as a 10 x 10 flipbook
+        flipbook = nodes.new("ShaderNodeTexImage")
+        flipbook.image = images[textures["Flipbook"]]
+        flipbook.extension = 'CLIP'
+        links.new(uv, flipbook.inputs[0])
+        channels = nodes.new("ShaderNodeSeparateColor")
+        links.new(flipbook.outputs["Color"], channels.inputs[0])
+        lines, halo = channels.outputs[0], channels.outputs[1]
+        centre = nodes.new("ShaderNodeVectorMath")
+        centre.operation = 'DISTANCE'
+        links.new(uv_node.outputs["Vector"], centre.inputs[0])
+        centre.inputs[1].default_value = (0.5, 0.5, 0.0)
+        radius = float(scalars.get("Radius", 0.3)) + float(scalars.get("RadiusGradient", 0.4))
+        screen = math_node('MULTIPLY', math_node('POWER', math_node('SUBTRACT', 1.0, math_node('DIVIDE', centre.outputs["Value"], radius), clamp=True), 1.5), 0.6)
+
+        def rgb(name, fallback):
+            value = vectors.get(name) or fallback
+            return (float(value[0]), float(value[1]), float(value[2]), 1.0)
+
+        mixed = nodes.new("ShaderNodeMix")
+        mixed.data_type = 'RGBA'
+        mixed.inputs[6].default_value = rgb("ColorRadialGradient", (0.62, 0.0, 0.91))
+        mixed.inputs[7].default_value = rgb("ColorA", (1.0, 0.0, 1.0))
+        links.new(math_node('MAXIMUM', lines, math_node('MULTIPLY', halo, 0.6)), mixed.inputs[0])
+        whiter = nodes.new("ShaderNodeMix")
+        whiter.data_type = 'RGBA'
+        links.new(math_node('POWER', lines, 3.0), whiter.inputs[0])
+        links.new(mixed.outputs[2], whiter.inputs[6])
+        whiter.inputs[7].default_value = (1.0, 0.85, 1.0, 1.0)
+        colour = whiter.outputs[2]
+        mask = math_node('MAXIMUM', math_node('MAXIMUM', screen, lines), math_node('MULTIPLY', halo, 0.8))
     elif "Emissive_Base" in textures or "Alpha_Base" in textures:
         # the game's generic effect material (0_GenericA01_MAT): a colour texture and an alpha texture, each raised to
         # a power, scaled and turned
@@ -735,7 +769,7 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
             continue
         control = spawn.get("Effect") or "FX"
         if control not in rig:
-            rig[control] = 0.0
+            rig[control] = 1.0 if spawn.get("On") else 0.0
             rig.id_properties_ui(control).update(
                 min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
                 description=("A burst that plays once: keyframe it from 0 (start) to 1 (over), over about "
@@ -825,7 +859,9 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
             if mesh_object is not None:
                 own.nodes["VP Mesh"].inputs["Object"].default_value = mesh_object
                 if mesh_object.data.uv_layers:
-                    own.nodes["VP Mesh UV"].inputs["Name"].default_value = mesh_object.data.uv_layers[0].name
+                    # (KAY/O's face screen: its flipbook is laid on the mesh's last UV map)
+                    face = ((emitter.get("Material") or {}).get("BaseMaterial") or "").lower().startswith("m_faceexpressions")
+                    own.nodes["VP Mesh UV"].inputs["Name"].default_value = mesh_object.data.uv_layers[-1 if face else 0].name
                 own.nodes["VP Use Mesh"].outputs[0].default_value = 1.0
                 type_data = _module(emitter, "TypeDataMesh") or {}
                 if not type_data.get("bCameraFacing"):

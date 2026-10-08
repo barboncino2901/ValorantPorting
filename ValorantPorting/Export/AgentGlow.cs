@@ -144,6 +144,19 @@ public static class AgentGlow
                     ["FlameScaleU"] = 3.0, ["FlameScaleV"] = 5.0, ["FlameSpeed"] = 0.275, ["FlamePower"] = 6.0,
                     ["FlameColorA"] = "FFC24A", ["FlameColorB"] = "FF6A1A"
                 }),
+            // KAY/O: his teal panels glow; each ability's overlay (m_overlay_3P_01: mi_Q/C/E/X_overlay_01) recolours them
+            // (ColorStable): his flash lime, his frag blue, his knife purple with a purple outline (ColorFresnel), his
+            // ultimate violet and flickering (UnstableColor, StableUnstable); tex_pixels_01: the flicker's scanlines
+            ["Grenadier"] = (
+                new Dictionary<string, string>
+                {
+                    ["Pixels"] = "/Game/Characters/Grenadier/S0/VFX/Textures/tex_pixels_01.tex_pixels_01"
+                },
+                new Dictionary<string, object>
+                {
+                    ["FlashColor"] = "8CE81A" /* (A4BC00 in game: its bloom reads lime) */, ["IdleColor"] = "00E8C6", ["FragColor"] = "2841FF", ["KnifeColor"] = "9550FF", ["KnifeFresnel"] = "9500EE",
+                    ["UltColor"] = "9570FF"
+                }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
             // colours: dark, orange, gold)
