@@ -201,8 +201,12 @@ def _node_group():
     """Geometry nodes: the particles alive at "Time", as sprites turned to the camera; each sprite gets its age
     (0..1 over its life) and a random number for its material."""
     name = "VP Particles"
-    if bpy.data.node_groups.get(name):
-        return bpy.data.node_groups[name]
+    existing = bpy.data.node_groups.get(name)
+    if existing is not None:
+        if existing.nodes.get("VP Pivot X") is not None:
+            return existing
+        existing.name = name + " (older add-on)"  # made by an older version: built again
+
     group = bpy.data.node_groups.new(name, 'GeometryNodeTree')
     face = group.interface
     face.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
@@ -211,7 +215,7 @@ def _node_group():
     inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
     # set per emitter (each has its own copy of this group): seconds since the effect started, on/off, camera offset
     values = {}
-    for value_name, default in (("Time", 0.0), ("Active", 1.0), ("Camera Offset", 0.0)):
+    for value_name, default in (("Time", 0.0), ("Active", 1.0), ("Camera Offset", 0.0), ("Pivot X", 0.0), ("Pivot Y", 0.0)):
         node = nodes.new("ShaderNodeValue")
         node.name = node.label = "VP " + value_name
         node.outputs[0].default_value = default
@@ -324,11 +328,18 @@ def _node_group():
     card = nodes.new("GeometryNodeMeshGrid")
     card.inputs["Size X"].default_value = card.inputs["Size Y"].default_value = 1.0
     card.inputs["Vertices X"].default_value = card.inputs["Vertices Y"].default_value = 2
+    # moved off its centre by the game's pivot offset (KAY/O's sparks start at his elbow and reach out from it)
+    pivot = nodes.new("ShaderNodeCombineXYZ")
+    links.new(values["Pivot X"], pivot.inputs[0])
+    links.new(values["Pivot Y"], pivot.inputs[1])
+    shifted = nodes.new("GeometryNodeTransform")
+    links.new(card.outputs["Mesh"], shifted.inputs["Geometry"])
+    links.new(pivot.outputs[0], shifted.inputs["Translation"])
     store_uv = nodes.new("GeometryNodeStoreNamedAttribute")
     store_uv.data_type = 'FLOAT2'
     store_uv.domain = 'CORNER'
     store_uv.inputs["Name"].default_value = "vp_uv"
-    links.new(card.outputs["Mesh"], store_uv.inputs["Geometry"])
+    links.new(shifted.outputs[0], store_uv.inputs["Geometry"])
     links.new(card.outputs["UV Map"], store_uv.inputs["Value"])
     # (or the emitter's mesh: mesh particles; object and UV map name set per emitter)
     mesh_info = nodes.new("GeometryNodeObjectInfo")
@@ -670,13 +681,16 @@ def _material(emitter, images, name, boost=1.0):
         # (a grey texture the game colours inside its material)
         hex_ = emitter["Tint"]
         rgb = [((int(hex_[i:i + 2], 16) / 255.0 + 0.055) / 1.055) ** 2.4 for i in (0, 2, 4)]
-        tinted = nodes.new("ShaderNodeMix")
-        tinted.data_type = 'RGBA'
-        tinted.blend_type = 'MULTIPLY'
-        tinted.inputs[0].default_value = 1.0
-        links.new(life_colour, tinted.inputs[6])
-        tinted.inputs[7].default_value = (*rgb, 1.0)
-        life_colour = tinted.outputs[2]
+        # its hue replaced (the game's own colour over life can be another hue: KAY/O's ult sparks are teal), its
+        # brightness kept
+        channels = nodes.new("ShaderNodeSeparateColor")
+        links.new(life_colour, channels.inputs[0])
+        value = math_node('MAXIMUM', math_node('MAXIMUM', channels.outputs[0], channels.outputs[1]), channels.outputs[2])
+        tinted = nodes.new("ShaderNodeVectorMath")
+        tinted.operation = 'SCALE'
+        tinted.inputs[0].default_value = rgb
+        links.new(value, tinted.inputs["Scale"])
+        life_colour = tinted.outputs[0]
     links.new(life_colour, tint.inputs[6])
     if colour is not None:
         links.new(colour, tint.inputs[7])
@@ -877,6 +891,10 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
             loops = int((_module(emitter, "Required") or {}).get("EmitterLoops") or 0)
             if loops > 0:
                 own.nodes["VP Loop"].outputs[0].default_value = 0.0
+            pivot = (_module(emitter, "PivotOffset") or {}).get("PivotOffset") or {}
+            # (the game's card spans offset .. offset + 1, -0.5 centring it; its V runs down the screen)
+            own.nodes["VP Pivot X"].outputs[0].default_value = 0.5 + float(pivot.get("X", -0.5))
+            own.nodes["VP Pivot Y"].outputs[0].default_value = -0.5 - float(pivot.get("Y", -0.5))
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
             # seconds since the effect started (its delay), and on/off from the armature

@@ -98,10 +98,10 @@ public static class AgentEffects
         ["ps_C_equipElements_3P|None"] = (3f, 1f, "5A8CFF"),
         ["ps_C_equipElements_3P|None|mi_lightning_damage_08"] = (0f, 0f, null), // (a filled blob in Blender)
         ["ps_trail_equip_3P|None"] = (3f, 1f, "B6FF3A"),
-        ["ps_nanogel_R_3P|EtherBurst_Right"] = (3f, 1.2f, "B48CFF"),
-        ["ps_nanogel_L_3P|EtherBurst_Right"] = (3f, 1.2f, "B48CFF"),
-        ["ps_sparkles|Glow"] = (3f, 1.5f, "C8A8FF"),
-        ["ps_sparkles1|Glow"] = (3f, 1.5f, "C8A8FF")
+        ["ps_nanogel_R_3P|EtherBurst_Right"] = (6f, 2.2f, "B48CFF"),
+        ["ps_nanogel_L_3P|EtherBurst_Right"] = (6f, 2.2f, "B48CFF"),
+        ["ps_sparkles|Glow"] = (5f, 2f, "C8A8FF"),
+        ["ps_sparkles1|Glow"] = (5f, 2f, "C8A8FF")
     };
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
