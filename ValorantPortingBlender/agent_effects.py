@@ -203,7 +203,7 @@ def _node_group():
     name = "VP Particles"
     existing = bpy.data.node_groups.get(name)
     if existing is not None:
-        if existing.nodes.get("VP Pivot X") is not None:
+        if existing.nodes.get("VP Spin") is not None:
             return existing
         existing.name = name + " (older add-on)"  # made by an older version: built again
 
@@ -215,7 +215,9 @@ def _node_group():
     inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
     # set per emitter (each has its own copy of this group): seconds since the effect started, on/off, camera offset
     values = {}
-    for value_name, default in (("Time", 0.0), ("Active", 1.0), ("Camera Offset", 0.0), ("Pivot X", 0.0), ("Pivot Y", 0.0)):
+    # (and the timeline's seconds and a turn per second: smoke that keeps swirling while its effect is held)
+    for value_name, default in (("Time", 0.0), ("Active", 1.0), ("Camera Offset", 0.0), ("Pivot X", 0.0), ("Pivot Y", 0.0),
+                                ("Clock", 0.0), ("Spin", 0.0)):
         node = nodes.new("ShaderNodeValue")
         node.name = node.label = "VP " + value_name
         node.outputs[0].default_value = default
@@ -423,7 +425,15 @@ def _node_group():
     links.new(math_node('GREATER_THAN', fixed.outputs[0], 0.5), orient.inputs["Switch"])
     links.new(turned.outputs[0], orient.inputs["False"])
     links.new(own_rotation.outputs[0], orient.inputs["True"])
-    links.new(orient.outputs[0], instance.inputs["Rotation"])
+    # turned round the effect's up axis as the timeline plays (Omen's shadows circling him)
+    swirl = nodes.new("FunctionNodeAxisAngleToRotation")
+    swirl.inputs["Axis"].default_value = (0.0, 0.0, 1.0)
+    links.new(math_node('MULTIPLY', values["Clock"], values["Spin"]), swirl.inputs["Angle"])
+    swirled = nodes.new("FunctionNodeRotateRotation")
+    swirled.rotation_space = 'GLOBAL'
+    links.new(orient.outputs[0], swirled.inputs["Rotation"])
+    links.new(swirl.outputs[0], swirled.inputs["Rotate By"])
+    links.new(swirled.outputs[0], instance.inputs["Rotation"])
     links.new(scale, instance.inputs["Scale"])
     links.new(instance.outputs[0], output.inputs[0])
     return group
@@ -571,8 +581,12 @@ def _material(emitter, images, name, boost=1.0):
             links.new(uv, moved.inputs[0])
             moved.inputs[1].default_value = (1.0, 1.0, 1.0)
             shift = nodes.new("ShaderNodeCombineXYZ")
-            links.new(math_node('ADD', math_node('MULTIPLY', instancer("vp_random").outputs["Fac"], 3.7), math_node('MULTIPLY', age, 0.3)), shift.inputs[0])
-            links.new(math_node('MULTIPLY', age, -0.6), shift.inputs[1])
+            # drifting with the particle's age and with the timeline (it keeps moving while the effect is held)
+            clock = nodes.new("ShaderNodeValue")
+            clock.name = clock.label = "VP Clock"
+            links.new(math_node('ADD', math_node('MULTIPLY', instancer("vp_random").outputs["Fac"], 3.7),
+                                math_node('ADD', math_node('MULTIPLY', age, 0.3), math_node('MULTIPLY', clock.outputs[0], 0.08))), shift.inputs[0])
+            links.new(math_node('ADD', math_node('MULTIPLY', age, -0.6), math_node('MULTIPLY', clock.outputs[0], -0.15)), shift.inputs[1])
             links.new(shift.outputs[0], moved.inputs[2])
             wisps = nodes.new("ShaderNodeTexImage")
             wisps.image = images[wisp_path]
@@ -957,6 +971,12 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
             own.nodes["VP Pivot Y"].outputs[0].default_value = -0.5 - float(pivot.get("Y", -0.5))
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
+            # the timeline's seconds: shadow smoke keeps drifting and circling while its effect is held
+            _drive(own, 'nodes["VP Clock"].outputs[0].default_value', rig, control, f"frame / {fps:g}", variables=[])
+            if (emitter.get("Material") or {}).get("BaseMaterial") in SHADOW_MATERIALS:
+                own.nodes["VP Spin"].outputs[0].default_value = 0.7 if mesh_object is not None else 0.0
+                if material.node_tree.nodes.get("VP Clock") is not None:
+                    _drive(material.node_tree, 'nodes["VP Clock"].outputs[0].default_value', rig, control, f"frame / {fps:g}", variables=[])
             # seconds since the effect started (its delay), and on/off from the armature
             delay = float(spawn.get('Delay') or 0.0)
             if one_shot.get(control):
