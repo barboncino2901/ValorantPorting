@@ -2066,8 +2066,10 @@ def import_response(response, holder=None, use_selection=True):
                 if not effects:
                     continue
                 sockets = {e.get("Socket") for e in effects}
+                # (3rd person effects never on the 1st person arms: they share bone names like Root and L_Hand)
                 rigs = [o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
-                        and [b for b in sockets if b in o.data.bones]]
+                        and [b for b in sockets if b in o.data.bones]
+                        and (first_person or not o.name.upper().startswith("FP_"))]
                 prefix = "FP" if first_person else "TP"
                 rig = next((o for o in rigs if o.name.upper().startswith(prefix)), None if first_person else (rigs[0] if rigs else None))
                 made += agent_effects.apply(effects, rig, import_texture, attach_part_to_bone, new_collection,
