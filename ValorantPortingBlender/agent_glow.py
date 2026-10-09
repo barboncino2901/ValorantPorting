@@ -1052,20 +1052,43 @@ def _build_yoru_group(images, values):
     links.new(inputs.outputs["Albedo"], channels.inputs[0])
     r, g, b = channels.outputs[0], channels.outputs[1], channels.outputs[2]
     brightness = math_node('ADD', math_node('ADD', math_node('MULTIPLY', r, 0.3), math_node('MULTIPLY', g, 0.59)), math_node('MULTIPLY', b, 0.11))
-    blue = mix_color(math_node('MULTIPLY', math_node('POWER', brightness, 2.0), 0.15, clamp=True),
-                     _color(values.get("BaseColor", "0308BC")), _color(values.get("CoreColor", "71ABFF")))
-    # his orange parts (stripes, logo) stay warm: pink
-    # (saturated orange only: red well above green; his skin is turned blue)
+    # a hologram of him: his own shading kept (dark folds to bright blue), glossy like chrome, lit by the scene, with a
+    # glow of its own; his skin a darker violet, his orange parts pink
+    dark = _color(values.get("DarkColor", "02031E"))
+    # (the game's colours, BaseColor and the others, read violet-blue with its bloom: shifted toward violet here)
+    blue = mix_color(math_node('MULTIPLY', math_node('POWER', brightness, 0.9), 1.6, clamp=True), dark, _color(values.get("HoloColor", "1A10D8")))
+    blue = mix_color(math_node('MULTIPLY', math_node('POWER', brightness, 4.0), 0.15, clamp=True), blue, _color(values.get("CoreColor", "71ABFF")))
+    skin = math_node('MULTIPLY', math_node('MULTIPLY', math_node('SUBTRACT', r, b), 3.0, clamp=True),
+                     math_node('SUBTRACT', 1.0, math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', r, g), 0.3), 4.0, clamp=True)))
+    blue = mix_color(math_node('MULTIPLY', skin, 0.7), blue, _color(values.get("SkinColor", "1C0A55")))
+    # (saturated orange only: red well above green)
     orange = math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', r, g), 0.3), 4.0, clamp=True)
     colour = mix_color(orange, blue, _color(values.get("WarmColor", "FF5FA8")))
 
     rim = nodes.new("ShaderNodeLayerWeight")
     rim.inputs["Blend"].default_value = 0.5
     facing = rim.outputs["Facing"]
-    # (lit from the front, darker toward his outline, where the sheen is)
-    body = emission(colour, math_node('SUBTRACT', 1.6, math_node('MULTIPLY', facing, 0.9)))
-    sheen_colour = mix_color(inputs.outputs["Hair"], _color(values.get("CoreColor", "71ABFF")), (1.0, 1.0, 1.0))
-    sheen = emission(sheen_colour, math_node('MULTIPLY', math_node('POWER', facing, 3.0), 1.3))
+    surface = nodes.new("ShaderNodeBsdfPrincipled")
+    links.new(colour, surface.inputs["Base Color"])
+    surface.inputs["Metallic"].default_value = 0.0
+    surface.inputs["Roughness"].default_value = 0.3
+    surface.inputs["Specular IOR Level"].default_value = 0.35
+    surface.inputs["Coat Weight"].default_value = 0.25  # (glossy highlights, not tinting him)
+    surface.inputs["Coat Roughness"].default_value = 0.15
+    links.new(colour, surface.inputs["Emission Color"])
+    surface.inputs["Emission Strength"].default_value = 1.4
+    # faint scanlines running up him
+    coords = nodes.new("ShaderNodeTexCoord")
+    height = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(coords.outputs["Object"], height.inputs[0])
+    lines = math_node('ADD', 0.85, math_node('MULTIPLY', math_node('SINE', math_node('ADD', math_node('MULTIPLY', height.outputs[2], 520.0),
+                                                                                       math_node('MULTIPLY', inputs.outputs["Time"], -6.0))), 0.15))
+    body = surface.outputs[0]
+    scan = emission(_color(values.get("HoloColor", "1A10D8")), math_node('MULTIPLY', math_node('SUBTRACT', lines, 0.7), 0.6))
+    body = add(body, scan)
+    # a blue haze at his outline (his hair's white)
+    sheen_colour = mix_color(inputs.outputs["Hair"], _color(values.get("HoloRimColor", "5A50FF")), (1.0, 1.0, 1.0))
+    sheen = emission(sheen_colour, math_node('MULTIPLY', math_node('POWER', facing, 2.5), 1.6))
 
     tile = float(values.get("CellTile", 3.0))
     uv = nodes.new("ShaderNodeUVMap")
@@ -1082,13 +1105,36 @@ def _build_yoru_group(images, values):
     cells.image = _image(images, "Cells")
     links.new(moved.outputs[0], cells.inputs[0])
     cell_lines = math_node('POWER', math_node('SUBTRACT', math_node('MULTIPLY', cells.outputs["Color"], 1.4), 0.4, clamp=True), 3.0)
-    cell_glow = emission(mix_color(0.5, _color(values.get("InnerColor", "0095FF")), _color(values.get("BaseColor", "0308BC"))), math_node('MULTIPLY', cell_lines, 0.8))
+    cell_glow = emission(_color(values.get("HoloCellColor", "3048FF")), math_node('MULTIPLY', cell_lines, 0.8))
+
+    # the glitch: blocks of him flicker back to his normal look for a frame or two, a cyan/magenta flash at their edge
+    # (Glitch Noise Details); a dozen steps a second
+    step = math_node('FLOOR', math_node('MULTIPLY', inputs.outputs["Time"], 12.0))
+    blocks = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('FLOOR', math_node('MULTIPLY', height.outputs[2], float(values.get("GlitchBands", 28.0)))), blocks.inputs[0])
+    links.new(math_node('FLOOR', math_node('MULTIPLY', math_node('ADD', height.outputs[0], height.outputs[1]), 6.0)), blocks.inputs[1])
+    links.new(step, blocks.inputs[2])
+    chance = nodes.new("ShaderNodeTexWhiteNoise")
+    chance.noise_dimensions = '3D'
+    links.new(blocks.outputs[0], chance.inputs["Vector"])
+    glitch = math_node('GREATER_THAN', chance.outputs["Value"], 1.0 - float(values.get("GlitchAmount", 0.06)))
+    flash_noise = nodes.new("ShaderNodeTexWhiteNoise")
+    flash_noise.noise_dimensions = '4D'
+    links.new(blocks.outputs[0], flash_noise.inputs["Vector"])
+    links.new(math_node('ADD', step, 0.5), flash_noise.inputs["W"])
+    flash = emission(mix_color(math_node('GREATER_THAN', flash_noise.outputs["Value"], 0.5), (0.0, 1.0, 1.0), (1.0, 0.1, 0.8)),
+                     math_node('MULTIPLY', math_node('MULTIPLY', math_node('GREATER_THAN', flash_noise.outputs["Value"], 0.85), glitch), 0.8))
+    hologram = add(add(add(body, sheen), cell_glow), flash)
+    glitched = nodes.new("ShaderNodeMixShader")
+    links.new(glitch, glitched.inputs[0])
+    links.new(hologram, glitched.inputs[1])
+    links.new(add(inputs.outputs["Shader"], flash), glitched.inputs[2])
 
     ult = inputs.outputs["Ult"]
     mixed = nodes.new("ShaderNodeMixShader")
     links.new(ult, mixed.inputs[0])
     links.new(inputs.outputs["Shader"], mixed.inputs[1])
-    links.new(add(add(body, sheen), cell_glow), mixed.inputs[2])
+    links.new(glitched.outputs[0], mixed.inputs[2])
     links.new(mixed.outputs[0], output.inputs[0])
     return group
 
