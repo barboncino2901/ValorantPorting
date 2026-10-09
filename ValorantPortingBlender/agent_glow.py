@@ -996,7 +996,7 @@ def _build_yoru_group(images, values):
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
     face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor').default_value = (0.5, 0.5, 0.5, 1.0)
-    for socket_name, default in (("Ult", 0.0), ("Time", 0.0), ("Hair", 0.0)):
+    for socket_name, default in (("Ult", 0.0), ("Glitch", 0.5), ("Time", 0.0), ("Hair", 0.0), ("Prop", 0.0)):
         face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
     nodes, links = group.nodes, group.links
@@ -1060,7 +1060,15 @@ def _build_yoru_group(images, values):
     blue = mix_color(math_node('MULTIPLY', math_node('POWER', brightness, 4.0), 0.15, clamp=True), blue, _color(values.get("CoreColor", "71ABFF")))
     skin = math_node('MULTIPLY', math_node('MULTIPLY', math_node('SUBTRACT', r, b), 3.0, clamp=True),
                      math_node('SUBTRACT', 1.0, math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', r, g), 0.3), 4.0, clamp=True)))
-    blue = mix_color(math_node('MULTIPLY', skin, 0.7), blue, _color(values.get("SkinColor", "1C0A55")))
+    # his skin keeps its own colour under the blue (his face, neck, fingers, wrists: a little bluish)
+    skin_colour = mix_color(float(values.get("SkinBlue", 0.3)), inputs.outputs["Albedo"], _color(values.get("HoloColor", "1A10D8")))
+    skin_colour = mix_color(0.45, skin_colour, (0.0, 0.0, 0.0), 'MULTIPLY')
+    skin_colour = mix_color(0.45, skin_colour, (0.25, 0.12, 0.2))  # (darker and warmer, as in game)
+    blue = mix_color(math_node('MULTIPLY', skin, 0.9), blue, skin_colour)
+    # his mask (Prop): its own light and dark parts clear, so it reads as a mask: near black to pale blue
+    mask_colour = mix_color(math_node('MULTIPLY', math_node('SUBTRACT', math_node('POWER', brightness, 0.8), 0.15), 2.2, clamp=True),
+                            (0.002, 0.003, 0.03), _color(values.get("MaskLight", "8FB0FF")))
+    blue = mix_color(inputs.outputs["Prop"], blue, mask_colour)
     # (saturated orange only: red well above green)
     orange = math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', r, g), 0.3), 4.0, clamp=True)
     colour = mix_color(orange, blue, _color(values.get("WarmColor", "FF5FA8")))
@@ -1076,7 +1084,10 @@ def _build_yoru_group(images, values):
     surface.inputs["Coat Weight"].default_value = 0.25  # (glossy highlights, not tinting him)
     surface.inputs["Coat Roughness"].default_value = 0.15
     links.new(colour, surface.inputs["Emission Color"])
-    surface.inputs["Emission Strength"].default_value = 1.4
+    # (his skin and his mask glow less: their own colours show)
+    links.new(math_node('MULTIPLY', 1.4, math_node('SUBTRACT', 1.0, math_node('MAXIMUM', math_node('MULTIPLY', skin, 0.85),
+                                                                                   math_node('MULTIPLY', inputs.outputs["Prop"], 0.5)))),
+              surface.inputs["Emission Strength"])
     # faint scanlines running up him
     coords = nodes.new("ShaderNodeTexCoord")
     height = nodes.new("ShaderNodeSeparateXYZ")
@@ -1117,7 +1128,9 @@ def _build_yoru_group(images, values):
     chance = nodes.new("ShaderNodeTexWhiteNoise")
     chance.noise_dimensions = '3D'
     links.new(blocks.outputs[0], chance.inputs["Vector"])
-    glitch = math_node('GREATER_THAN', chance.outputs["Value"], 1.0 - float(values.get("GlitchAmount", 0.035)))
+    # ("Glitch": 0 none, 0.5 as in game, 1 twice as much)
+    glitch = math_node('GREATER_THAN', chance.outputs["Value"],
+                       math_node('SUBTRACT', 1.0, math_node('MULTIPLY', inputs.outputs["Glitch"], 2.0 * float(values.get("GlitchAmount", 0.035)))))
     flash_noise = nodes.new("ShaderNodeTexWhiteNoise")
     flash_noise.noise_dimensions = '4D'
     links.new(blocks.outputs[0], flash_noise.inputs["Vector"])
@@ -1259,17 +1272,19 @@ def _warp_group(rig, fps):
     links.new(to_local.outputs[0], move.inputs["Position"])
     links.new(move.outputs[0], output.inputs[0])
 
-    for value_name, expression, prop in (("Amount", "value", True), ("Time", f"frame / {fps:g}", False)):
+    # (Amount: the ult control times the glitch slider, 0.5 = as made here)
+    for value_name, expression, props in (("Amount", "value * glitch * 2", (("value", "Ult: active"), ("glitch", "Ult: glitch"))),
+                                          ("Time", f"frame / {fps:g}", ())):
         curve = group.driver_add(f'nodes["VP {value_name}"].outputs[0].default_value')
         driver = curve.driver
         driver.type = 'SCRIPTED'
-        if prop:
+        for var_name, prop in props:
             var = driver.variables.new()
-            var.name = "value"
+            var.name = var_name
             var.type = 'SINGLE_PROP'
             var.targets[0].id_type = 'OBJECT'
             var.targets[0].id = rig
-            var.targets[0].data_path = '["Ult: active"]'
+            var.targets[0].data_path = f'["{prop}"]'
         driver.expression = expression
     return group
 
@@ -1766,7 +1781,9 @@ AGENTS = {
                   ("Ult: ghost", "Ghost", 0.0, "Omen's ghost (his ethereal form as he arrives): 0 -> 1 it takes his place; back to 0 he comes back")]),
     "stealth": dict(
         node="VP Yoru Ult", build=_build_yoru_group, materials="stealth", prepare=_prepare_yoru, first_person=True,
-        controls=[("Ult: active", "Ult", 0.0, "Yoru's ultimate (Dimensional Drift): he turns glowing blue, his mask on his face")]),
+        per_material=lambda tree, node, name, images: setattr(node.inputs["Prop"], "default_value", 1.0 if "_acc_" in name else 0.0),
+        controls=[("Ult: active", "Ult", 0.0, "Yoru's ultimate (Dimensional Drift): he turns into a glowing blue hologram, his mask on his face"),
+                  ("Ult: glitch", "Glitch", 0.5, "How much his hologram glitches: 0 none, 0.5 as in game, 1 twice as much (the warp and the flickering strips)")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
