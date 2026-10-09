@@ -1159,11 +1159,13 @@ def _prepare_yoru(objects):
 _ult_warps = []
 
 WARP_GROUP = "VP Hologram Warp"
+SLICES_PER_M = 140  # the glitch's slices: ~7 mm
 
 
 def _warp_group(rig, fps):
-    """Geometry nodes, after the rig: horizontal slices of the model pushed sideways by smooth noise that flows up
-    it (After Effects' Wave Warp, Smooth Noise), and now and then a band jolted further for a frame (a glitch).
+    """Geometry nodes, after the rig: a glitch warp. In random patches of the model (moving a few times a second),
+    thin horizontal slices jump sideways, each its own way, a dozen times a second; now and then a wider band is jolted
+    for a frame.
     Its "VP Amount" (0..1, the agent's ult control) and "VP Time" (s) are driven per rig."""
     name = f"{WARP_GROUP} ({rig.name})"
     if bpy.data.node_groups.get(name) is not None:
@@ -1204,33 +1206,42 @@ def _warp_group(rig, fps):
     links.new(to_world.outputs[0], split.inputs[0])
     height = split.outputs[2]
 
-    # the wave: smooth noise along his height, flowing up over time (two directions)
-    def wave(seed):
-        along = nodes.new("ShaderNodeCombineXYZ")
-        links.new(math_node('MULTIPLY', height, 6.0), along.inputs[0])
-        along.inputs[1].default_value = seed
-        noise = nodes.new("ShaderNodeTexNoise")
-        noise.noise_dimensions = '4D'
-        noise.inputs["Scale"].default_value = 1.0
-        noise.inputs["Detail"].default_value = 1.0
-        links.new(along.outputs[0], noise.inputs["Vector"])
-        links.new(math_node('MULTIPLY', values["Time"], 1.6), noise.inputs["W"])
-        return math_node('MULTIPLY', math_node('SUBTRACT', noise.outputs["Fac"], 0.5), 2.0)
+    step = math_node('FLOOR', math_node('MULTIPLY', values["Time"], 12.0))  # (a dozen glitch steps a second)
 
-    # the glitch: a band of him jolted sideways, a few times a second, for a frame
-    step = math_node('FLOOR', math_node('MULTIPLY', values["Time"], 12.0))
-    band = nodes.new("ShaderNodeCombineXYZ")
-    links.new(math_node('FLOOR', math_node('MULTIPLY', height, 14.0)), band.inputs[0])
-    links.new(step, band.inputs[1])
-    white = nodes.new("ShaderNodeTexWhiteNoise")
-    white.noise_dimensions = '3D'
-    links.new(band.outputs[0], white.inputs["Vector"])
-    jolt = math_node('MULTIPLY', math_node('GREATER_THAN', white.outputs["Value"], 0.96),
-                     math_node('SUBTRACT', math_node('MULTIPLY', white.outputs["Color"], 1.0), 0.5))
+    def white(x, y, z, dimensions='3D'):
+        vector = nodes.new("ShaderNodeCombineXYZ")
+        for i, v in enumerate((x, y, z)):
+            if isinstance(v, (int, float)):
+                vector.inputs[i].default_value = v
+            else:
+                links.new(v, vector.inputs[i])
+        node = nodes.new("ShaderNodeTexWhiteNoise")
+        node.noise_dimensions = dimensions
+        links.new(vector.outputs[0], node.inputs["Vector"])
+        return node.outputs["Value"]
+
+    # thin slices (~7 mm), each jumping its own way, again every glitch step
+    slice_index = math_node('FLOOR', math_node('MULTIPLY', height, float(SLICES_PER_M)))
+    slice_x = math_node('SUBTRACT', white(slice_index, step, 0.0), 0.5)
+    slice_y = math_node('SUBTRACT', white(slice_index, step, 3.7), 0.5)
+    # only in patches of him: soft blobs of noise over his body, somewhere else a few times a second
+    patches = nodes.new("ShaderNodeTexNoise")
+    patches.noise_dimensions = '4D'
+    patches.inputs["Scale"].default_value = 3.0
+    patches.inputs["Detail"].default_value = 0.0
+    links.new(to_world.outputs[0], patches.inputs["Vector"])
+    links.new(math_node('MULTIPLY', math_node('FLOOR', math_node('MULTIPLY', values["Time"], 4.0)), 7.13), patches.inputs["W"])
+    patch = math_node('MULTIPLY', math_node('SUBTRACT', patches.outputs["Fac"], 0.56), 10.0)
+    patch = math_node('MINIMUM', math_node('MAXIMUM', patch, 0.0), 1.0)
+    # and now and then a wider band jolted for a frame
+    band = math_node('FLOOR', math_node('MULTIPLY', height, 14.0))
+    jolt_noise = white(band, step, 9.1)
+    jolt = math_node('MULTIPLY', math_node('GREATER_THAN', jolt_noise, 0.985),
+                     math_node('SUBTRACT', math_node('MULTIPLY', math_node('FRACT', math_node('MULTIPLY', jolt_noise, 97.0)), 2.0), 1.0))
+    slice_size, jolt_size = 0.04, 0.05  # m
     shift = nodes.new("ShaderNodeCombineXYZ")
-    wave_size, jolt_size = 0.045, 0.07  # m
-    links.new(math_node('ADD', math_node('MULTIPLY', wave(0.0), wave_size), math_node('MULTIPLY', jolt, jolt_size)), shift.inputs[0])
-    links.new(math_node('MULTIPLY', wave(7.3), wave_size), shift.inputs[1])
+    links.new(math_node('ADD', math_node('MULTIPLY', math_node('MULTIPLY', slice_x, patch), slice_size), math_node('MULTIPLY', jolt, jolt_size)), shift.inputs[0])
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', slice_y, patch), slice_size), shift.inputs[1])
     scaled = nodes.new("ShaderNodeVectorMath")
     scaled.operation = 'SCALE'
     links.new(shift.outputs[0], scaled.inputs[0])
