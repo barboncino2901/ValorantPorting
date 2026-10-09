@@ -984,6 +984,128 @@ def _prepare_omen(objects):
     return _put_form_on_rig(objects, "x_new", "wraith")
 
 
+def _build_yoru_group(images, values):
+    """Yoru: his ultimate (Dimensional Drift; mi_ultimate_X_materialOverlay_3P_0/_3). Ult: he turns deep blue (his own
+    shading kept as light and dark blues: BaseColor to CoreColor), his orange parts pink, a light blue sheen at his
+    outline, cells of light drifting over him (tex_noise_04 tiled 3x3, PanSpeed); his hair's outline white."""
+    name = "VP Yoru Ult"
+    old = bpy.data.node_groups.get(name)
+    if old is not None and old.users == 0:
+        bpy.data.node_groups.remove(old)
+    group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    face = group.interface
+    face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
+    face.new_socket("Albedo", in_out='INPUT', socket_type='NodeSocketColor').default_value = (0.5, 0.5, 0.5, 1.0)
+    for socket_name, default in (("Ult", 0.0), ("Time", 0.0), ("Hair", 0.0)):
+        face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = default
+    face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def mix_color(factor, a, b, blend='MIX'):
+        node = nodes.new("ShaderNodeMix")
+        node.data_type = 'RGBA'
+        node.blend_type = blend
+        if isinstance(factor, (int, float)):
+            node.inputs[0].default_value = factor
+        else:
+            links.new(factor, node.inputs[0])
+        for socket, value in ((node.inputs[6], a), (node.inputs[7], b)):
+            if isinstance(value, tuple):
+                socket.default_value = (*value, 1.0)
+            else:
+                links.new(value, socket)
+        return node.outputs[2]
+
+    def emission(color, strength):
+        node = nodes.new("ShaderNodeEmission")
+        if isinstance(color, tuple):
+            node.inputs["Color"].default_value = (*color, 1.0)
+        else:
+            links.new(color, node.inputs["Color"])
+        if isinstance(strength, (int, float)):
+            node.inputs["Strength"].default_value = strength
+        else:
+            links.new(strength, node.inputs["Strength"])
+        return node.outputs[0]
+
+    def add(a, b):
+        node = nodes.new("ShaderNodeAddShader")
+        links.new(a, node.inputs[0])
+        links.new(b, node.inputs[1])
+        return node.outputs[0]
+
+    channels = nodes.new("ShaderNodeSeparateColor")
+    links.new(inputs.outputs["Albedo"], channels.inputs[0])
+    r, g, b = channels.outputs[0], channels.outputs[1], channels.outputs[2]
+    brightness = math_node('ADD', math_node('ADD', math_node('MULTIPLY', r, 0.3), math_node('MULTIPLY', g, 0.59)), math_node('MULTIPLY', b, 0.11))
+    blue = mix_color(math_node('MULTIPLY', math_node('POWER', brightness, 2.0), 0.15, clamp=True),
+                     _color(values.get("BaseColor", "0308BC")), _color(values.get("CoreColor", "71ABFF")))
+    # his orange parts (stripes, logo) stay warm: pink
+    # (saturated orange only: red well above green; his skin is turned blue)
+    orange = math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', r, g), 0.3), 4.0, clamp=True)
+    colour = mix_color(orange, blue, _color(values.get("WarmColor", "FF5FA8")))
+
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.5
+    facing = rim.outputs["Facing"]
+    # (lit from the front, darker toward his outline, where the sheen is)
+    body = emission(colour, math_node('SUBTRACT', 1.6, math_node('MULTIPLY', facing, 0.9)))
+    sheen_colour = mix_color(inputs.outputs["Hair"], _color(values.get("CoreColor", "71ABFF")), (1.0, 1.0, 1.0))
+    sheen = emission(sheen_colour, math_node('MULTIPLY', math_node('POWER', facing, 3.0), 1.3))
+
+    tile = float(values.get("CellTile", 3.0))
+    uv = nodes.new("ShaderNodeUVMap")
+    moved = nodes.new("ShaderNodeVectorMath")
+    moved.operation = 'MULTIPLY_ADD'
+    links.new(uv.outputs[0], moved.inputs[0])
+    moved.inputs[1].default_value = (tile, tile, 1.0)
+    shift = nodes.new("ShaderNodeCombineXYZ")
+    speed = float(values.get("PanSpeed", 0.15))
+    links.new(math_node('MULTIPLY', inputs.outputs["Time"], speed), shift.inputs[0])
+    links.new(math_node('MULTIPLY', inputs.outputs["Time"], speed * 0.6), shift.inputs[1])
+    links.new(shift.outputs[0], moved.inputs[2])
+    cells = nodes.new("ShaderNodeTexImage")
+    cells.image = _image(images, "Cells")
+    links.new(moved.outputs[0], cells.inputs[0])
+    cell_lines = math_node('POWER', math_node('SUBTRACT', math_node('MULTIPLY', cells.outputs["Color"], 1.4), 0.4, clamp=True), 3.0)
+    cell_glow = emission(mix_color(0.5, _color(values.get("InnerColor", "0095FF")), _color(values.get("BaseColor", "0308BC"))), math_node('MULTIPLY', cell_lines, 0.8))
+
+    ult = inputs.outputs["Ult"]
+    mixed = nodes.new("ShaderNodeMixShader")
+    links.new(ult, mixed.inputs[0])
+    links.new(inputs.outputs["Shader"], mixed.inputs[1])
+    links.new(add(add(body, sheen), cell_glow), mixed.inputs[2])
+    links.new(mixed.outputs[0], output.inputs[0])
+    return group
+
+
+# props shown only in an ultimate (Yoru's mask): the object and its rig, given their visibility driver after the import
+_ult_props = []
+
+
+def _prepare_yoru(objects):
+    """His ult mask: shown while "Ult: active" is up."""
+    rig = next((_armature_of(o) for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_") and _armature_of(o)), None)
+    for obj in objects:
+        if obj.type == 'MESH' and obj.name.upper().startswith("AB_STEALTH_S0_X") and rig is not None:
+            _ult_props.append((obj, rig, "Ult: active"))
+    return objects
+
+
 def _build_neon_group(images, values):
     """Neon (after a Blender setup made for her ultimate): Ult (Overdrive): her suit's lines and tattoo glow cyan, the
     edges of her skin glow with electricity moving over them (TP_Sprinter_Ult_Masks_Body01_T R and G, the model's
@@ -1474,6 +1596,9 @@ AGENTS = {
         node="VP Omen Ult", build=_build_omen_group, materials=("wraith", "ethereal"), prepare=_prepare_omen, see_through=True,
         controls=[("Ult: cast", "Cast", 0.0, "Omen casting his ultimate: 0 -> 0.5 he turns to shadow, his markings glowing cyan; 0.5 -> 1 he dissolves away"),
                   ("Ult: ghost", "Ghost", 0.0, "Omen's ghost (his ethereal form as he arrives): 0 -> 1 it takes his place; back to 0 he comes back")]),
+    "stealth": dict(
+        node="VP Yoru Ult", build=_build_yoru_group, materials="stealth", prepare=_prepare_yoru, first_person=True,
+        controls=[("Ult: active", "Ult", 0.0, "Yoru's ultimate (Dimensional Drift): he turns glowing blue, his mask on his face")]),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
@@ -1496,7 +1621,7 @@ def _drive(tree, node, socket, armature, prop):
 def _armature_of(obj):
     if obj.parent is not None and obj.parent.type == 'ARMATURE':
         return obj.parent
-    return next((m.object for m in obj.modifiers if m.type == 'ARMATURE' and m.object), None)
+    return next((m.object for m in obj.modifiers if m.type == 'ARMATURE' and m.object), None) or         next((c.target for c in obj.constraints if c.type == 'CHILD_OF' and c.target is not None and c.target.type == 'ARMATURE'), None)
 
 
 HANDS_ATTRIBUTE = "vp_hands"
@@ -1599,6 +1724,23 @@ def connect_pending():
     """Connects the glow layers to their armature's controls (the "Glow: ..." properties) and to the timeline. Done
     after the import, and the armature is told it changed: Blender's evaluated copy of it doesn't have the new
     properties until then, and drivers reading them before that are marked invalid."""
+    while _ult_props:
+        obj, rig, prop = _ult_props.pop()
+        try:
+            for path in ("hide_viewport", "hide_render"):
+                curve = obj.driver_add(path)
+                driver = curve.driver
+                driver.type = 'SCRIPTED'
+                var = driver.variables.new()
+                var.name = "value"
+                var.type = 'SINGLE_PROP'
+                var.targets[0].id_type = 'OBJECT'
+                var.targets[0].id = rig
+                var.targets[0].data_path = f'["{prop}"]'
+                driver.expression = "value < 0.5"
+            rig.update_tag()
+        except ReferenceError:
+            pass
     while pending:
         material, armature, fps, spec = pending.pop()
         try:

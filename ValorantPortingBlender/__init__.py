@@ -481,6 +481,23 @@ def attach_part_to_bone(child, rig, attachment):
     constraint.inverse_matrix = unreal_bone_frame(rig, bone)
 
 
+def face_like_rig(child, rig, bone, offset=None):
+    """A prop made in the agent's own frame (Yoru's ult mask): at rest, on the bone (moved by the offset, Unreal cm in
+    the agent's frame) and turned like the agent, still following the bone after (its Child Of stays)."""
+    if child is None or bone not in rig.data.bones:
+        return
+    constraint = next((c for c in child.constraints if c.type == 'CHILD_OF'), None)
+    if constraint is None:
+        return
+    rest_bone = rig.matrix_world @ rig.data.bones[bone].matrix_local
+    body = next((o for o in rig.children if o.type == 'MESH'), rig)  # (imported like the prop: same axes)
+    wanted = body.matrix_world.to_quaternion().to_matrix().to_4x4()
+    offset = offset or {}
+    shift = Vector((offset.get("X", 0.0), -offset.get("Y", 0.0), offset.get("Z", 0.0))) * 0.01
+    wanted.translation = rest_bone.translation + body.matrix_world.to_3x3() @ shift
+    child.matrix_basis = (rest_bone @ constraint.inverse_matrix).inverted() @ wanted
+
+
 # Valorant's horizontal field of view (fixed, 16:9)
 FIRST_PERSON_FOV = 103.0
 
@@ -1958,6 +1975,7 @@ def import_response(response, holder=None, use_selection=True):
             imported_parts.append({
                 "MeshName": part.get("MeshName"),
                 "BoneAttachment": part.get("AttachToBone"),
+                "Part": part.get("Part"),
                 "Attachments": attachments,
                 "Parent": imported_part,
                 "Mesh": mesh
@@ -1991,10 +2009,14 @@ def import_response(response, holder=None, use_selection=True):
     import_part(import_data.get("Parts"))
 
     # parts the game hangs on the model's bones (Jett's Blade Storm: a knife on each rig bone Knife1-5)
-    rig = next((p["Parent"] for p in imported_parts if p["Parent"].type == 'ARMATURE'), None)
+    # (an agent's: her 3rd person rig, e.g. Yoru's ult mask on his head)
+    armatures = [p["Parent"] for p in imported_parts if p["Parent"].type == 'ARMATURE']
+    rig = next((a for a in armatures if a.name.upper().startswith("TP_")), armatures[0] if armatures else None)
     for imported_part in imported_parts:
         if (bone_attachment := imported_part.get("BoneAttachment")) and rig is not None:
             attach_part_to_bone(imported_part["Parent"], rig, bone_attachment)
+            if imported_part.get("Part") == "UltProp":
+                face_like_rig(imported_part["Parent"], rig, bone_attachment.get("Bone"), bone_attachment.get("Location"))
 
     if import_settings.get("FirstPersonCamera"):
         add_first_person_camera([p["Parent"] for p in imported_parts], new_collection)

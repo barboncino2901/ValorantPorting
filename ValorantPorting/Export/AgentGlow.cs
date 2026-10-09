@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
+using CUE4Parse.UE4.Assets.Exports.StaticMesh;
+using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using ValorantPorting.AppUtils;
 
@@ -175,6 +178,19 @@ public static class AgentGlow
                     ["BodyColorLower"] = "9598BC", ["BodyColorUpper"] = "4E4D89", ["HeadColorBottom"] = "30316C",
                     ["HeadColorTop"] = "151434", ["EyeColor"] = "00FFFF", ["TearawayColor"] = "090D19"
                 }),
+            // Yoru: his ultimate (Dimensional Drift): mi_ultimate_X_materialOverlay_3P_0/_3 turn him deep blue (BaseColor),
+            // a light blue sheen (CoreColor, InnerColor), cells drifting over him (tex_noise_04 tiled 3x3, PanSpeed), a
+            // white rim on his hair (FresnelColor); his mask on his face (see UltProps)
+            ["Stealth"] = (
+                new Dictionary<string, string>
+                {
+                    ["Cells"] = "/Game/Characters/Stealth/S0/VFX/Textures/tex_noise_04.tex_noise_04"
+                },
+                new Dictionary<string, object>
+                {
+                    ["BaseColor"] = "0308BC", ["CoreColor"] = "71ABFF", ["InnerColor"] = "0095FF", ["CellTile"] = 3.0,
+                    ["PanSpeed"] = 0.15
+                }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
             // colours: dark, orange, gold)
@@ -201,8 +217,18 @@ public static class AgentGlow
         ["Smonk"] = "/Game/Characters/Smonk/S0/Ability_X/3P/Models/AB_Smonk_S0_X_Resurrection_Skelmesh.AB_Smonk_S0_X_Resurrection_Skelmesh"
     };
 
+    // props the game puts on an agent in her ultimate: codename -> (static mesh, its material, bone, offset in the
+    // agent's frame, cm: forward, right, up). Yoru's mask (FXC_Stealth_X_MaskCosmetics, placed by the game's code: set
+    // on his face by eye); the add-on shows it while the ultimate is on
+    private static readonly Dictionary<string, (string Mesh, string Material, string Bone, FVector Offset)> UltProps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Stealth"] = ("/Game/Characters/Stealth/S0/VFX/Meshes/AB_Stealth_S0_X_Staticmesh.AB_Stealth_S0_X_Staticmesh",
+            "/Game/Characters/Stealth/S0/3P/Materials/TP_Stealth_S0_Acc_MI.TP_Stealth_S0_Acc_MI", "Head", new FVector(6f, 0f, -3.5f))
+    };
+
     public static void AddUltForm(List<ExportPart> parts)
     {
+        AddUltProp(parts);
         var thirdPerson = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/3P/", StringComparison.OrdinalIgnoreCase) &&
                                                                                   p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
         if (thirdPerson is null) return;
@@ -216,6 +242,29 @@ public static class AgentGlow
         catch (Exception)
         {
             // missing from this game version: no ult form
+        }
+    }
+
+    private static void AddUltProp(List<ExportPart> parts)
+    {
+        var thirdPerson = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/3P/", StringComparison.OrdinalIgnoreCase) &&
+                                                                                  p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
+        if (thirdPerson is null) return;
+        var codename = thirdPerson[(thirdPerson.IndexOf("/Characters/", StringComparison.OrdinalIgnoreCase) + "/Characters/".Length)..].Split('/')[0];
+        if (!UltProps.TryGetValue(codename, out var prop)) return;
+        try
+        {
+            if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(prop.Mesh, out UStaticMesh mesh)) return;
+            var index = ExportHelpers.SMesh(mesh, parts);
+            if (index < 0) return;
+            parts[index].Part = "UltProp";
+            parts[index].AttachToBone = new PartBoneAttachment(prop.Bone, prop.Offset, FRotator.ZeroRotator, FVector.OneVector);
+            if (AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(prop.Material, out UMaterialInstanceConstant material))
+                ExportHelpers.OverrideMaterials([material], parts[index]);
+        }
+        catch (Exception)
+        {
+            // missing from this game version: no prop
         }
     }
 
