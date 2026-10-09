@@ -1117,7 +1117,7 @@ def _build_yoru_group(images, values):
     chance = nodes.new("ShaderNodeTexWhiteNoise")
     chance.noise_dimensions = '3D'
     links.new(blocks.outputs[0], chance.inputs["Vector"])
-    glitch = math_node('GREATER_THAN', chance.outputs["Value"], 1.0 - float(values.get("GlitchAmount", 0.06)))
+    glitch = math_node('GREATER_THAN', chance.outputs["Value"], 1.0 - float(values.get("GlitchAmount", 0.035)))
     flash_noise = nodes.new("ShaderNodeTexWhiteNoise")
     flash_noise.noise_dimensions = '4D'
     links.new(blocks.outputs[0], flash_noise.inputs["Vector"])
@@ -1144,12 +1144,123 @@ _ult_props = []
 
 
 def _prepare_yoru(objects):
-    """His ult mask: shown while "Ult: active" is up."""
+    """His ult mask: shown while "Ult: active" is up. His models (and the mask) warp like a hologram in his ult."""
     rig = next((_armature_of(o) for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_") and _armature_of(o)), None)
     for obj in objects:
         if obj.type == 'MESH' and obj.name.upper().startswith("AB_STEALTH_S0_X") and rig is not None:
             _ult_props.append((obj, rig, "Ult: active"))
+    for obj in objects:
+        if obj.type == 'MESH' and obj.name.upper().startswith(("TP_", "FP_", "AB_STEALTH_S0_X")) and _armature_of(obj) is not None:
+            _ult_warps.append((obj, _armature_of(obj), "Ult: active"))
     return objects
+
+
+# models that warp in an ultimate (Yoru's hologram), given their modifier and drivers after the import
+_ult_warps = []
+
+WARP_GROUP = "VP Hologram Warp"
+
+
+def _warp_group(rig, fps):
+    """Geometry nodes, after the rig: horizontal slices of the model pushed sideways by smooth noise that flows up
+    it (After Effects' Wave Warp, Smooth Noise), and now and then a band jolted further for a frame (a glitch).
+    Its "VP Amount" (0..1, the agent's ult control) and "VP Time" (s) are driven per rig."""
+    name = f"{WARP_GROUP} ({rig.name})"
+    if bpy.data.node_groups.get(name) is not None:
+        return bpy.data.node_groups[name]
+    group = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+    group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+    values = {}
+    for value_name in ("Amount", "Time"):
+        node = nodes.new("ShaderNodeValue")
+        node.name = node.label = "VP " + value_name
+        values[value_name] = node.outputs[0]
+
+    def math_node(op, a, b=None):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    # (in world space: his body and his mask, attached another way, warp together)
+    position = nodes.new("GeometryNodeInputPosition")
+    self_object = nodes.new("GeometryNodeSelfObject")
+    info = nodes.new("GeometryNodeObjectInfo")
+    info.transform_space = 'ORIGINAL'
+    links.new(self_object.outputs[0], info.inputs["Object"])
+    to_world = nodes.new("FunctionNodeTransformPoint")
+    links.new(position.outputs[0], to_world.inputs["Vector"])
+    links.new(info.outputs["Transform"], to_world.inputs["Transform"])
+    split = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(to_world.outputs[0], split.inputs[0])
+    height = split.outputs[2]
+
+    # the wave: smooth noise along his height, flowing up over time (two directions)
+    def wave(seed):
+        along = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', height, 6.0), along.inputs[0])
+        along.inputs[1].default_value = seed
+        noise = nodes.new("ShaderNodeTexNoise")
+        noise.noise_dimensions = '4D'
+        noise.inputs["Scale"].default_value = 1.0
+        noise.inputs["Detail"].default_value = 1.0
+        links.new(along.outputs[0], noise.inputs["Vector"])
+        links.new(math_node('MULTIPLY', values["Time"], 1.6), noise.inputs["W"])
+        return math_node('MULTIPLY', math_node('SUBTRACT', noise.outputs["Fac"], 0.5), 2.0)
+
+    # the glitch: a band of him jolted sideways, a few times a second, for a frame
+    step = math_node('FLOOR', math_node('MULTIPLY', values["Time"], 12.0))
+    band = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('FLOOR', math_node('MULTIPLY', height, 14.0)), band.inputs[0])
+    links.new(step, band.inputs[1])
+    white = nodes.new("ShaderNodeTexWhiteNoise")
+    white.noise_dimensions = '3D'
+    links.new(band.outputs[0], white.inputs["Vector"])
+    jolt = math_node('MULTIPLY', math_node('GREATER_THAN', white.outputs["Value"], 0.96),
+                     math_node('SUBTRACT', math_node('MULTIPLY', white.outputs["Color"], 1.0), 0.5))
+    shift = nodes.new("ShaderNodeCombineXYZ")
+    wave_size, jolt_size = 0.045, 0.07  # m
+    links.new(math_node('ADD', math_node('MULTIPLY', wave(0.0), wave_size), math_node('MULTIPLY', jolt, jolt_size)), shift.inputs[0])
+    links.new(math_node('MULTIPLY', wave(7.3), wave_size), shift.inputs[1])
+    scaled = nodes.new("ShaderNodeVectorMath")
+    scaled.operation = 'SCALE'
+    links.new(shift.outputs[0], scaled.inputs[0])
+    links.new(values["Amount"], scaled.inputs["Scale"])
+    moved = nodes.new("ShaderNodeVectorMath")
+    links.new(to_world.outputs[0], moved.inputs[0])
+    links.new(scaled.outputs[0], moved.inputs[1])
+    back = nodes.new("FunctionNodeInvertMatrix")
+    links.new(info.outputs["Transform"], back.inputs[0])
+    to_local = nodes.new("FunctionNodeTransformPoint")
+    links.new(moved.outputs[0], to_local.inputs["Vector"])
+    links.new(back.outputs[0], to_local.inputs["Transform"])
+    move = nodes.new("GeometryNodeSetPosition")
+    links.new(inputs.outputs["Geometry"], move.inputs["Geometry"])
+    links.new(to_local.outputs[0], move.inputs["Position"])
+    links.new(move.outputs[0], output.inputs[0])
+
+    for value_name, expression, prop in (("Amount", "value", True), ("Time", f"frame / {fps:g}", False)):
+        curve = group.driver_add(f'nodes["VP {value_name}"].outputs[0].default_value')
+        driver = curve.driver
+        driver.type = 'SCRIPTED'
+        if prop:
+            var = driver.variables.new()
+            var.name = "value"
+            var.type = 'SINGLE_PROP'
+            var.targets[0].id_type = 'OBJECT'
+            var.targets[0].id = rig
+            var.targets[0].data_path = '["Ult: active"]'
+        driver.expression = expression
+    return group
 
 
 def _build_neon_group(images, values):
@@ -1770,6 +1881,16 @@ def connect_pending():
     """Connects the glow layers to their armature's controls (the "Glow: ..." properties) and to the timeline. Done
     after the import, and the armature is told it changed: Blender's evaluated copy of it doesn't have the new
     properties until then, and drivers reading them before that are marked invalid."""
+    while _ult_warps:
+        obj, rig, prop = _ult_warps.pop()
+        try:
+            if obj.modifiers.get("VP Hologram Warp") is None:
+                fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+                modifier = obj.modifiers.new("VP Hologram Warp", 'NODES')  # (after the rig: last in the stack)
+                modifier.node_group = _warp_group(rig, fps)
+            rig.update_tag()
+        except ReferenceError:
+            pass
     while _ult_props:
         obj, rig, prop = _ult_props.pop()
         try:
