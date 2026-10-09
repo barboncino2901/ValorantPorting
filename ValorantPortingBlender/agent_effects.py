@@ -462,6 +462,9 @@ def _has_alpha(image):
     return found
 
 
+# Yoru's rift: which end of its mesh (its V) it tears open from
+TEAR_FROM_HIGH_V = False
+
 # Omen's shadow smoke materials (their look is made in their shaders: see _material)
 SHADOW_MATERIALS = {"ground_power", "ground_power_activate_ALLY", "back_power", "specter_ground_tether", "Radial_Mesh",
                     "air_splitting"}
@@ -656,9 +659,38 @@ def _material(emitter, images, name, boost=1.0):
         links.new(math_node('MINIMUM', math_node('MULTIPLY', edge.outputs[0], 1.5), 1.0), rim.inputs[0])
         links.new(inside.outputs[2], rim.inputs[6])
         rim.inputs[7].default_value = rgb("EdgeColor", (0.33, 0.81, 1.0))
-        colour = rim.outputs[2]
-        mask = math_node('MINIMUM', math_node('MULTIPLY', shape.outputs[0], 1.2), 1.0)
+        # it tears open along its length (right to left as he looks, 0 -> 0.4 of its control), stays open, and pinches
+        # shut across its width (0.75 -> 1); "VP Reveal" is the control, driven after the import
+        reveal = nodes.new("ShaderNodeValue")
+        reveal.name = reveal.label = "VP Reveal"
+        reveal.outputs[0].default_value = 0.5
+        split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(uv, split.inputs[0])
+        jag = nodes.new("ShaderNodeTexNoise")
+        jag.inputs["Scale"].default_value = 6.0
+        links.new(uv, jag.inputs["Vector"])
+        along = math_node('ADD', math_node('SUBTRACT', 1.0, split.outputs[1]) if TEAR_FROM_HIGH_V else split.outputs[1],
+                          math_node('MULTIPLY', math_node('SUBTRACT', jag.outputs["Fac"], 0.5), 0.12))
+        opened = math_node('MULTIPLY', math_node('DIVIDE', reveal.outputs[0], 0.4), 1.15)
+        front = math_node('SUBTRACT', opened, along)  # > 0: torn open
+        shown = math_node('MINIMUM', math_node('MAXIMUM', math_node('MULTIPLY', front, 25.0), 0.0), 1.0)
+        tip = math_node('MULTIPLY', math_node('MULTIPLY', shown, math_node('SUBTRACT', 1.0, math_node('MINIMUM', math_node('MULTIPLY', front, 8.0), 1.0))),
+                        math_node('LESS_THAN', reveal.outputs[0], 0.4))  # (the tearing edge, bright while it opens)
+        closing = math_node('MINIMUM', math_node('MAXIMUM', math_node('DIVIDE', math_node('SUBTRACT', reveal.outputs[0], 0.75), 0.25), 0.0), 1.0)
+        across = math_node('ABSOLUTE', math_node('MULTIPLY', math_node('SUBTRACT', split.outputs[0], 0.5), 2.0))
+        pinched = math_node('MINIMUM', math_node('MAXIMUM', math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', 1.0, closing), across), 12.0), 0.0), 1.0)
+        bright = nodes.new("ShaderNodeMix")
+        bright.data_type = 'RGBA'
+        links.new(math_node('MAXIMUM', tip, math_node('MULTIPLY', closing, 0.25)), bright.inputs[0])
+        links.new(rim.outputs[2], bright.inputs[6])
+        bright.inputs[7].default_value = (0.8, 0.95, 1.0, 1.0)
+        colour = bright.outputs[2]
+        mask = math_node('MULTIPLY', math_node('MINIMUM', math_node('MULTIPLY', shape.outputs[0], 1.2), 1.0), math_node('MULTIPLY', shown, pinched))
         boost = boost * 2.0
+        life_alpha = 1.0  # (its reveal is its fade; its colour its own)
+        white = nodes.new("ShaderNodeRGB")
+        white.outputs[0].default_value = (1.0, 1.0, 1.0, 1.0)
+        life_colour = white.outputs[0]
     elif face and images.get(textures.get("Flipbook")) is not None:
         # KAY/O's face screen (m_faceExpressions_flipbook): the expression's lines (R) and their halo (G) in ColorA, on
         # a round purple glow (ColorRadialGradient, Radius); his face as a 10 x 10 flipbook
@@ -790,7 +822,7 @@ def _material(emitter, images, name, boost=1.0):
         tint.inputs[7].default_value = (1.0, 1.0, 1.0, 1.0)
     glow = nodes.new("ShaderNodeEmission")
     links.new(tint.outputs[2], glow.inputs["Color"])
-    opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False)
+    opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False) if not isinstance(life_alpha, float) else mask
     # (smoke: barely lit, it darkens what's behind it)
     links.new(math_node('MULTIPLY', opacity, 0.04 if smoke else 0.15 if shadow else min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
     if boost > 1.0:
@@ -869,7 +901,7 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
     meshes = {}
     # effects whose emitters all play once (a cast burst): their control is how far through the burst (0 -> 1) they
     # are, to keyframe; the others switch on (1) and keep going with the timeline
-    one_shot, lengths = {}, {}
+    one_shot, lengths, counts, held = {}, {}, {}, {}
     for spawn in effects:
         control = spawn.get("Effect") or "FX"
         for emitter in spawn.get("Emitters") or []:
@@ -877,10 +909,16 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
             particles = schedule(emitter, seed=0) if loops > 0 else []
             # (one whose particles stay, held as long as the effect is on: an on/off effect)
             stays = any(p["life"] >= 1e8 for p in particles)
-            one_shot[control] = one_shot.get(control, True) and loops > 0 and not stays
+            once, total = counts.get(control, (0, 0))
+            counts[control] = (once + (loops > 0 and not stays), total + 1)
+            held[control] = held.get(control, False) or stays
             if loops > 0:
                 end = max((p["birth"] + min(p["life"], 10.0) for p in particles), default=0.0)
                 lengths[control] = max(lengths.get(control, 0.0), float(spawn.get("Delay") or 0.0) + end)
+    # one-shot when most of its emitters play once (a few looping embers in a burst, like Yoru's rift, don't make it
+    # an on/off effect) and none of them stays
+    for control, (once, total) in counts.items():
+        one_shot[control] = not held.get(control) and once >= 0.6 * total
     if modes is not None:
         for control, (shot, length) in modes.items():
             one_shot[control], lengths[control] = shot, length
@@ -933,6 +971,11 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
                         images[path] = None
             # the same particles every time (Python's hash() changes between runs)
             particles = schedule(emitter, seed=zlib.crc32(f"{spawn.get('System')}|{socket}|{emitter.get('Name')}|{number}".encode()))
+            if ((emitter.get("Material") or {}).get("BaseMaterial") or "") == "m_X_portalTear_01":
+                # (Yoru's rift: there for the whole effect; its control opens and closes it)
+                particles = particles[:1]
+                for particle in particles:
+                    particle["birth"], particle["life"] = -1.0, 1e9
             mesh_object = None
             if emitter.get("Mesh") and load_mesh is not None:
                 if emitter["Mesh"] not in meshes:
@@ -1018,6 +1061,8 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
             own.nodes["VP Pivot Y"].outputs[0].default_value = -0.5 - float(pivot.get("Y", -0.5))
             offset = _module(emitter, "CameraOffset")
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
+            if material.node_tree.nodes.get("VP Reveal") is not None:
+                _drive(material.node_tree, 'nodes["VP Reveal"].outputs[0].default_value', rig, control)
             # the timeline's seconds: shadow smoke keeps drifting and circling while its effect is held
             _drive(own, 'nodes["VP Clock"].outputs[0].default_value', rig, control, f"frame / {fps:g}", variables=[])
             if (emitter.get("Material") or {}).get("BaseMaterial") in SHADOW_MATERIALS:

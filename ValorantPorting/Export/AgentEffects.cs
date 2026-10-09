@@ -60,6 +60,9 @@ public static class AgentEffects
             ("Face: knife (E)", "/Game/Characters/Grenadier/S0/VFX/ps_E_faceExpression_01", "Head", false),
             ("Face: ultimate", "/Game/Characters/Grenadier/S0/VFX/ps_X_faceExpression_01", "Head", false)
         ],
+        // Yoru: his rift seen in 3rd person too (the game shows its 1st person version only to him), where his left
+        // hand tears it in his mask-pulling animation
+        ["Stealth"] = [("FX: mask portal", "/Game/Characters/Stealth/S0/VFX/ps_ultMaskPortal_01", "L_WeaponPoint", false)],
         // Omen's ultimate (FXC_Wraith_X_GlobalTeleport_Equip / _Depart, the ghost's arrival): the shadow orb in his
         // hand while he holds it, the shadows swirling round him as he casts it, and as his ghost arrives
         ["Wraith"] =
