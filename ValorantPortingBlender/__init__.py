@@ -2059,12 +2059,19 @@ def import_response(response, holder=None, use_selection=True):
     if import_data.get("Effects"):
         try:
             # the rig with the bones the effects hang on (an agent's 3rd person rig, Jett's knife rig)
-            sockets = {e.get("Socket") for e in import_data["Effects"]}
-            rigs = [o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
-                    and [b for b in sockets if b in o.data.bones]]
-            rig = next((o for o in rigs if o.name.upper().startswith("TP")), rigs[0] if rigs else None)
-            made = agent_effects.apply(import_data["Effects"], rig, import_texture, attach_part_to_bone, new_collection,
-                                       load_mesh=import_mesh)
+            # (1st person effects on the 1st person arms)
+            made, modes = 0, {}
+            for first_person in (False, True):
+                effects = [e for e in import_data["Effects"] if bool(e.get("FirstPerson")) == first_person]
+                if not effects:
+                    continue
+                sockets = {e.get("Socket") for e in effects}
+                rigs = [o for o in bpy.data.objects if o not in before_import and o.type == 'ARMATURE'
+                        and [b for b in sockets if b in o.data.bones]]
+                prefix = "FP" if first_person else "TP"
+                rig = next((o for o in rigs if o.name.upper().startswith(prefix)), None if first_person else (rigs[0] if rigs else None))
+                made += agent_effects.apply(effects, rig, import_texture, attach_part_to_bone, new_collection,
+                                            load_mesh=import_mesh, modes=modes)
             if made:
                 bpy.app.timers.register(agent_effects.revalidate, first_interval=0.05)
                 Log.information(f"Effects added: {made} emitter(s), switched on from the armature")

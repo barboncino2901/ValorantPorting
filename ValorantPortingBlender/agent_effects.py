@@ -618,6 +618,47 @@ def _material(emitter, images, name, boost=1.0):
         links.new(noise.outputs["Color"], channels.inputs[0])
         wisps = math_node('MULTIPLY', math_node('SUBTRACT', channels.outputs[0], 0.15), 1.6, clamp=True)
         mask = math_node('MULTIPLY', math_node('MULTIPLY', puff, wisps), float(emitter.get("Opacity") or 1.0))
+    elif (spec.get("BaseMaterial") or "") == "m_X_portalTear_01" and images.get(textures.get("Alpha")) is not None:
+        # Yoru's rift (m_X_portalTear_01): its jagged shape (Alpha), dark inside (BaseColor) with blue crystal light
+        # drifting in its depth (NoiseBack in DepthColor / RadianiteColor), its torn edge glowing (AlphaB in EdgeColor)
+        def rgb(name, fallback):
+            value = vectors.get(name) or fallback
+            return (float(value[0]), float(value[1]), float(value[2]), 1.0)
+
+        def sample(key, vector, extension='CLIP'):
+            node = nodes.new("ShaderNodeTexImage")
+            node.image = images.get(textures.get(key))
+            node.extension = extension
+            links.new(vector, node.inputs[0])
+            return node
+
+        shape = nodes.new("ShaderNodeSeparateColor")
+        links.new(sample("Alpha", uv).outputs["Color"], shape.inputs[0])
+        edge = nodes.new("ShaderNodeSeparateColor")
+        links.new((sample("AlphaB", uv) if images.get(textures.get("AlphaB")) else sample("Alpha", uv)).outputs["Color"], edge.inputs[0])
+        drift = nodes.new("ShaderNodeVectorMath")
+        drift.operation = 'MULTIPLY_ADD'
+        links.new(uv, drift.inputs[0])
+        drift.inputs[1].default_value = (1.5, 1.5, 1.0)
+        offset = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', age, 0.4), offset.inputs[0])
+        links.new(drift.outputs[0] if False else offset.outputs[0], drift.inputs[2])
+        depth = nodes.new("ShaderNodeSeparateColor")
+        links.new(sample("NoiseBack", drift.outputs[0], 'REPEAT').outputs["Color"], depth.inputs[0]) if images.get(textures.get("NoiseBack")) else None
+        crystals = math_node('POWER', depth.outputs[2], 3.0) if images.get(textures.get("NoiseBack")) else 0.3
+        inside = nodes.new("ShaderNodeMix")
+        inside.data_type = 'RGBA'
+        links.new(crystals, inside.inputs[0]) if not isinstance(crystals, float) else None
+        inside.inputs[6].default_value = rgb("BaseColor", (0.0, 0.006, 0.02))
+        inside.inputs[7].default_value = rgb("DepthColor", (0.02, 0.05, 1.0))
+        rim = nodes.new("ShaderNodeMix")
+        rim.data_type = 'RGBA'
+        links.new(math_node('MINIMUM', math_node('MULTIPLY', edge.outputs[0], 1.5), 1.0), rim.inputs[0])
+        links.new(inside.outputs[2], rim.inputs[6])
+        rim.inputs[7].default_value = rgb("EdgeColor", (0.33, 0.81, 1.0))
+        colour = rim.outputs[2]
+        mask = math_node('MINIMUM', math_node('MULTIPLY', shape.outputs[0], 1.2), 1.0)
+        boost = boost * 2.0
     elif face and images.get(textures.get("Flipbook")) is not None:
         # KAY/O's face screen (m_faceExpressions_flipbook): the expression's lines (R) and their halo (G) in ColorA, on
         # a round purple glow (ColorRadialGradient, Radius); his face as a 10 x 10 flipbook
@@ -820,10 +861,11 @@ def _bone(rig, name):
     return next((bone.name for bone in rig.data.bones if bone.name.lower() == name.lower()), None)
 
 
-def apply(effects, rig, load_image, attach, collection, load_mesh=None):
+def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=None):
     """effects: what the app sent (spawns); rig: the agent's armature; load_image(game path) -> image;
     attach(obj, rig, {"Bone", "Location", "Rotation"}): hangs an object on a bone with an Unreal offset;
-    load_mesh(game path) -> object (mesh particles' meshes)."""
+    load_mesh(game path) -> object (mesh particles' meshes); modes: {control: (one-shot, length)} from another rig's
+    effects (the 1st person version of an effect plays like the 3rd person one), filled in with this call's."""
     meshes = {}
     # effects whose emitters all play once (a cast burst): their control is how far through the burst (0 -> 1) they
     # are, to keyframe; the others switch on (1) and keep going with the timeline
@@ -839,6 +881,11 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None):
             if loops > 0:
                 end = max((p["birth"] + min(p["life"], 10.0) for p in particles), default=0.0)
                 lengths[control] = max(lengths.get(control, 0.0), float(spawn.get("Delay") or 0.0) + end)
+    if modes is not None:
+        for control, (shot, length) in modes.items():
+            one_shot[control], lengths[control] = shot, length
+        for control in one_shot:
+            modes.setdefault(control, (one_shot[control], lengths.get(control, 1.0)))
     if not effects or rig is None:
         return 0
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base

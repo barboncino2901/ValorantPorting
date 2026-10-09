@@ -21,7 +21,8 @@ public static class AgentEffects
 {
     // Boost: how much brighter than the game's values it's drawn in Blender (the game adds bloom; some effects need it)
     // On: its control starts switched on (an idle effect always there in game)
-    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false);
+    // FirstPerson: on the 1st person arms (the game's EmitterTemplate1P)
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false);
 
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
@@ -39,6 +40,8 @@ public static class AgentEffects
                          ("FX: frag (C)", "/Game/Characters/Grenadier/S0/Ability_Q/FXC_Grenadier_StickyEquip_MaterialSwap"),
                          ("FX: knife (E)", "/Game/Characters/Grenadier/S0/Ability_E/FXC_Grenadier_E_Equip_MaterialSwap"),
                          ("FX: ultimate", "/Game/Characters/Grenadier/S0/Ability_X/FXC_Grenadier_X_Empowered")],
+        // Yoru: the rift he tears open with his hand to take his mask from, as he casts his ultimate
+        ["Stealth"] = [("FX: mask portal", "/Game/Characters/Stealth/S0/Ability_X/FXC_Stealth_X_MaskPortal")],
         // Phoenix: flames on his shoulders and elbows in his ultimate, embers on his shoulders while healing in his fire
         ["Phoenix"] = [("FX: ultimate", "/Game/Characters/Phoenix/S0/Ability_X/Production/FXC_Phoenix_X_Active_Production"),
                        ("FX: heal", "/Game/Characters/Phoenix/S0/Passive_Fire/Production/FXC_Phoenix_HealingFire_Production")]
@@ -65,6 +68,15 @@ public static class AgentEffects
             ("FX: ult cast", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_Activate_ALLY", "Root", false),
             ("FX: ult arrive", "/Game/Characters/Wraith/S0/VFX/Ability_X/Specter_Arrive", "Root", false)
         ]
+    };
+
+    // agents whose effects also go on the 1st person arms
+    private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth" };
+
+    // systems hung on another bone than the game's: its weapon points only reach the hand in animations (Yoru's rift)
+    private static readonly Dictionary<string, string> SocketOverrides = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ps_ultMaskPortal_3P"] = "L_Hand"
     };
 
     // systems left out: they don't look like the game in Blender (Neon's head glow, which the game hides with depth)
@@ -108,6 +120,16 @@ public static class AgentEffects
         ["ps_trail_equip_3P|None"] = (3f, 1f, "B6FF3A"),
         ["ps_nanogel_R_3P|EtherBurst_Right"] = (6f, 2.2f, "B48CFF"),
         ["ps_nanogel_L_3P|EtherBurst_Right"] = (6f, 2.2f, "B48CFF"),
+        // Yoru's rift: its liquid film, screen distortion and ground splashes are drawn by the game's own passes
+        // (grey sheets in Blender)
+        ["ps_ultMaskPortal_01|None|mi_ferrofluid_trail_05"] = (0f, 0f, null),
+        ["ps_ultMaskPortal_01|None|m_X_distortion"] = (0f, 0f, null),
+        ["ps_ultMaskPortal_01|None|mi_groundfluid_02"] = (0f, 0f, null),
+        ["ps_ultMaskPortal_01|None|mi_groundfluid_03"] = (0f, 0f, null),
+        ["ps_ultMaskPortal_01|None|mi_groundfluid_05"] = (0f, 0f, null),
+        ["ps_ultMaskPortal_01|None|mi_flipbookQuad_05"] = (0f, 0f, null), // (its smoke and ripples: grey squares)
+        ["ps_ultMaskPortal_01|None|m_ripples_01"] = (0f, 0f, null),
+        ["ps_ultMaskPortal_3P|None|mi_flipbookQuad_18"] = (0f, 0f, null),
         ["ps_sparkles|Glow"] = (5f, 2f, "C8A8FF"),
         ["ps_sparkles1|Glow"] = (5f, 2f, "C8A8FF")
     };
@@ -169,10 +191,17 @@ public static class AgentEffects
                     if (!export.TryGetValue(out UObject system, "EmitterTemplate3P") || Skipped.Contains(system.Name)) continue;
                     var emitters = Emitters(system);
                     if (emitters.Count == 0) continue;
-                    spawns.Add(new Spawn(control, system.Name, export.GetOrDefault<FName>("AttachPoint3P").Text,
+                    spawns.Add(new Spawn(control, system.Name, SocketOverrides.GetValueOrDefault(system.Name) ?? export.GetOrDefault<FName>("AttachPoint3P").Text,
                         export.GetOrDefault("EmitterOffset3P", FVector.ZeroVector),
                         export.GetOrDefault("EmitterRotation3P", FRotator.ZeroRotator),
                         Delay(export), emitters));
+                    // its 1st person version, for the agents whose 1st person effects are done (Yoru's rift)
+                    if (FirstPersonAgents.Contains(codename) && export.TryGetValue(out UObject system1P, "EmitterTemplate1P") &&
+                        Emitters(system1P) is { Count: > 0 } emitters1P)
+                        spawns.Add(new Spawn(control, system1P.Name, export.GetOrDefault<FName>("AttachPoint1P").Text,
+                            export.GetOrDefault("EmitterOffset1P", FVector.ZeroVector),
+                            export.GetOrDefault("EmitterRotation1P", FRotator.ZeroRotator),
+                            Delay(export), emitters1P, FirstPerson: true));
                 }
             }
             catch (Exception)
