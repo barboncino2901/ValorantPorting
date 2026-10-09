@@ -48,33 +48,43 @@ public static class AgentEffects
     };
 
     // particle systems the game spawns from its own code (not an effect container): agent codename -> (control, system,
-    // bone, starts on)
-    private static readonly Dictionary<string, (string Control, string System, string Bone, bool On)[]> Systems = new(StringComparer.OrdinalIgnoreCase)
+    // bone, starts on, offset, rotation)
+    private static readonly Dictionary<string, (string Control, string System, string Bone, bool On, FVector Offset, FRotator Rotation)[]> Systems = new(StringComparer.OrdinalIgnoreCase)
     {
         // KAY/O's face screen (Comp_Grenadier_FaceTracking plays one by what he does): idle, then each ability's
         ["Grenadier"] =
         [
-            ("Face: idle", "/Game/Characters/Grenadier/S0/VFX/ps_Idle_faceExpression_02", "Head", true),
-            ("Face: flash (Q)", "/Game/Characters/Grenadier/S0/VFX/ps_Q_faceExpression_01", "Head", false),
-            ("Face: frag (C)", "/Game/Characters/Grenadier/S0/VFX/ps_C_faceExpression_01", "Head", false),
-            ("Face: knife (E)", "/Game/Characters/Grenadier/S0/VFX/ps_E_faceExpression_01", "Head", false),
-            ("Face: ultimate", "/Game/Characters/Grenadier/S0/VFX/ps_X_faceExpression_01", "Head", false)
+            ("Face: idle", "/Game/Characters/Grenadier/S0/VFX/ps_Idle_faceExpression_02", "Head", true, FVector.ZeroVector, FRotator.ZeroRotator),
+            ("Face: flash (Q)", "/Game/Characters/Grenadier/S0/VFX/ps_Q_faceExpression_01", "Head", false, FVector.ZeroVector, FRotator.ZeroRotator),
+            ("Face: frag (C)", "/Game/Characters/Grenadier/S0/VFX/ps_C_faceExpression_01", "Head", false, FVector.ZeroVector, FRotator.ZeroRotator),
+            ("Face: knife (E)", "/Game/Characters/Grenadier/S0/VFX/ps_E_faceExpression_01", "Head", false, FVector.ZeroVector, FRotator.ZeroRotator),
+            ("Face: ultimate", "/Game/Characters/Grenadier/S0/VFX/ps_X_faceExpression_01", "Head", false, FVector.ZeroVector, FRotator.ZeroRotator)
         ],
         // Yoru: his rift seen in 3rd person too (the game shows its 1st person version only to him), where his left
         // hand tears it in his mask-pulling animation
-        ["Stealth"] = [("FX: mask portal", "/Game/Characters/Stealth/S0/VFX/ps_ultMaskPortal_01", "L_WeaponPoint", false)],
+        // (fixed in front of him where it opens, as in game: where his mask-pulling animation has his left weapon point
+        // as it starts, before it moves to his hand)
+        ["Stealth"] = [("FX: mask portal", "/Game/Characters/Stealth/S0/VFX/ps_ultMaskPortal_01", "Root", false,
+            new FVector(93.3f, -15.9f, 150.9f), new FRotator(-168f, -48f, -120f))],
         // Omen's ultimate (FXC_Wraith_X_GlobalTeleport_Equip / _Depart, the ghost's arrival): the shadow orb in his
         // hand while he holds it, the shadows swirling round him as he casts it, and as his ghost arrives
         ["Wraith"] =
         [
-            ("FX: ult hold", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_EquipLoop_ALLY", "Root", false),
-            ("FX: ult cast", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_Activate_ALLY", "Root", false),
-            ("FX: ult arrive", "/Game/Characters/Wraith/S0/VFX/Ability_X/Specter_Arrive", "Root", false)
+            ("FX: ult hold", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_EquipLoop_ALLY", "Root", false, FVector.ZeroVector, FRotator.ZeroRotator),
+            ("FX: ult cast", "/Game/Characters/Wraith/S0/VFX/Ability_X/Wraith_Teleport_Activate_ALLY", "Root", false, FVector.ZeroVector, FRotator.ZeroRotator),
+            ("FX: ult arrive", "/Game/Characters/Wraith/S0/VFX/Ability_X/Specter_Arrive", "Root", false, FVector.ZeroVector, FRotator.ZeroRotator)
         ]
     };
 
     // agents whose effects also go on the 1st person arms
     private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth" };
+
+    // 1st person systems moved (cm, the bone's frame): Yoru's rift pushed back from his eyes so his mask is halfway
+    // through it (the game draws it over a closer mask)
+    private static readonly Dictionary<string, FVector> FirstPersonShift = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ps_ultMaskPortal_01"] = new FVector(0f, 0f, 6f)
+    };
 
     // systems hung on another bone than the game's: its weapon points only reach the hand in animations (Yoru's rift)
     private static readonly Dictionary<string, string> SocketOverrides = new(StringComparer.OrdinalIgnoreCase)
@@ -168,14 +178,14 @@ public static class AgentEffects
         var containers = Agents.GetValueOrDefault(codename) ?? [];
 
         var spawns = new List<Spawn>();
-        foreach (var (control, systemPath, bone, on) in Systems.GetValueOrDefault(codename) ?? [])
+        foreach (var (control, systemPath, bone, on, offset, rotation) in Systems.GetValueOrDefault(codename) ?? [])
         {
             try
             {
                 if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(systemPath, out UObject system)) continue;
                 var emitters = Emitters(system);
                 if (emitters.Count > 0)
-                    spawns.Add(new Spawn(control, system.Name, bone, FVector.ZeroVector, FRotator.ZeroRotator, 0f, emitters, 1f, on));
+                    spawns.Add(new Spawn(control, system.Name, bone, offset, rotation, 0f, emitters, 1f, on));
             }
             catch (Exception)
             {
@@ -202,7 +212,7 @@ public static class AgentEffects
                     if (FirstPersonAgents.Contains(codename) && export.TryGetValue(out UObject system1P, "EmitterTemplate1P") &&
                         Emitters(system1P) is { Count: > 0 } emitters1P)
                         spawns.Add(new Spawn(control, system1P.Name, export.GetOrDefault<FName>("AttachPoint1P").Text,
-                            export.GetOrDefault("EmitterOffset1P", FVector.ZeroVector),
+                            export.GetOrDefault("EmitterOffset1P", FVector.ZeroVector) + FirstPersonShift.GetValueOrDefault(system1P.Name),
                             export.GetOrDefault("EmitterRotation1P", FRotator.ZeroRotator),
                             Delay(export), emitters1P, FirstPerson: true));
                 }
