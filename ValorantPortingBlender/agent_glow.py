@@ -1804,10 +1804,264 @@ def _setup_viper_mask(values, objects):
             driver.expression = "value"
             _mask_drivers.append((rig, constraint))
             done += 1
+        for hand in ("L_Hand", "R_Hand"):
+            if hand in rig.data.bones:
+                _add_viper_gas(rig, hand, objects)
         rig.update_tag()
     if done:
         bpy.app.timers.register(_validate_mask_drivers, first_interval=0.05)
     return done
+
+
+GAS_CONTROL = "FX: hand smoke"
+
+
+def _gas_material():
+    """Viper's gas: soft lime puffs, wispy (noise eaten), glowing, fading in and out over each puff's life."""
+    name = "VP Viper gas"
+    if bpy.data.materials.get(name) is not None:
+        return bpy.data.materials[name]
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    if hasattr(material, "surface_render_method"):
+        material.surface_render_method = 'BLENDED'
+    tree = material.node_tree
+    nodes, links = tree.nodes, tree.links
+    for node in list(nodes):
+        nodes.remove(node)
+    output = nodes.new("ShaderNodeOutputMaterial")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def instancer(attribute):
+        node = nodes.new("ShaderNodeAttribute")
+        node.attribute_type = 'INSTANCER'
+        node.attribute_name = attribute
+        return node.outputs["Fac"]
+
+    uv = nodes.new("ShaderNodeAttribute")
+    uv.attribute_type = 'GEOMETRY'
+    uv.attribute_name = "vp_uv"
+    life, seed, amount = instancer("vp_life"), instancer("vp_seed"), instancer("vp_amount")
+    centre = nodes.new("ShaderNodeVectorMath")
+    centre.operation = 'DISTANCE'
+    links.new(uv.outputs["Vector"], centre.inputs[0])
+    centre.inputs[1].default_value = (0.5, 0.5, 0.0)
+    puff = math_node('POWER', math_node('SUBTRACT', 1.0, math_node('MULTIPLY', centre.outputs["Value"], 2.0), clamp=True), 1.6)
+    # wisps: noise drifting through the puff (each its own), eating it away more as it ages
+    where = nodes.new("ShaderNodeCombineXYZ")
+    split = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(uv.outputs["Vector"], split.inputs[0])
+    links.new(math_node('ADD', math_node('MULTIPLY', split.outputs[0], 2.5), math_node('MULTIPLY', seed, 17.0)), where.inputs[0])
+    links.new(math_node('ADD', math_node('MULTIPLY', split.outputs[1], 2.5), math_node('MULTIPLY', life, -1.2)), where.inputs[1])
+    links.new(seed, where.inputs[2])
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 1.6
+    noise.inputs["Detail"].default_value = 4.0
+    noise.inputs["Roughness"].default_value = 0.6
+    links.new(where.outputs[0], noise.inputs["Vector"])
+    wisp = math_node('MULTIPLY', math_node('SUBTRACT', noise.outputs["Fac"], math_node('ADD', 0.32, math_node('MULTIPLY', life, 0.18))), 3.0, clamp=True)
+    fade = math_node('MULTIPLY', math_node('MINIMUM', math_node('MULTIPLY', life, 6.0), 1.0), math_node('SUBTRACT', 1.0, life))
+    alpha = math_node('MULTIPLY', math_node('MULTIPLY', math_node('MULTIPLY', puff, wisp), fade), amount)
+    alpha = math_node('MULTIPLY', alpha, 1.3, clamp=True)
+    # colour: hot lime-white near the hand, deeper green as it rises and thins
+    colour = nodes.new("ShaderNodeMix")
+    colour.data_type = 'RGBA'
+    links.new(math_node('POWER', life, 0.7), colour.inputs[0])
+    colour.inputs[6].default_value = (0.85, 1.0, 0.35, 1.0)
+    colour.inputs[7].default_value = (0.25, 1.0, 0.05, 1.0)
+    glow = nodes.new("ShaderNodeEmission")
+    links.new(colour.outputs[2], glow.inputs["Color"])
+    links.new(math_node('MULTIPLY', alpha, 9.0), glow.inputs["Strength"])
+    see_through = nodes.new("ShaderNodeBsdfTransparent")
+    mixed = nodes.new("ShaderNodeMixShader")
+    links.new(alpha, mixed.inputs[0])
+    links.new(see_through.outputs[0], mixed.inputs[1])
+    links.new(glow.outputs[0], mixed.inputs[2])
+    links.new(mixed.outputs[0], output.inputs["Surface"])
+    return material
+
+
+def _gas_group(rig, fps):
+    """Geometry nodes: a plume of gas puffs from this object (on her hand): each puff born at the hand, rising and
+    curling in world space, growing, over its own ~1 s life, again and again with the timeline; facing the camera.
+    "VP Amount" (her "FX: hand smoke") thins and fades it; "VP Clock" is the timeline's seconds."""
+    name = f"VP Viper gas ({rig.name})"
+    if bpy.data.node_groups.get(name) is not None:
+        return bpy.data.node_groups[name]
+    group = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+    group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    nodes, links = group.nodes, group.links
+    nodes.new("NodeGroupInput")
+    output = nodes.new("NodeGroupOutput")
+    values = {}
+    for value_name in ("Amount", "Clock"):
+        node = nodes.new("ShaderNodeValue")
+        node.name = node.label = "VP " + value_name
+        values[value_name] = node.outputs[0]
+
+    def math_node(op, a, b=None):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    count = 70
+    points = nodes.new("GeometryNodePoints")
+    points.inputs["Count"].default_value = count
+    index = nodes.new("GeometryNodeInputIndex")
+
+    def random(seed, low=0.0, high=1.0):
+        node = nodes.new("FunctionNodeRandomValue")
+        node.data_type = 'FLOAT'
+        links.new(index.outputs[0], node.inputs["ID"])
+        node.inputs["Seed"].default_value = seed
+        live = [x for x in node.inputs if x.enabled and x.type == 'VALUE' and x.name in ("Min", "Max")]
+        live[0].default_value, live[1].default_value = low, high
+        return [x for x in node.outputs if x.enabled and x.type == 'VALUE'][0]
+
+    life = math_node('FRACT', math_node('ADD', math_node('MULTIPLY', values["Clock"], random(1, 0.75, 1.25)), random(2)))
+    # where: world space (rising straight up whatever her hand does), then into this object's space
+    self_object = nodes.new("GeometryNodeSelfObject")
+    info = nodes.new("GeometryNodeObjectInfo")
+    info.transform_space = 'ORIGINAL'
+    links.new(self_object.outputs[0], info.inputs["Object"])
+    curl = nodes.new("ShaderNodeTexNoise")
+    curl.noise_dimensions = '4D'
+    curl.inputs["Scale"].default_value = 1.0
+    curl.inputs["Detail"].default_value = 1.0
+    seed_vector = nodes.new("ShaderNodeCombineXYZ")
+    links.new(random(3, 0.0, 50.0), seed_vector.inputs[0])
+    links.new(math_node('MULTIPLY', life, 1.5), seed_vector.inputs[1])
+    links.new(seed_vector.outputs[0], curl.inputs["Vector"])
+    links.new(math_node('MULTIPLY', values["Clock"], 0.4), curl.inputs["W"])
+    curl_split = nodes.new("FunctionNodeSeparateColor")
+    links.new(curl.outputs["Color"], curl_split.inputs[0])
+    spread = math_node('ADD', 0.012, math_node('MULTIPLY', life, 0.09))
+    offset = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', math_node('SUBTRACT', curl_split.outputs[0], 0.5), math_node('MULTIPLY', spread, 2.0)), offset.inputs[0])
+    links.new(math_node('MULTIPLY', math_node('SUBTRACT', curl_split.outputs[1], 0.5), math_node('MULTIPLY', spread, 2.0)), offset.inputs[1])
+    links.new(math_node('MULTIPLY', math_node('POWER', life, 0.8), random(4, 0.16, 0.30)), offset.inputs[2])
+    world = nodes.new("ShaderNodeVectorMath")
+    links.new(info.outputs["Location"], world.inputs[0])
+    links.new(offset.outputs[0], world.inputs[1])
+    back = nodes.new("FunctionNodeInvertMatrix")
+    links.new(info.outputs["Transform"], back.inputs[0])
+    local = nodes.new("FunctionNodeTransformPoint")
+    links.new(world.outputs[0], local.inputs["Vector"])
+    links.new(back.outputs[0], local.inputs["Transform"])
+    placed = nodes.new("GeometryNodeSetPosition")
+    links.new(points.outputs[0], placed.inputs["Geometry"])
+    links.new(local.outputs[0], placed.inputs["Position"])
+    # thinner at lower amounts: a share of the puffs only
+    keep = nodes.new("GeometryNodeDeleteGeometry")
+    keep.domain = 'POINT'
+    links.new(placed.outputs[0], keep.inputs["Geometry"])
+    links.new(math_node('GREATER_THAN', random(5), math_node('ADD', math_node('MULTIPLY', values["Amount"], 0.7), 0.3)), keep.inputs["Selection"])
+    stored = keep.outputs[0]
+    for attribute, value in (("vp_life", life), ("vp_seed", random(6)), ("vp_amount", values["Amount"])):
+        store = nodes.new("GeometryNodeStoreNamedAttribute")
+        store.data_type = 'FLOAT'
+        store.domain = 'POINT'
+        store.inputs["Name"].default_value = attribute
+        links.new(stored, store.inputs["Geometry"])
+        links.new(value, store.inputs["Value"])
+        stored = store.outputs[0]
+    card = nodes.new("GeometryNodeMeshGrid")
+    card.inputs["Size X"].default_value = card.inputs["Size Y"].default_value = 1.0
+    card.inputs["Vertices X"].default_value = card.inputs["Vertices Y"].default_value = 2
+    store_uv = nodes.new("GeometryNodeStoreNamedAttribute")
+    store_uv.data_type = 'FLOAT2'
+    store_uv.domain = 'CORNER'
+    store_uv.inputs["Name"].default_value = "vp_uv"
+    links.new(card.outputs["Mesh"], store_uv.inputs["Geometry"])
+    links.new(card.outputs["UV Map"], store_uv.inputs["Value"])
+    painted = nodes.new("GeometryNodeSetMaterial")
+    links.new(store_uv.outputs[0], painted.inputs["Geometry"])
+    painted.inputs["Material"].default_value = _gas_material()
+    # facing the camera, each turned its own way
+    camera = nodes.new("GeometryNodeInputActiveCamera")
+    camera_info = nodes.new("GeometryNodeObjectInfo")
+    camera_info.transform_space = 'RELATIVE'
+    links.new(camera.outputs[0], camera_info.inputs["Object"])
+    position = nodes.new("GeometryNodeInputPosition")
+    to_camera = nodes.new("ShaderNodeVectorMath")
+    to_camera.operation = 'SUBTRACT'
+    links.new(camera_info.outputs["Location"], to_camera.inputs[0])
+    links.new(position.outputs[0], to_camera.inputs[1])
+    facing = nodes.new("FunctionNodeAlignRotationToVector")
+    facing.axis = 'Z'
+    links.new(to_camera.outputs[0], facing.inputs["Vector"])
+    spin = nodes.new("FunctionNodeAxisAngleToRotation")
+    spin.inputs["Axis"].default_value = (0.0, 0.0, 1.0)
+    links.new(math_node('ADD', random(7, 0.0, 6.28), math_node('MULTIPLY', life, random(8, -1.5, 1.5))), spin.inputs["Angle"])
+    turned = nodes.new("FunctionNodeRotateRotation")
+    turned.rotation_space = 'LOCAL'
+    links.new(facing.outputs[0], turned.inputs["Rotation"])
+    links.new(spin.outputs[0], turned.inputs["Rotate By"])
+    on_points = nodes.new("GeometryNodeInstanceOnPoints")
+    links.new(stored, on_points.inputs["Points"])
+    links.new(painted.outputs[0], on_points.inputs["Instance"])
+    links.new(turned.outputs[0], on_points.inputs["Rotation"])
+    links.new(math_node('MULTIPLY', math_node('ADD', 0.035, math_node('MULTIPLY', life, 0.11)), random(9, 0.7, 1.3)), on_points.inputs["Scale"])
+    links.new(on_points.outputs[0], output.inputs[0])
+    for value_name, expression, prop in (("Amount", "value", GAS_CONTROL), ("Clock", f"frame / {fps:g}", None)):
+        curve = group.driver_add(f'nodes["VP {value_name}"].outputs[0].default_value')
+        driver = curve.driver
+        driver.type = 'SCRIPTED'
+        if prop:
+            var = driver.variables.new()
+            var.name = "value"
+            var.type = 'SINGLE_PROP'
+            var.targets[0].id_type = 'OBJECT'
+            var.targets[0].id = rig
+            var.targets[0].data_path = f'["{prop}"]'
+        driver.expression = expression
+    _mask_drivers.append((rig, None))
+    return group
+
+
+def _add_viper_gas(rig, hand, objects):
+    """A gas plume on her hand (the valve on her gauntlet), for "FX: hand smoke"."""
+    if GAS_CONTROL not in rig:
+        rig[GAS_CONTROL] = 0.0
+        rig.id_properties_ui(GAS_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+                                                 description="Viper's ultimate: green gas pouring from her hands (0 none, 1 full)")
+    fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+    mesh = bpy.data.meshes.new(f"VP Viper gas ({hand})")
+    mesh.from_pydata([(0.0, 0.0, 0.0)], [], [])
+    obj = bpy.data.objects.new(f"VP Viper gas ({hand})", mesh)
+    for collection in rig.users_collection:
+        collection.objects.link(obj)
+    obj.parent = rig
+    obj.parent_type = 'BONE'
+    obj.parent_bone = hand
+    bone = rig.pose.bones[hand]
+    # (at the back of her hand, where the valve is: a little toward her wrist from the hand bone)
+    placed = rig.matrix_world @ bone.matrix
+    along = placed.to_3x3().col[1].normalized()  # (Blender bones point along their Y: from her wrist into her hand)
+    placed.translation = placed.translation + along * 0.06
+    obj.matrix_world = placed
+    modifier = obj.modifiers.new("VP Viper gas", 'NODES')
+    modifier.node_group = _gas_group(rig, fps)
 
 
 # Viper's mask drivers: made valid once the import is over (the rig's evaluated copy doesn't have "Ult: mask" before)

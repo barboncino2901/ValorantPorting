@@ -63,8 +63,7 @@ public static class AgentEffects
         ],
         // Viper: green smoke pouring from her hands while she holds her ultimate (FXC_Pandemic_X_EquippedUntilCast;
         // its emitters hang on her hands themselves: LocationBoneSocket); the pit itself (a map-sized smoke field) is left out
-        ["Pandemic"] = [("FX: hand smoke", "/Game/Characters/Pandemic/S0/VFX/Ability_X/Pandemic_X_3P_Equip", "Root", false,
-            FVector.ZeroVector, FRotator.ZeroRotator)],
+        // (rebuilt in the add-on as its own gas plume: its sprites look flat in Blender)
         // Yoru: his rift seen in 3rd person too (the game shows its 1st person version only to him), where his left
         // hand tears it in his mask-pulling animation
         // (fixed in front of him where it opens, as in game: where his mask-pulling animation has his left weapon point
