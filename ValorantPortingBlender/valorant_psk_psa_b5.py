@@ -1366,8 +1366,9 @@ def _fcurve_new(action, owner, data_path, index):
 # Bones that take the animation's own position (not the model's) under "keep proportions":
 # - weapon/IK bones rest at the origin and only the animation places them (the gun in the hand);
 # - collarbones and arms keep the animation's lengths, so both hands meet the gun where Riot animated them
-#   (with the model's own arm lengths the support hand is several cm off and goes through the gun).
-ANIMATION_PLACED_BONES = re.compile(r"weapon|handtarget|^ik_|^[LR]_(Clavicle|Shoulder|Elbow|Hand)$", re.IGNORECASE)
+#   (with the model's own arm lengths the support hand is several cm off and goes through the gun);
+# - mask pieces that slide into place (Viper's ult mask closing over her head: GasMask, MaskWrap1-4, MaskTop...).
+ANIMATION_PLACED_BONES = re.compile(r"weapon|handtarget|^ik_|^[LR]_(Clavicle|Shoulder|Elbow|Hand)$|mask", re.IGNORECASE)
 
 
 def psaimport(filepath,
@@ -1850,6 +1851,8 @@ def psaimport(filepath,
                     continue
                 if not any(p.name.lower() == "head" for p in psa_bone.pose_bone.parent_recursive):
                     continue
+                if ANIMATION_PLACED_BONES.search(psa_bone.pose_bone.name):
+                    continue  # (props on the head, like Viper's ult mask: as animated, not a face)
                 p0_pos, p0_quat = Raw_Key_List[raw_key_index + j]
                 q0 = psa_bone.post_quat.copy()
                 q0.rotate(psa_bone.orig_quat)
