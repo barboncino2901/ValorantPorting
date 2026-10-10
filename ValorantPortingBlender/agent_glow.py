@@ -1933,7 +1933,7 @@ def _gas_volume_material(rig, fps):
     links.new(coords.outputs["Object"], drift.inputs[0])
     shift = nodes.new("ShaderNodeCombineXYZ")
     links.new(math_node('MULTIPLY', clock.outputs[0], 0.05), shift.inputs[0])
-    links.new(math_node('MULTIPLY', clock.outputs[0], -0.25), shift.inputs[2])
+    links.new(math_node('MULTIPLY', clock.outputs[0], 0.25), shift.inputs[2])  # (wisps sinking with it)
     links.new(shift.outputs[0], drift.inputs[1])
     noise = nodes.new("ShaderNodeTexNoise")
     noise.noise_dimensions = '4D'
@@ -2031,13 +2031,14 @@ def _gas_group(rig, fps, body=None):
     links.new(math_node('MULTIPLY', values["Clock"], 0.4), curl.inputs["W"])
     curl_split = nodes.new("FunctionNodeSeparateColor")
     links.new(curl.outputs["Color"], curl_split.inputs[0])
-    spread = math_node('ADD', 0.012, math_node('MULTIPLY', life, 0.09))
+    spread = math_node('ADD', 0.012, math_node('MULTIPLY', life, 0.13))
     offset = nodes.new("ShaderNodeCombineXYZ")
     links.new(math_node('MULTIPLY', math_node('SUBTRACT', curl_split.outputs[0], 0.5), math_node('MULTIPLY', spread, 2.0)), offset.inputs[0])
     links.new(math_node('MULTIPLY', math_node('SUBTRACT', curl_split.outputs[1], 0.5), math_node('MULTIPLY', spread, 2.0)), offset.inputs[1])
-    # ejected downward from the valve (slowed by the air: 1 - e^-6u), then rising as gas (u^2)
-    eject = math_node('MULTIPLY', math_node('SUBTRACT', 1.0, math_node('EXPONENT', math_node('MULTIPLY', life, -6.0))), random(10, -0.16, -0.09))
-    lift = math_node('MULTIPLY', math_node('MULTIPLY', life, life), random(4, 0.35, 0.55))
+    # heavy gas: ejected downward from the valve (slowed by the air: 1 - e^-6u), then sinking under its own weight
+    # (u^2), spreading as it falls
+    eject = math_node('MULTIPLY', math_node('SUBTRACT', 1.0, math_node('EXPONENT', math_node('MULTIPLY', life, -4.0))), random(10, -0.1, -0.05))
+    lift = math_node('MULTIPLY', math_node('MULTIPLY', life, life), random(4, -0.45, -0.28))
     links.new(math_node('ADD', eject, lift), offset.inputs[2])
     world = nodes.new("ShaderNodeVectorMath")
     links.new(info.outputs["Location"], world.inputs[0])
@@ -2047,7 +2048,7 @@ def _gas_group(rig, fps, body=None):
     local = nodes.new("FunctionNodeTransformPoint")
     links.new(world.outputs[0], local.inputs["Vector"])
     links.new(back.outputs[0], local.inputs["Transform"])
-    size = math_node('MULTIPLY', math_node('ADD', 0.035, math_node('MULTIPLY', life, 0.11)), random(9, 0.7, 1.3))
+    size = math_node('MULTIPLY', math_node('ADD', 0.07, math_node('MULTIPLY', life, 0.13)), random(9, 0.7, 1.3))
     where = local.outputs[0]
     if body is not None:
         # it can't go through her: a puff inside her or touching her is pushed out along her surface (her body as
@@ -2106,7 +2107,7 @@ def _gas_group(rig, fps, body=None):
         stored = store.outputs[0]
     # a real volume: each puff a soft ball of gas (growing as it rises, shrinking away at the end of its life), the
     # balls merging into one cloud; its wisps come from its material
-    envelope = math_node('MULTIPLY', math_node('MINIMUM', math_node('MULTIPLY', life, 8.0), 1.0),
+    envelope = math_node('MULTIPLY', math_node('MINIMUM', math_node('ADD', math_node('MULTIPLY', life, 12.0), 0.35), 1.0),
                          math_node('POWER', math_node('SUBTRACT', 1.0, life), 0.6))
     radius = math_node('MULTIPLY', math_node('MULTIPLY', size, 0.55), envelope)
     store_radius = nodes.new("GeometryNodeSetPointRadius")
