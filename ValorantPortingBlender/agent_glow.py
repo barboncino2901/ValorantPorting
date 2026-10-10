@@ -1825,7 +1825,7 @@ def _setup_viper_mask(values, objects):
             keep = rig.animation_data.action
             rig.animation_data.action = hair_action
             hair = rig.pose.bones["Hair"]
-            for frame_, size in ((0, 1.0), (10, 0.62), (20, 0.0)):
+            for frame_, size in ((0, 1.0), (10, 1.0), (20, 0.0)):
                 hair.scale = (size, size, size)
                 hair.keyframe_insert("scale", frame=frame_)
             hair.scale = (1.0, 1.0, 1.0)
@@ -1853,18 +1853,142 @@ def _setup_viper_mask(values, objects):
             var.targets[0].data_path = f'["{MASK_CONTROL}"]'
             if name.lower() == "hair":
                 # shrinking a little as the mask closes over it (0 -> 0.5 of its action), gone as it closes
-                a = mask_start + (closed - mask_start) * 0.6  # (once the mask covers her scalp)
-                b = max(closed - 0.03, a + 0.02)
+                # (it keeps its size, pressed under the mask by "VP Hair Under Mask", and shrinks away as it closes)
+                a = mask_start
+                b = max(closed - 0.04, a + 0.02)
                 driver.expression = (f"min(max((value - {a:.4f}) / {b - a:.4f}, 0.0), 1.0) * 0.5 + "
                                      f"min(max((value - {b:.4f}) / 0.03, 0.0), 1.0) * 0.5")
             else:
                 driver.expression = "value"
             _mask_drivers.append((rig, constraint))
             done += 1
+        if done:
+            # when each mask piece is half way into place (on the slider): it only presses hair from then on
+            deploy = {}
+            for curve in mask_curves:
+                bone = curve.data_path.split('"')[1]
+                first_value, last_value = curve.evaluate(start), curve.evaluate(end)
+                if abs(last_value - first_value) < 1e-3:
+                    continue
+                half = next((f for f in range(int(start), int(end) + 1)
+                             if abs(curve.evaluate(f) - first_value) >= 0.5 * abs(last_value - first_value)), end)
+                deploy[bone] = max(deploy.get(bone, 0.0), (half - start) / span)
+            for obj in objects:
+                if obj.type == 'MESH' and _armature_of(obj) == rig:
+                    _hair_under_mask(obj, rig, deploy)
         rig.update_tag()
     if done:
         bpy.app.timers.register(_validate_mask_drivers, first_interval=0.05)
     return done
+
+
+def _hair_under_mask(obj, rig, deploy):
+    """Her hair collides with her mask: after the rig, each hair vertex that a nearby mask piece should cover but sits
+    outside it is pressed just beneath that piece's surface (so the closing mask squeezes the hair instead of the
+    hair poking through), while "Ult: mask" is up."""
+    hair_slots = [i for i, slot in enumerate(obj.material_slots) if slot.material and "hair" in slot.material.name.lower()]
+    mask_groups = {g.index for g in obj.vertex_groups if "mask" in g.name.lower()}
+    if not hair_slots or not mask_groups or "vp_mask" in obj.data.attributes:
+        return
+    mesh = obj.data
+    mask_weight = [min(1.0, sum(e.weight for e in v.groups if e.group in mask_groups)) for v in mesh.vertices]
+    hair = [0.0] * len(mesh.vertices)
+    for poly in mesh.polygons:
+        if poly.material_index in hair_slots:
+            for index in poly.vertices:
+                hair[index] = 1.0
+    mesh.attributes.new("vp_mask", 'FLOAT', 'POINT').data.foreach_set("value", mask_weight)
+    by_index = {g.index: deploy.get(g.name, 1.0) for g in obj.vertex_groups if g.index in mask_groups}
+    deploy_at = []
+    for v in mesh.vertices:
+        groups = [e for e in v.groups if e.group in mask_groups]
+        deploy_at.append(by_index[max(groups, key=lambda e: e.weight).group] if groups else 1.0)
+    mesh.attributes.new("vp_deploy", 'FLOAT', 'POINT').data.foreach_set("value", deploy_at)
+    mesh.attributes.new("vp_hair", 'FLOAT', 'POINT').data.foreach_set("value", hair)
+
+    name = f"VP Hair Under Mask ({rig.name})"
+    group = bpy.data.node_groups.get(name)
+    if group is None:
+        group = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+        group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+        group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        nodes, links = group.nodes, group.links
+        inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+        amount = nodes.new("ShaderNodeValue")
+        amount.name = amount.label = "VP Amount"  # ("Ult: mask", driven)
+
+        def math_node(op, a, b=None):
+            node = nodes.new("ShaderNodeMath")
+            node.operation = op
+            for i, v in enumerate((a, b)):
+                if v is None:
+                    continue
+                if isinstance(v, (int, float)):
+                    node.inputs[i].default_value = v
+                else:
+                    links.new(v, node.inputs[i])
+            return node.outputs[0]
+
+        def attribute(name):
+            node = nodes.new("GeometryNodeInputNamedAttribute")
+            node.data_type = 'FLOAT'
+            node.inputs["Name"].default_value = name
+            return node.outputs["Attribute"]
+
+        # the mask's pieces, on their own
+        mask_only = nodes.new("GeometryNodeSeparateGeometry")
+        mask_only.domain = 'POINT'
+        links.new(inputs.outputs["Geometry"], mask_only.inputs["Geometry"])
+        links.new(math_node('MULTIPLY', math_node('GREATER_THAN', attribute("vp_mask"), 0.5),
+                            math_node('GREATER_THAN', amount.outputs[0], attribute("vp_deploy"))), mask_only.inputs["Selection"])
+        position = nodes.new("GeometryNodeInputPosition")
+        nearest = nodes.new("GeometryNodeProximity")
+        nearest.target_element = 'FACES'
+        links.new(mask_only.outputs["Selection"], nearest.inputs[0])
+        normal = nodes.new("GeometryNodeInputNormal")
+        surface_normal = nodes.new("GeometryNodeSampleNearestSurface")
+        surface_normal.data_type = 'FLOAT_VECTOR'
+        links.new(mask_only.outputs["Selection"], surface_normal.inputs["Mesh"])
+        links.new(normal.outputs[0], surface_normal.inputs["Value"])
+        # outside the piece (along its normal) and close to it: pressed to just beneath it
+        offset = nodes.new("ShaderNodeVectorMath")
+        offset.operation = 'SUBTRACT'
+        links.new(position.outputs[0], offset.inputs[0])
+        links.new(nearest.outputs["Position"], offset.inputs[1])
+        outside = nodes.new("ShaderNodeVectorMath")
+        outside.operation = 'DOT_PRODUCT'
+        links.new(offset.outputs[0], outside.inputs[0])
+        links.new(surface_normal.outputs["Value"], outside.inputs[1])
+        close = math_node('LESS_THAN', nearest.outputs["Distance"], 0.05)
+        poking = math_node('MULTIPLY', math_node('MULTIPLY', math_node('GREATER_THAN', outside.outputs["Value"], -0.003), close),
+                           math_node('GREATER_THAN', attribute("vp_hair"), 0.5))
+        beneath = nodes.new("ShaderNodeVectorMath")
+        beneath.operation = 'MULTIPLY_ADD'
+        links.new(surface_normal.outputs["Value"], beneath.inputs[0])
+        beneath.inputs[1].default_value = (-0.004, -0.004, -0.004)
+        links.new(nearest.outputs["Position"], beneath.inputs[2])
+        selection = math_node('MULTIPLY', poking, math_node('GREATER_THAN', amount.outputs[0], 0.02))
+        move = nodes.new("GeometryNodeSetPosition")
+        links.new(inputs.outputs["Geometry"], move.inputs["Geometry"])
+        links.new(selection, move.inputs["Selection"])
+        links.new(beneath.outputs[0], move.inputs["Position"])
+        links.new(move.outputs[0], output.inputs[0])
+        _drive_by_mask(group, 'nodes["VP Amount"].outputs[0].default_value', rig)
+    modifier = obj.modifiers.new("VP Hair Under Mask", 'NODES')  # (last: after the rig)
+    modifier.node_group = group
+
+
+def _drive_by_mask(target, path, rig):
+    curve = target.driver_add(path)
+    driver = curve.driver
+    driver.type = 'SCRIPTED'
+    var = driver.variables.new()
+    var.name = "value"
+    var.type = 'SINGLE_PROP'
+    var.targets[0].id_type = 'OBJECT'
+    var.targets[0].id = rig
+    var.targets[0].data_path = f'["{MASK_CONTROL}"]'
+    driver.expression = "value"
 
 
 # Viper's mask drivers: made valid once the import is over (the rig's evaluated copy doesn't have "Ult: mask" before)
@@ -1876,7 +2000,7 @@ def _validate_mask_drivers():
     while _mask_drivers:
         rig, constraint = _mask_drivers.pop()
         try:
-            rig.update_tag()
+            rig.update_tag()  # (a rig, or the mesh with the hair modifier)
             rigs.add(rig)
             for curve in (rig.animation_data.drivers if rig.animation_data else []):
                 curve.driver.is_valid = True
