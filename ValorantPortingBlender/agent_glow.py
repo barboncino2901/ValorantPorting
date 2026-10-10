@@ -1893,6 +1893,82 @@ def _gas_material():
     return material
 
 
+def _gas_volume_material(rig, fps):
+    """Viper's gas as a volume: dense lime fog at the core, thinning into wisps (animated noise eats its edges),
+    glowing a little, drifting with the timeline; "FX: hand smoke" thickens it."""
+    name = f"VP Viper gas volume ({rig.name})"
+    if bpy.data.materials.get(name) is not None:
+        return bpy.data.materials[name]
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    tree = material.node_tree
+    nodes, links = tree.nodes, tree.links
+    for node in list(nodes):
+        nodes.remove(node)
+    output = nodes.new("ShaderNodeOutputMaterial")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    amount = nodes.new("ShaderNodeValue")
+    amount.name = amount.label = "VP Amount"
+    clock = nodes.new("ShaderNodeValue")
+    clock.name = clock.label = "VP Clock"
+    density_in = nodes.new("ShaderNodeAttribute")
+    density_in.attribute_type = 'GEOMETRY'
+    density_in.attribute_name = "density"
+    coords = nodes.new("ShaderNodeTexCoord")
+    drift = nodes.new("ShaderNodeVectorMath")
+    drift.operation = 'ADD'
+    links.new(coords.outputs["Object"], drift.inputs[0])
+    shift = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', clock.outputs[0], 0.05), shift.inputs[0])
+    links.new(math_node('MULTIPLY', clock.outputs[0], -0.25), shift.inputs[2])
+    links.new(shift.outputs[0], drift.inputs[1])
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.noise_dimensions = '4D'
+    noise.inputs["Scale"].default_value = 22.0
+    noise.inputs["Detail"].default_value = 6.0
+    noise.inputs["Roughness"].default_value = 0.55
+    links.new(drift.outputs[0], noise.inputs["Vector"])
+    links.new(math_node('MULTIPLY', clock.outputs[0], 0.6), noise.inputs["W"])
+    wisps = math_node('POWER', math_node('MULTIPLY', math_node('SUBTRACT', noise.outputs["Fac"], 0.38), 3.0, clamp=True), 1.6)
+    # (the grid's own density is applied by the volume shader: its "density" attribute)
+    density = math_node('MULTIPLY', math_node('MULTIPLY', wisps, density_in.outputs["Fac"]), math_node('MULTIPLY', amount.outputs[0], 40.0))
+    volume = nodes.new("ShaderNodeVolumePrincipled")
+    volume.inputs["Color"].default_value = (0.55, 1.0, 0.2, 1.0)
+    volume.inputs["Absorption Color"].default_value = (0.75, 1.0, 0.5, 1.0)
+    links.new(density, volume.inputs["Density"])
+    volume.inputs["Density Attribute"].default_value = ""  # (applied above)
+    volume.inputs["Emission Color"].default_value = (0.5, 1.0, 0.08, 1.0)
+    # its wisps glow (brightest where densest): the game's lime fog lit from within
+    links.new(math_node('MULTIPLY', math_node('POWER', density, 1.3), 0.06), volume.inputs["Emission Strength"])
+    links.new(volume.outputs[0], output.inputs["Volume"])
+    for node_name, expression, prop in (("VP Amount", "value", GAS_CONTROL), ("VP Clock", f"frame / {fps:g}", None)):
+        curve = tree.driver_add(f'nodes["{node_name}"].outputs[0].default_value')
+        driver = curve.driver
+        driver.type = 'SCRIPTED'
+        if prop:
+            var = driver.variables.new()
+            var.name = "value"
+            var.type = 'SINGLE_PROP'
+            var.targets[0].id_type = 'OBJECT'
+            var.targets[0].id = rig
+            var.targets[0].data_path = f'["{prop}"]'
+        driver.expression = expression
+    return material
+
+
 def _gas_group(rig, fps, body=None):
     """Geometry nodes: a plume of gas puffs from this object (on her hand): each puff born at the hand, rising and
     curling in world space, growing, over its own ~1 s life, again and again with the timeline; facing the camera.
@@ -1924,7 +2000,7 @@ def _gas_group(rig, fps, body=None):
                 links.new(v, node.inputs[i])
         return node.outputs[0]
 
-    count = 70
+    count = 220
     points = nodes.new("GeometryNodePoints")
     points.inputs["Count"].default_value = count
     index = nodes.new("GeometryNodeInputIndex")
@@ -1999,7 +2075,9 @@ def _gas_group(rig, fps, body=None):
         links.new(away.outputs[0], side.inputs[0])
         links.new(surface_normal.outputs["Value"], side.inputs[1])
         margin = math_node('MULTIPLY', size, 0.35)
-        push = math_node('MAXIMUM', math_node('SUBTRACT', margin, side.outputs["Value"]), 0.0)
+        # (only near her: within a few cm of her surface, and never more than a few cm)
+        near = math_node('LESS_THAN', nearest.outputs["Distance"], 0.06)
+        push = math_node('MULTIPLY', math_node('MINIMUM', math_node('MAXIMUM', math_node('SUBTRACT', margin, side.outputs["Value"]), 0.0), 0.06), near)
         pushed = nodes.new("ShaderNodeVectorMath")
         pushed.operation = 'MULTIPLY_ADD'
         links.new(surface_normal.outputs["Value"], pushed.inputs[0])
@@ -2026,44 +2104,30 @@ def _gas_group(rig, fps, body=None):
         links.new(stored, store.inputs["Geometry"])
         links.new(value, store.inputs["Value"])
         stored = store.outputs[0]
-    card = nodes.new("GeometryNodeMeshGrid")
-    card.inputs["Size X"].default_value = card.inputs["Size Y"].default_value = 1.0
-    card.inputs["Vertices X"].default_value = card.inputs["Vertices Y"].default_value = 2
-    store_uv = nodes.new("GeometryNodeStoreNamedAttribute")
-    store_uv.data_type = 'FLOAT2'
-    store_uv.domain = 'CORNER'
-    store_uv.inputs["Name"].default_value = "vp_uv"
-    links.new(card.outputs["Mesh"], store_uv.inputs["Geometry"])
-    links.new(card.outputs["UV Map"], store_uv.inputs["Value"])
+    # a real volume: each puff a soft ball of gas (growing as it rises, shrinking away at the end of its life), the
+    # balls merging into one cloud; its wisps come from its material
+    envelope = math_node('MULTIPLY', math_node('MINIMUM', math_node('MULTIPLY', life, 8.0), 1.0),
+                         math_node('POWER', math_node('SUBTRACT', 1.0, life), 0.6))
+    radius = math_node('MULTIPLY', math_node('MULTIPLY', size, 0.55), envelope)
+    store_radius = nodes.new("GeometryNodeSetPointRadius")
+    links.new(stored, store_radius.inputs["Points"])
+    links.new(radius, store_radius.inputs["Radius"])
+    volume = nodes.new("GeometryNodePointsToVolume")
+    links.new(store_radius.outputs[0], volume.inputs["Points"])
+    volume.inputs["Density"].default_value = 1.0
+    links.new(radius, volume.inputs["Radius"])
+    if "Resolution Mode" in [i.name for i in volume.inputs]:
+        pass
+    try:
+        volume.resolution_mode = 'VOXEL_SIZE'
+    except Exception:
+        pass
+    if "Voxel Size" in volume.inputs:
+        volume.inputs["Voxel Size"].default_value = 0.006
     painted = nodes.new("GeometryNodeSetMaterial")
-    links.new(store_uv.outputs[0], painted.inputs["Geometry"])
-    painted.inputs["Material"].default_value = _gas_material()
-    # facing the camera, each turned its own way
-    camera = nodes.new("GeometryNodeInputActiveCamera")
-    camera_info = nodes.new("GeometryNodeObjectInfo")
-    camera_info.transform_space = 'RELATIVE'
-    links.new(camera.outputs[0], camera_info.inputs["Object"])
-    position = nodes.new("GeometryNodeInputPosition")
-    to_camera = nodes.new("ShaderNodeVectorMath")
-    to_camera.operation = 'SUBTRACT'
-    links.new(camera_info.outputs["Location"], to_camera.inputs[0])
-    links.new(position.outputs[0], to_camera.inputs[1])
-    facing = nodes.new("FunctionNodeAlignRotationToVector")
-    facing.axis = 'Z'
-    links.new(to_camera.outputs[0], facing.inputs["Vector"])
-    spin = nodes.new("FunctionNodeAxisAngleToRotation")
-    spin.inputs["Axis"].default_value = (0.0, 0.0, 1.0)
-    links.new(math_node('ADD', random(7, 0.0, 6.28), math_node('MULTIPLY', life, random(8, -1.5, 1.5))), spin.inputs["Angle"])
-    turned = nodes.new("FunctionNodeRotateRotation")
-    turned.rotation_space = 'LOCAL'
-    links.new(facing.outputs[0], turned.inputs["Rotation"])
-    links.new(spin.outputs[0], turned.inputs["Rotate By"])
-    on_points = nodes.new("GeometryNodeInstanceOnPoints")
-    links.new(stored, on_points.inputs["Points"])
-    links.new(painted.outputs[0], on_points.inputs["Instance"])
-    links.new(turned.outputs[0], on_points.inputs["Rotation"])
-    links.new(size, on_points.inputs["Scale"])
-    links.new(on_points.outputs[0], output.inputs[0])
+    links.new(volume.outputs[0], painted.inputs["Geometry"])
+    painted.inputs["Material"].default_value = _gas_volume_material(rig, fps)
+    links.new(painted.outputs[0], output.inputs[0])
     for value_name, expression, prop in (("Amount", "value", GAS_CONTROL), ("Clock", f"frame / {fps:g}", None)):
         curve = group.driver_add(f'nodes["VP {value_name}"].outputs[0].default_value')
         driver = curve.driver
