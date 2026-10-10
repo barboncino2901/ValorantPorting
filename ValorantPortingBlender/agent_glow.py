@@ -1805,6 +1805,7 @@ def _setup_viper_mask(values, objects):
                 if changing:
                     latest.append(max(changing))
             closed = (max(latest) + 1 - start) / span if latest else 0.5
+        mask_start = (min(settle(mask_curves, True), default=start) - start) / span
         hair_start = (min(settle(hair_curves, True), default=start) - start) / span
         hair_end = hair_start
         for curve in hair_curves:
@@ -1815,17 +1816,31 @@ def _setup_viper_mask(values, objects):
         rig[MASK_CONTROL] = 0.0
         rig.id_properties_ui(MASK_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
                                                   description="Viper's ultimate: 0 her mouth mask, 1 her full mask closed over her head (keyframe it for her putting it on)")
+        # her hair: its own action, shrinking smoothly into her head as the mask closes over it (the game's own hair
+        # motion jumps: it hides at once under its smoke)
+        hair_action = None
+        if "Hair" in moving and rig.pose.bones.get("Hair") is not None:
+            hair_action = bpy.data.actions.new("VP Viper hair")
+            hair_action.use_fake_user = True
+            keep = rig.animation_data.action
+            rig.animation_data.action = hair_action
+            hair = rig.pose.bones["Hair"]
+            for frame_, size in ((0, 1.0), (10, 0.62), (20, 0.0)):
+                hair.scale = (size, size, size)
+                hair.keyframe_insert("scale", frame=frame_)
+            hair.scale = (1.0, 1.0, 1.0)
+            rig.animation_data.action = keep
         for name in sorted(moving):
             bone = rig.pose.bones.get(name)
             if bone is None:
                 continue
             constraint = bone.constraints.new('ACTION')
             constraint.name = "VP Viper mask"
-            constraint.action = action
-            if hasattr(constraint, "action_slot") and getattr(action, "slots", None):
-                constraint.action_slot = action.slots[0]
+            constraint.action = hair_action if (name == "Hair" and hair_action) else action
+            if hasattr(constraint, "action_slot") and getattr(constraint.action, "slots", None):
+                constraint.action_slot = constraint.action.slots[0]
             constraint.use_eval_time = True
-            constraint.frame_start, constraint.frame_end = int(start), int(end)
+            constraint.frame_start, constraint.frame_end = (0, 20) if constraint.action == hair_action else (int(start), int(end))
             constraint.mix_mode = 'BEFORE_FULL'
             curve = constraint.driver_add("eval_time")
             driver = curve.driver
@@ -1837,14 +1852,13 @@ def _setup_viper_mask(values, objects):
             var.targets[0].id = rig
             var.targets[0].data_path = f'["{MASK_CONTROL}"]'
             if name.lower() == "hair":
-                # its own motion squeezed into the moment the mask is closed
-                width = 0.04
-                a = max(closed - width, 0.0)
-                driver.expression = (f"{hair_start:.4f} + min(max((value - {a:.4f}) / {width:g}, 0.0), 1.0) * "
-                                     f"{max(hair_end - hair_start, 0.001):.4f}")
+                # shrinking a little as the mask closes over it (0 -> 0.5 of its action), gone as it closes
+                a = mask_start + (closed - mask_start) * 0.6  # (once the mask covers her scalp)
+                b = max(closed - 0.03, a + 0.02)
+                driver.expression = (f"min(max((value - {a:.4f}) / {b - a:.4f}, 0.0), 1.0) * 0.5 + "
+                                     f"min(max((value - {b:.4f}) / 0.03, 0.0), 1.0) * 0.5")
             else:
                 driver.expression = "value"
-            print(f"VP Viper mask: {name} closed at {closed:.2f}, hair {hair_start:.2f}-{hair_end:.2f}") if name.lower() == "hair" else None
             _mask_drivers.append((rig, constraint))
             done += 1
         rig.update_tag()
