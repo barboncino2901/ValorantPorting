@@ -1030,9 +1030,11 @@ public partial class MainViewModel : ObservableObject
             var sounds = await SoundsFor(item);
             // put on top of an animation, an additive one brings its base pose: only its change from it is added
             var additive = AppSettings.Current.AnimationMode == "Layer" && clips.Count == 1 ? await AnimationExport.AdditiveBase(item) : null;
+            var effects = await Task.Run(() => AgentEffects.FromAnimation(AnimationSounds.SourcesOf(item).Take(1)));
+            if (effects is { Count: > 0 }) AppLog.Information($"{item.Title}: {effects.Count} particle effect(s) included.");
             BlenderService.SendAnimation(item.Name, paths[0], repeat: item.IsLoop ? RepeatCount : 1, lowerLoops: item.IsLoop,
                 sequencePaths: paths.Count > 1 ? paths : null, sounds: sounds, mode: AppSettings.Current.AnimationMode, additive: additive,
-                preset: new SavedScenes.Animation(item.Title, item.LibraryId, null, null, item.IsLoop ? RepeatCount : 1));
+                preset: new SavedScenes.Animation(item.Title, item.LibraryId, null, null, item.IsLoop ? RepeatCount : 1), effects: effects);
             UserLibrary.AddRecent(item.LibraryId);
             AppLog.Information($"Sent animation {item.Name} to BLENDER in {Math.Round(timer.Elapsed.TotalSeconds, 3)}s (applies to the selected armature).");
             _ = Task.Run(() => MemoryHelper.ReleaseAfterLoading($"After sending {item.Name}"));

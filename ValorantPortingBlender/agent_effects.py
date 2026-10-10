@@ -558,7 +558,8 @@ def _material(emitter, images, name, boost=1.0):
     # its sprite: the first texture that isn't a normal map (Reyna's ult embers list a sphere normal first)
     # (and not a colour gradient when it has a shape texture too: KAY/O's sparks list their gradient first)
     shapes = [path for key, path in textures.items() if "normal" not in (key + path).lower()]
-    texture_path = next((path for path in shapes if "gradient" not in path.lower()), next(iter(shapes), next(iter(textures.values()), None)))
+    # (a lightning texture over a helper mask: Neon's arm bolts list HardEdges_TEX first)
+    texture_path = next((path for path in shapes if any(w in path.lower() for w in ("lightning", "bolt"))), None) or         next((path for path in shapes if "gradient" not in path.lower() and "edges" not in path.lower()), None) or         next((path for path in shapes if "gradient" not in path.lower()), next(iter(shapes), next(iter(textures.values()), None)))
     image = images.get(texture_path) if texture_path else None
     colour = None
     # smoke (Reyna's ult wisps: Vampire_Wisp_Smoke_B): the game shapes it with a flow map in its shader; here a soft
@@ -719,6 +720,42 @@ def _material(emitter, images, name, boost=1.0):
         white = nodes.new("ShaderNodeRGB")
         white.outputs[0].default_value = (1.0, 1.0, 1.0, 1.0)
         life_colour = white.outputs[0]
+    elif (spec.get("BaseMaterial") or "") == "Sprinter_CS_Swipe":
+        # Neon's energy trails (character select): a streak running along the mesh over its life, a wiggly band
+        # (TextureA_Wipe) of cyan energy (ColorA) with a hot yellow leading edge (TextureA_Edge_Color)
+        def rgb(name, fallback):
+            value = vectors.get(name) or fallback
+            peak = max(float(value[0]), float(value[1]), float(value[2]), 1.0)
+            return (float(value[0]) / peak, float(value[1]) / peak, float(value[2]) / peak, 1.0)
+
+        split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(uv, split.inputs[0])
+        along = split.outputs[0]
+        if images.get(textures.get("TextureA_Wipe")) is not None:
+            wiggle = nodes.new("ShaderNodeTexImage")
+            wiggle.image = images[textures["TextureA_Wipe"]]
+            links.new(uv, wiggle.inputs[0])
+            channels = nodes.new("ShaderNodeSeparateColor")
+            links.new(wiggle.outputs["Color"], channels.inputs[0])
+            along = math_node('ADD', along, math_node('MULTIPLY', math_node('SUBTRACT', channels.outputs[0], 0.5), 0.12))
+        front = math_node('SUBTRACT', math_node('MULTIPLY', age, 1.5), 0.2)
+        behind = math_node('SUBTRACT', front, along)  # > 0: the streak has passed here
+        tail = math_node('MULTIPLY', math_node('GREATER_THAN', behind, 0.0),
+                         math_node('POWER', math_node('SUBTRACT', 1.0, math_node('DIVIDE', behind, 0.22), clamp=True), 2.0))
+        edge = math_node('MULTIPLY', math_node('GREATER_THAN', behind, 0.0), math_node('SUBTRACT', 1.0, math_node('DIVIDE', behind, 0.06), clamp=True))
+        across = math_node('SUBTRACT', 1.0, math_node('ABSOLUTE', math_node('MULTIPLY', math_node('SUBTRACT', split.outputs[1], 0.5), 2.0)), clamp=True)
+        mixed = nodes.new("ShaderNodeMix")
+        mixed.data_type = 'RGBA'
+        links.new(edge, mixed.inputs[0])
+        mixed.inputs[6].default_value = rgb("ColorA", (0.0, 0.57, 1.0))
+        mixed.inputs[7].default_value = rgb("TextureA_Edge_Color", (1.0, 0.75, 0.0))
+        colour = mixed.outputs[2]
+        mask = math_node('MULTIPLY', math_node('MAXIMUM', math_node('MULTIPLY', tail, 0.6), edge), math_node('POWER', across, 2.0))
+        life_alpha = 1.0
+        white = nodes.new("ShaderNodeRGB")
+        white.outputs[0].default_value = (1.0, 1.0, 1.0, 1.0)
+        life_colour = white.outputs[0]
+        boost = boost * 3.0
     elif face and images.get(textures.get("Flipbook")) is not None:
         # KAY/O's face screen (m_faceExpressions_flipbook): the expression's lines (R) and their halo (G) in ColorA, on
         # a round purple glow (ColorRadialGradient, Radius); his face as a 10 x 10 flipbook
@@ -1095,9 +1132,11 @@ def _bone(rig, name):
     return next((bone.name for bone in rig.data.bones if bone.name.lower() == name.lower()), None)
 
 
-def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=None):
+def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=None, start_frame=None):
     """effects: what the app sent (spawns); rig: the agent's armature; load_image(game path) -> image;
     attach(obj, rig, {"Bone", "Location", "Rotation"}): hangs an object on a bone with an Unreal offset;
+    start_frame: for an animation's effects ("Timed"): the frame its animation starts at, each playing from its own
+    moment (its delay) for its length;
     load_mesh(game path) -> object (mesh particles' meshes); modes: {control: (one-shot, length)} from another rig's
     effects (the 1st person version of an effect plays like the 3rd person one), filled in with this call's."""
     meshes = {}
@@ -1282,6 +1321,18 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
                     _drive(material.node_tree, 'nodes["VP Clock"].outputs[0].default_value', rig, control, f"frame / {fps:g}", variables=[])
             # seconds since the effect started (its delay), and on/off from the armature
             delay = float(spawn.get('Delay') or 0.0)
+            if spawn.get("Timed") and start_frame is not None:
+                # an animation's effect: from its moment of the animation (the timeline), for its length (a looping
+                # emitter: 2 s), switched by the armature's control
+                ends = [p["birth"] + min(p["life"], 10.0) for p in particles if p["life"] < 1e8]
+                length = max(ends, default=0.0) if loops > 0 else 2.0
+                length = max(length, 0.3)
+                seconds = f"(frame - {start_frame:g}) / {fps:g}"
+                _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, control, f"{seconds} - {delay:g}", variables=[])
+                _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control,
+                       f"value * ({seconds} >= {delay:g}) * ({seconds} < {delay + length:g})")
+                made += 1
+                continue
             if one_shot.get(control):
                 # how far through the burst: 0 -> 1 over its length (shown while between)
                 length = max(lengths.get(control, 1.0), 0.1)

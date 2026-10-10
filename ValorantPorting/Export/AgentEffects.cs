@@ -23,7 +23,7 @@ public static class AgentEffects
     // On: its control starts switched on (an idle effect always there in game)
     // FirstPerson: on the 1st person arms (the game's EmitterTemplate1P)
     // Held: played in a loop, its control its strength (0 none .. 1 full) rather than a one-shot's progress
-    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false, bool Held = false);
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false, bool Held = false, bool Timed = false);
 
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
@@ -158,6 +158,85 @@ public static class AgentEffects
         ["Pandemic_X_3P_Equip|GasUP_Intro"] = (2.5f, 1.4f, null),
         ["ps_sparkles1|Glow"] = (5f, 2f, "C8A8FF")
     };
+
+    // The particle effects an animation plays in game (its notifies: AnimNotify_PlayParticleEffect, the game's own
+    // PlayParticle notify), each at its moment on its bone: an agent's character select intro (Neon's zaps, eye sparks,
+    // tattoo glow), ability casts. Background-only effects (the intro's backdrop) are left out.
+    public static List<Spawn>? FromAnimation(IEnumerable<string> objectPaths)
+    {
+        var spawns = new List<Spawn>();
+        var systems = new Dictionary<string, List<JObject>?>(StringComparer.OrdinalIgnoreCase);
+        List<JObject>? EmittersOf(string path)
+        {
+            if (systems.TryGetValue(path, out var cached)) return cached;
+            List<JObject>? result = null;
+            try
+            {
+                if (AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(path, out UObject system) && system.ExportType == "ParticleSystem" &&
+                    !Skipped.Contains(system.Name))
+                    result = Emitters(system) is { Count: > 0 } emitters ? emitters : null;
+            }
+            catch (Exception)
+            {
+                // unreadable / not a Cascade system
+            }
+            return systems[path] = result;
+        }
+
+        foreach (var objectPath in objectPaths)
+        {
+            try
+            {
+                if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(objectPath, out CUE4Parse.UE4.Assets.Exports.Animation.UAnimSequenceBase animation) ||
+                    animation.Notifies is not { } notifies) continue;
+                foreach (var notify in notifies)
+                {
+                    if (notify.Notify is not { IsNull: false } index || index.Load() is not { } notifyObject) continue;
+                    var time = (float) Math.Max(0, notify.LinkValue + notify.TriggerTimeOffset);
+                    string? path = null, socket = null;
+                    FVector offset = FVector.ZeroVector;
+                    FRotator rotation = FRotator.ZeroRotator;
+                    if (notifyObject.TryGetValue(out FPackageIndex template, "PSTemplate") && !template.IsNull)
+                    {
+                        path = template.ResolvedObject?.GetPathName();
+                        socket = notifyObject.GetOrDefault<FName>("SocketName").Text;
+                        offset = notifyObject.GetOrDefault("LocationOffset", FVector.ZeroVector);
+                        rotation = notifyObject.GetOrDefault("RotationOffset", FRotator.ZeroRotator);
+                    }
+                    else
+                    {
+                        // the game's own notify: a list of particles, each with its attach point and offsets
+                        var json = JObject.Parse(JsonConvert.SerializeObject(notifyObject))["Properties"] as JObject;
+                        var infos = json?.Properties().FirstOrDefault(p => p.Name.StartsWith("Particle Info"))?.Value as JArray;
+                        foreach (var info in infos?.OfType<JObject>() ?? [])
+                        {
+                            string? Field(string start) => info.Properties().FirstOrDefault(p => p.Name.StartsWith(start))?.Value?.ToString();
+                            JToken? Token(string start) => info.Properties().FirstOrDefault(p => p.Name.StartsWith(start))?.Value;
+                            var asset = (Token("Particle_") as JObject)?["AssetPathName"]?.ToString();
+                            if (string.IsNullOrEmpty(asset) || asset.Split('/').Last().StartsWith("BG", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (Token("IsFirstPerson") is { } first && first.Type == JTokenType.Boolean && first.Value<bool>()) continue;
+                            var o = Token("ParticleSpawnLocationOffset") as JObject;
+                            var r = Token("ParticleSpawnRotationOffset") as JObject;
+                            if (EmittersOf(asset) is { } infoEmitters)
+                                spawns.Add(new Spawn("FX: animation effects", asset.Split('.').Last(), Field("VFXAttachPoint") ?? "Root",
+                                    new FVector(o?["X"]?.Value<float>() ?? 0, o?["Y"]?.Value<float>() ?? 0, o?["Z"]?.Value<float>() ?? 0),
+                                    new FRotator(r?["Pitch"]?.Value<float>() ?? 0, r?["Yaw"]?.Value<float>() ?? 0, r?["Roll"]?.Value<float>() ?? 0),
+                                    time, infoEmitters, 1f, true, Timed: true));
+                        }
+                        continue;
+                    }
+                    if (path is null || EmittersOf(path) is not { } emitters) continue;
+                    spawns.Add(new Spawn("FX: animation effects", path.Split('.').Last(), string.IsNullOrEmpty(socket) || socket == "None" ? "Root" : socket,
+                        offset, rotation, time, emitters, 1f, true, Timed: true));
+                }
+            }
+            catch (Exception)
+            {
+                // unreadable: none from it
+            }
+        }
+        return spawns.Count == 0 ? null : spawns;
+    }
 
     public static List<Spawn>? ForAbility(IEnumerable<ExportPart> parts)
     {

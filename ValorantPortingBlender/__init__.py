@@ -846,7 +846,28 @@ def import_animation(data, armature=None):
         remove_animation_sounds(armature)  # the previous animation's sounds go with it (a layer or chain keeps them)
     if action is not None:
         add_animation_sounds(data, action, owner=armature.name, start=sounds_start)
+        add_animation_effects(data, action, armature, start=sounds_start)
         record_preset_step(armature, data, mode if base is not None else "Replace", cut_used)
+
+
+def add_animation_effects(data, action, armature, start=None):
+    """The particle effects the animation plays in game (an agent's character select intro: Neon's zaps, eye sparks,
+    tattoo glow), on their bones, each playing from its moment of the animation with the timeline;
+    "FX: animation effects" on the armature switches them off. An earlier animation's ones are removed (a layer or
+    chain keeps them)."""
+    effects = data.get("Effects") or []
+    if armature is None or not effects:
+        return
+    start = action.frame_range[0] if start is None else start
+    collection = armature.users_collection[0] if armature.users_collection else bpy.context.scene.collection
+    try:
+        made = agent_effects.apply(effects, armature, import_texture, attach_part_to_bone, collection,
+                                   load_mesh=import_mesh, start_frame=start)
+        if made:
+            bpy.app.timers.register(agent_effects.revalidate, first_interval=0.05)
+            Log.information(f"Animation effects added: {made} emitter(s), from frame {start:g}")
+    except Exception as e:
+        Log.error(f"Could not add the animation's effects: {e}")
 
 
 def record_preset_step(armature, data, mode, cut):

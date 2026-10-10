@@ -55,15 +55,16 @@ public class BlenderService : SocketServiceBase
     public static void SendAnimation(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null,
         IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null,
-        SavedScenes.Animation? preset = null) =>
+        SavedScenes.Animation? preset = null, IReadOnlyList<AgentEffects.Spawn>? effects = null) =>
         SendMessage(JsonConvert.SerializeObject(AnimationMessage(name, psaPath, upperPsaPath, repeat, lowerLoops, upperLoops, sequencePaths,
-            sounds: sounds, mode: mode, additive: additive, preset: preset)));
+            sounds: sounds, mode: mode, additive: additive, preset: preset, effects: effects)));
 
     // sceneTarget: in a scene, which armature it goes on ("agent:TP", "agent:FP", "agent:CS" or "gun")
     public static object AnimationMessage(string name, string psaPath, string? upperPsaPath = null, int repeat = 1,
         bool lowerLoops = false, bool upperLoops = false, IReadOnlyList<string>? sequencePaths = null, string? sceneTarget = null,
         IReadOnlyList<AnimationSounds.Placed>? sounds = null, string? mode = null, AnimationExport.AdditiveInfo? additive = null,
-        SavedScenes.Animation? preset = null, double? chainBlend = null, double? chainCutFrame = null) => new
+        SavedScenes.Animation? preset = null, double? chainBlend = null, double? chainCutFrame = null,
+        IReadOnlyList<AgentEffects.Spawn>? effects = null) => new
     {
         AssetsRoot = App.AssetsFolder.FullName.Replace("\\", "/"),
         SceneTarget = sceneTarget,
@@ -86,7 +87,9 @@ public class BlenderService : SocketServiceBase
                 additive.Type, BasePath = additive.BasePath?.Replace("\\", "/"), additive.BaseFraction, additive.BaseScaled
             },
             SequencePaths = sequencePaths?.Select(p => p.Replace("\\", "/")).ToList(),
-            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop, s.Voice }).ToList()
+            Sounds = sounds?.Select(s => new { Path = s.Path.Replace("\\", "/"), s.Time, s.Name, s.Loop, s.Voice }).ToList(),
+            // the particle effects it plays (character select intros, casts), each at its moment on its bone
+            Effects = effects
         }
     };
 
