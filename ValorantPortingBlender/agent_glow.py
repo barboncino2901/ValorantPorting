@@ -1729,6 +1729,121 @@ def _build_kayo_group(images, values):
     return group
 
 
+MASK_CONTROL = "Ult: mask"
+
+
+def _setup_viper_mask(values, objects):
+    """Viper's ult mask: built into her model, closed over her head by the game's MaskOn animation. Its mask pieces'
+    motion (only those) is kept in an action and played by "Ult: mask" (0 her mouth mask, 1 the full mask closed),
+    with Action constraints: on top of whatever animation she has."""
+    from .valorant_psk_psa_b5 import psaimport
+    path = values.get("MaskAnimation")
+    if not path:
+        return 0
+    done = 0
+    for rig in {_armature_of(o) for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_")} - {None}:
+        if MASK_CONTROL in rig:
+            continue
+        previous = rig.animation_data.action if rig.animation_data else None
+        scene = bpy.context.scene
+        frame = scene.frame_current
+        try:
+            psaimport(path, context=bpy.context, oArmature=rig, bKeepProportions=True, bRealTime=True,
+                      bUpdateTimelineRange=False, error_callback=print)
+        except Exception as error:
+            print(f"VP: Viper's mask animation not loaded: {error}")
+            continue
+        action = rig.animation_data.action if rig.animation_data else None
+        rig.animation_data.action = previous
+        if previous is None:
+            # (the pose it left behind: back to her rest pose)
+            for bone in rig.pose.bones:
+                bone.location = (0.0, 0.0, 0.0)
+                bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+                bone.rotation_euler = (0.0, 0.0, 0.0)
+                bone.scale = (1.0, 1.0, 1.0)
+        scene.frame_set(frame)
+        if action is None or action == previous:
+            continue
+        action.name = "VP Viper mask"
+        action.use_fake_user = True
+        start, end = action.frame_range
+        # the bones it moves: her mask's pieces
+        moving = set()
+        for curve in _action_curves(action, rig):
+            bone = curve.data_path.split('"')[1] if curve.data_path.startswith("pose.bones") else None
+            if bone is None or not ("mask" in bone.lower() or bone.lower() == "hair"):  # (her hair tucks in under it)
+                continue
+            values_ = [k.co[1] for k in curve.keyframe_points]
+            if values_ and max(values_) - min(values_) > 1e-4:
+                moving.add(bone)
+        rig[MASK_CONTROL] = 0.0
+        rig.id_properties_ui(MASK_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+                                                  description="Viper's ultimate: 0 her mouth mask, 1 her full mask closed over her head (keyframe it for her putting it on)")
+        for name in sorted(moving):
+            bone = rig.pose.bones.get(name)
+            if bone is None:
+                continue
+            constraint = bone.constraints.new('ACTION')
+            constraint.name = "VP Viper mask"
+            constraint.action = action
+            if hasattr(constraint, "action_slot") and getattr(action, "slots", None):
+                constraint.action_slot = action.slots[0]
+            constraint.use_eval_time = True
+            constraint.frame_start, constraint.frame_end = int(start), int(end)
+            constraint.mix_mode = 'BEFORE_FULL'
+            curve = constraint.driver_add("eval_time")
+            driver = curve.driver
+            driver.type = 'SCRIPTED'
+            var = driver.variables.new()
+            var.name = "value"
+            var.type = 'SINGLE_PROP'
+            var.targets[0].id_type = 'OBJECT'
+            var.targets[0].id = rig
+            var.targets[0].data_path = f'["{MASK_CONTROL}"]'
+            driver.expression = "value"
+            _mask_drivers.append((rig, constraint))
+            done += 1
+        rig.update_tag()
+    if done:
+        bpy.app.timers.register(_validate_mask_drivers, first_interval=0.05)
+    return done
+
+
+# Viper's mask drivers: made valid once the import is over (the rig's evaluated copy doesn't have "Ult: mask" before)
+_mask_drivers = []
+
+
+def _validate_mask_drivers():
+    rigs = set()
+    while _mask_drivers:
+        rig, constraint = _mask_drivers.pop()
+        try:
+            rig.update_tag()
+            rigs.add(rig)
+            for curve in (rig.animation_data.drivers if rig.animation_data else []):
+                curve.driver.is_valid = True
+        except ReferenceError:
+            pass
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
+    return None
+
+
+def _action_curves(action, owner):
+    """An action's F-curves (Blender 5: in its layers' channelbags)."""
+    if hasattr(action, "fcurves") and len(getattr(action, "fcurves", [])):
+        return list(action.fcurves)
+    curves = []
+    for layer in getattr(action, "layers", []):
+        for strip in layer.strips:
+            for bag in getattr(strip, "channelbags", []):
+                curves += list(bag.fcurves)
+    return curves
+
+
 # each agent with a glow: its shader, which of its materials get it (name contains), and its controls on the
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
@@ -1784,6 +1899,7 @@ AGENTS = {
         per_material=lambda tree, node, name, images: setattr(node.inputs["Prop"], "default_value", 1.0 if "_acc_" in name else 0.0),
         controls=[("Ult: active", "Ult", 0.0, "Yoru's ultimate (Dimensional Drift): he turns into a glowing blue hologram, his mask on his face"),
                   ("Ult: glitch", "Glitch", 0.5, "How much his hologram glitches: 0 none, 0.5 as in game, 1 twice as much (the warp and the flickering strips)")]),
+    "pandemic": dict(rig_only=_setup_viper_mask),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
@@ -1832,6 +1948,9 @@ def apply(glow, objects, load_image):
     spec = AGENTS.get((glow or {}).get("Agent", "").lower())
     if spec is None:
         return 0
+    if spec.get("rig_only"):
+        # (no glow: something on her rig, like Viper's mask slider)
+        return spec["rig_only"](glow.get("Values") or {}, objects)
     if spec.get("hands"):
         for obj in objects:
             if obj.type == 'MESH':

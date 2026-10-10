@@ -1,6 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using CUE4Parse_Conversion;
+using CUE4Parse_Conversion.Exporters;
+using CUE4Parse_Conversion.Meshes;
+using CUE4Parse_Conversion.Options;
+using CUE4Parse.UE4.Assets.Exports.Animation;
 using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
@@ -191,6 +197,14 @@ public static class AgentGlow
                     ["BaseColor"] = "0308BC", ["CoreColor"] = "71ABFF", ["InnerColor"] = "0095FF", ["CellTile"] = 3.0,
                     ["PanSpeed"] = 0.15
                 }),
+            // Viper: her ult's full face mask, built into her model and closed over her head by TP_Pandemic_S0_X_MaskOn_Cosmetic
+            // (sent as .psa: the add-on plays just its mask pieces by a slider)
+            ["Pandemic"] = (
+                new Dictionary<string, string>(),
+                new Dictionary<string, object>
+                {
+                    ["MaskAnimation"] = "/Game/Characters/Pandemic/S0/Ability_X/3P/Anims/TP_Pandemic_S0_X_MaskOn_Cosmetic.TP_Pandemic_S0_X_MaskOn_Cosmetic"
+                }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
             // colours: dark, orange, gold)
@@ -291,6 +305,28 @@ public static class AgentGlow
             }
         }
 
-        return textures.Count == 0 ? null : new Spec(codename, textures, glow.Values);
+        // animations it plays (values naming one: exported as .psa, the path sent instead)
+        var values = new Dictionary<string, object>(glow.Values);
+        foreach (var (key, value) in glow.Values)
+        {
+            if (!key.EndsWith("Animation") || value is not string animationPath) continue;
+            try
+            {
+                if (AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(animationPath, out UAnimationAsset animation) &&
+                    Task.Run(() => new ExportSession { MaxDegreeOfParallelism = 1 }.Add(new AnimationExporter(animation))
+                        .RunAsync(App.AssetsFolder.FullName, new ExportOptions(meshFormat: EMeshFormat.ActorX, exportMaterials: false)))
+                        .GetAwaiter().GetResult()
+                        .SelectMany(r => r.DiskFilePaths ?? []).FirstOrDefault(p => p.EndsWith(".psa", StringComparison.OrdinalIgnoreCase)) is { } psa)
+                    values[key] = psa;
+                else
+                    values.Remove(key);
+            }
+            catch (Exception)
+            {
+                values.Remove(key);  // missing from this game version
+            }
+        }
+
+        return textures.Count == 0 && values.Count == 0 ? null : new Spec(codename, textures, values);
     }
 }
