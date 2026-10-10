@@ -85,7 +85,7 @@ public static class AgentEffects
     private static readonly HashSet<string> HeldSystems = new(StringComparer.OrdinalIgnoreCase) { "Pandemic_X_3P_Equip" };
 
     // agents whose effects also go on the 1st person arms
-    private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth", "Sprinter" };
+    private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth", "Sprinter", "Phoenix", "Wraith", "Vampire", "Grenadier" };
 
     // 1st person systems moved (cm, the bone's frame): Yoru's rift pushed back from his eyes so his mask is halfway
     // through it (the game draws it over a closer mask)

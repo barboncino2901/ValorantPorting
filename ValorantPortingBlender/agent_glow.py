@@ -300,7 +300,13 @@ def _build_iso_group(images, values):
     links.new(mask.outputs[0], channels.inputs[0])
 
     total = None
-    for channel, switch in ((0, "Hands E"), (1, "Hands abilities"), (2, "Outfit")):
+    layout = ((0, "Hands E"), (1, "Hands abilities"), (2, "Outfit"))
+    if mask.image is not None and mask.image.name.lower().startswith("fp_"):
+        # his 1st person arms' mask: red his bare hand, green his glove's trim, blue a gradient up his fingers (his
+        # E's glow, fading toward the wrist); no outfit lines on them
+        layout = ((2, "Hands E"), (1, "Hands abilities"))
+    first_person = len(layout) == 2
+    for channel, switch in layout:
         part = nodes.new("ShaderNodeMath")
         part.operation = 'MULTIPLY'
         links.new(channels.outputs[channel], part.inputs[0])
@@ -313,6 +319,24 @@ def _build_iso_group(images, values):
             links.new(total, add.inputs[0])
             links.new(part.outputs[0], add.inputs[1])
             total = add.outputs[0]
+    if first_person:
+        # (seen up close: a glow strongest at his hands' outline, not flat paint over them)
+        rim = nodes.new("ShaderNodeLayerWeight")
+        rim.inputs["Blend"].default_value = 0.5
+        edge = nodes.new("ShaderNodeMath")
+        edge.operation = 'POWER'
+        links.new(rim.outputs["Facing"], edge.inputs[0])
+        edge.inputs[1].default_value = 2.0
+        light = nodes.new("ShaderNodeMath")
+        light.operation = 'MULTIPLY_ADD'
+        links.new(edge.outputs[0], light.inputs[0])
+        light.inputs[1].default_value = 1.4
+        light.inputs[2].default_value = 0.15
+        softened = nodes.new("ShaderNodeMath")
+        softened.operation = 'MULTIPLY'
+        links.new(total, softened.inputs[0])
+        links.new(light.outputs[0], softened.inputs[1])
+        total = softened.outputs[0]
     emission = nodes.new("ShaderNodeEmission")
     emission.inputs["Color"].default_value = (*_color(values.get("GlowColor", "D6AAFF")), 1.0)
     strength = nodes.new("ShaderNodeMath")
@@ -363,6 +387,8 @@ def _build_chamber_group(images, values):
     mask.image = _image(images, "MultiMask")
     links.new(uv.outputs[0], mask.inputs[0])
     tattoo = mask.outputs[1]  # alpha
+    if mask.image is not None and mask.image.name.lower().startswith("1p_"):
+        tattoo = mask.outputs[0]  # (his 1st person arms' mask: the tattoo in its colour, its alpha full)
 
     # the reveal: a left-to-right ramp across the texture (game: T_Mask_Ramp_LeftRight, tiled once), shown where it's
     # below the "Tattoo" value; a thin band at the front glows
@@ -692,8 +718,13 @@ def _build_clove_group(images, values):
     # her ult: the game's glow mask (her TP_ULT_ colours where it is white), a blue rim; her hair's tips
     ult = inputs.outputs["Ult"]
     ult_albedo = texture("UltAlbedo").outputs[0]
-    ult_mask = separate(texture("UltMask").outputs[0])[0]
-    ult_mask = math_node('DIVIDE', math_node('SUBTRACT', ult_mask, 0.6), 0.4, clamp=True)  # its bright parts (eyes, ...)
+    ult_mask_node = texture("UltMask")
+    first_person = _image(images, "CMask") is None  # (her 1st person arms: no C mask, no legs)
+    if ult_mask_node.image is not None and ult_mask_node.image.name.lower().startswith("fp_"):
+        ult_mask = separate(ult_mask_node.outputs[0])[1]  # (her 1st person arms' mask: red the arm, green its glowing spots)
+    else:
+        ult_mask = separate(ult_mask_node.outputs[0])[0]
+        ult_mask = math_node('DIVIDE', math_node('SUBTRACT', ult_mask, 0.6), 0.4, clamp=True)  # its bright parts (eyes, ...)
     glow = float(values.get("UltGlow", 2.5))
     body_glow = emission(ult_albedo, math_node('MULTIPLY', math_node('MULTIPLY', ult_mask, ult), math_node('MULTIPLY', body, glow)))
     blue_rim = emission(_color(values.get("UltFresnelColor", "6BBEFF")),
@@ -725,7 +756,8 @@ def _build_clove_group(images, values):
     butterflies = separate(texture("CMask").outputs[0])[0]
     butterfly_glow = emission(_color(values.get("ButterflyColor", "FFB8FF")),
                               math_node('MULTIPLY', math_node('MULTIPLY', butterflies, legs), math_node('MULTIPLY', body, 3.0)))
-    result = add(add(result, leg_glow), butterfly_glow)
+    if not first_person:
+        result = add(add(result, leg_glow), butterfly_glow)
 
     # her ghost (the resurrection model; the game's 3P_SMO_X_Dismiss-Formless_MAT): unlit and see-through, pale
     # lavender turning pink at its outline (SMO_X_Color-Soft_LUT), a bright pink rim, glowing eyes
@@ -1486,6 +1518,19 @@ def _build_jett_group(images, values):
     island_u, island_v = float(values.get("ArmIslandU", 0.208)), float(values.get("ArmIslandV", 0.2534))
     around = math_node('DIVIDE', split.outputs[0], island_u)
     along = math_node('DIVIDE', math_node('SUBTRACT', split.outputs[1], 1.0 - island_v), island_v)
+    if mask.image is None:
+        # her 1st person arms (OverlayMaterial_FP_Wushu_S0: no mask): their second UV map is each arm unwrapped around
+        # (u) and along it, wrist to shoulder (v); their third keeps the hands apart (below 0.25), left without wind
+        arm_uv = nodes.new("ShaderNodeUVMap")
+        arm_uv.uv_map = "EXTRAUVS0"
+        arm_split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(arm_uv.outputs[0], arm_split.inputs[0])
+        around, along = arm_split.outputs[0], arm_split.outputs[1]
+        hand_uv = nodes.new("ShaderNodeUVMap")
+        hand_uv.uv_map = "EXTRAUVS1"
+        hand_split = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(hand_uv.outputs[0], hand_split.inputs[0])
+        arm = math_node('DIVIDE', math_node('SUBTRACT', hand_split.outputs[1], 0.235), 0.04, clamp=True)
 
     # smoke streams: three around the arm, the flipbook's 18 frames (9 x 2) played at 15 per second
     frame = math_node('FLOORED_MODULO', math_node('FLOOR', math_node('MULTIPLY', inputs.outputs["Time"], 15.0)), 18.0)
@@ -1592,6 +1637,8 @@ def _build_phoenix_group(images, values):
     channels = nodes.new("ShaderNodeSeparateColor")
     links.new(masks.outputs["Color"], channels.inputs[0])
     where, honeycomb = channels.outputs[0], channels.outputs[1]
+    if masks.image is None:
+        where, honeycomb = 1.0, 0.0  # (his 1st person arms: no mask, the flames all over them)
 
     rim = nodes.new("ShaderNodeLayerWeight")
     rim.inputs["Blend"].default_value = 0.4
@@ -2314,24 +2361,25 @@ def _action_curves(action, owner):
 # armature: (custom property, the group's input, default, description)
 AGENTS = {
     "vampire": dict(
-        node=GROUP, build=_build_group, materials="vampire", hands=True,
+        node=GROUP, build=_build_group, materials="vampire", hands=True, first_person=True, fp_none=("MaskSetsXE", "ChestFlare"),
         controls=[(HEART, "Heart", 1.0, CONTROLS[HEART][1]), (EYES, "Eyes", 0.0, CONTROLS[EYES][1]),
                   (ULTIMATE, "Ultimate", 0.0, CONTROLS[ULTIMATE][1]),
                   ("Glow: dismiss", "Dismiss", 0.0, "Reyna's Dismiss: she turns see-through purple with a glowing magenta outline"),
                   ("Glow: tattoos", "Tattoos", 0.0, "Reyna's arm tattoos glowing on their own (1 on, 0 off), without her ultimate or Dismiss")]),
     "sequoia": dict(
-        node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip=("hair",),
+        node="VP Iso Glow", build=_build_iso_group, materials="sequoia", skip=("hair",), first_person=True,
         controls=[("Glow: outfit", "Outfit", 0.0, "Iso's outfit lines glowing"),
                   ("Glow: hands (E)", "Hands E", 0.0, "Iso's forearms glowing, as with his E (charged punches)"),
                   ("Glow: hands (abilities)", "Hands abilities", 0.0, "Iso's gloves glowing, as with his other abilities")]),
     "deadeye": dict(
-        node="VP Chamber Tattoo", build=_build_chamber_group, materials="deadeye", skip=("hair", "glass"),
+        node="VP Chamber Tattoo", build=_build_chamber_group, materials="deadeye", skip=("hair", "glass"), first_person=True,
         controls=[("Tattoo", "Tattoo", 1.0, "Chamber's gold tattoo (side of his head, wrists); from 0 it reveals left to right with a glowing edge, as in character select")]),
     "terra": dict(
-        node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair", "terra_s0_floaters"),
+        node="VP Waylay Glow", build=_build_waylay_group, materials=("terra_s0_arm", "terra_s0_hair", "terra_s0_floaters"), first_person=True,
         controls=[("Glow: tattoos", "Tattoos", 0.0, "Waylay's crystal tattoos, nails and hair tips glowing, as when she uses her abilities")]),
     "smonk": dict(
-        node="VP Clove Glow", build=_build_clove_group, materials="smonk", prepare=_prepare_clove,
+        node="VP Clove Glow", build=_build_clove_group, materials="smonk", prepare=_prepare_clove, first_person=True,
+        fp_none=("UltHairMask", "CMask", "GhostEyes"),
         per_material=_swap_clove_albedo, see_through=True,
         extra_drivers=[("VP Clove Ult Colours", "Factor", "Ult: active")],
         controls=[("Ult: respawn", "Respawn", 1.0, "Clove fading in from her head down (0 to 1), as she comes back with her ultimate (with \"Ult: ghost\" at 1: her ghost)"),
@@ -2340,14 +2388,15 @@ AGENTS = {
                   ("Glow: legs (C)", "Legs", 0.0, "Clove's legs glowing, smoke rising and her trousers' butterflies lit, as with her C")]),
     "sprinter": dict(
         node="VP Neon Glow", build=_build_neon_group, materials="sprinter",
-        first_person=True,
+        first_person=True, fp_none=("TattooMask", "HairMask"),
         controls=[("Glow: sprint (E)", "Sprint", 0.0, "Neon's suit lighting up blue, as when she sprints (her E)"),
                   ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit, tattoo and the edges of her skin glowing cyan with electricity, her hair blue to yellow")]),
     "wushu": dict(
-        node="VP Jett Tattoos", build=_build_jett_group, materials="wushu_s0_tattoo",
+        node="VP Jett Tattoos", build=_build_jett_group, materials=("wushu_s0_tattoo", "fp_wushu_s0"),
+        first_person=True, fp_none=("Mask",), fp_always=True,
         controls=[("Glow: arms (ult)", "Loop", 0.0, "Jett's arms streaming wind, as while her ultimate is up")]),
     "phoenix": dict(
-        node="VP Phoenix Fire", build=_build_phoenix_group, materials="phoenix_s0",
+        node="VP Phoenix Fire", build=_build_phoenix_group, materials="phoenix_s0", first_person=True, fp_none=("Masks",), fp_always=True,
         controls=[("Glow: ultimate", "Ult", 0.0, "Phoenix's ultimate (Run It Back): flames crawling over him, his chest glowing"),
                   ("Glow: heal", "Heal", 0.0, "Phoenix healing in his own fire: softer flames over him")]),
     "grenadier": dict(
@@ -2359,6 +2408,7 @@ AGENTS = {
                   ("Glow: ultimate", "Ult", 0.0, "KAY/O's ultimate (NULL/cmd): his panels violet and flickering, a violet outline")]),
     "wraith": dict(
         node="VP Omen Ult", build=_build_omen_group, materials=("wraith", "ethereal"), prepare=_prepare_omen, see_through=True,
+        first_person=True, fp_none=("Cracks",), fp_always=True,
         controls=[("Ult: cast", "Cast", 0.0, "Omen casting his ultimate: 0 -> 0.5 he turns to shadow, his markings glowing cyan; 0.5 -> 1 he dissolves away"),
                   ("Ult: ghost", "Ghost", 0.0, "Omen's ghost (his ethereal form as he arrives): 0 -> 1 it takes his place; back to 0 he comes back")]),
     "stealth": dict(
@@ -2368,7 +2418,7 @@ AGENTS = {
                   ("Ult: glitch", "Glitch", 0.5, "How much his hologram glitches: 0 none, 0.5 as in game, 1 twice as much (the warp and the flickering strips)")]),
     "pandemic": dict(rig_only=_setup_viper_mask),
     "pine": dict(
-        node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True,
+        node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True, first_person=True,
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
 }
 
@@ -2431,15 +2481,15 @@ def apply(glow, objects, load_image):
     group = spec["build"]({k: v for k, v in images.items() if not k.startswith("FP:")}, glow.get("Values") or {})
     # the 1st person arms' own glow: the same shader with their own masks ("FP:" roles; the others it lacks left out)
     group_fp = None
-    if spec.get("first_person") and any(k.startswith("FP:") for k in images):
+    if spec.get("first_person") and (any(k.startswith("FP:") for k in images) or spec.get("fp_always")):
         name = group.name
         group.name = name + " (3rd person)"
         fp_images = {k: v for k, v in images.items() if not k.startswith("FP:")}
         for k, v in images.items():
             if k.startswith("FP:"):
                 fp_images[k[3:]] = v
-        for k in ("TattooMask", "HairMask"):
-            fp_images[k] = None
+        for k in spec.get("fp_none", ()):
+            fp_images[k] = None  # (what the arms don't have: Neon's hair, Reyna's eyes and heart)
         group_fp = spec["build"](fp_images, glow.get("Values") or {})
         group_fp.name = name + " (1st person)"
         group.name = name
@@ -2485,7 +2535,8 @@ def apply(glow, objects, load_image):
             if spec.get("per_material"):
                 spec["per_material"](tree, node, name, images)
             if "Reveal" in node.inputs:
-                node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name else 0.0
+                # (his 1st person arms carry his symbiote material themselves: FP_Pine_S0_Sym_MI)
+                node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name or ("fp_" in name and "_sym" in name) else 0.0
             if spec.get("see_through"):
                 if hasattr(material, "use_transparent_shadow"):
                     material.use_transparent_shadow = True  # its hidden parts cast no shadow (Eevee)

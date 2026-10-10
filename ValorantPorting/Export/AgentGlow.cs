@@ -38,7 +38,9 @@ public static class AgentGlow
                     // what moves in it: the chest flare and the energy flowing over her (3P_Vampire_X_FX_Inst's TextureA)
                     ["ChestFlare"] = "/Game/Characters/Vampire/S0/VFX/Texture/Vampire_Chest_Flare.Vampire_Chest_Flare",
                     ["Energy"] = "/Game/Characters/Pandemic/S0/VFX/Textures/Wraith_4Xtile90_GrayScale.Wraith_4Xtile90_GrayScale",
-                    ["TattooColor"] = "/Game/Characters/Vampire/S0/VFX/Texture/Vampire_Tattoo_Color.Vampire_Tattoo_Color"
+                    ["TattooColor"] = "/Game/Characters/Vampire/S0/VFX/Texture/Vampire_Tattoo_Color.Vampire_Tattoo_Color",
+                    // her 1st person arms' tattoo mask (1P_Vampire_Tattoo_X_S0_MI_VFX's Tattoo)
+                    ["FP:TattooMask"] = "/Game/Characters/Vampire/S0/VFX/Texture/Vampire_Tatoo_VFX_C_MB.Vampire_Tatoo_VFX_C_MB"
                 },
                 new Dictionary<string, object>
                 {
@@ -54,7 +56,8 @@ public static class AgentGlow
             ["Sequoia"] = (
                 new Dictionary<string, string>
                 {
-                    ["GlowMask"] = "/Game/Characters/Sequoia/S0/3P/Materials/TP_Sequoia_S0_VFXMask.TP_Sequoia_S0_VFXMask"
+                    ["GlowMask"] = "/Game/Characters/Sequoia/S0/3P/Materials/TP_Sequoia_S0_VFXMask.TP_Sequoia_S0_VFXMask",
+                    ["FP:GlowMask"] = "/Game/Characters/Sequoia/S0/1P/Materials/FP_Sequoia_S0_VFXMask_RGB_TFX.FP_Sequoia_S0_VFXMask_RGB_TFX"
                 },
                 new Dictionary<string, object>
                 {
@@ -66,7 +69,8 @@ public static class AgentGlow
             ["Deadeye"] = (
                 new Dictionary<string, string>
                 {
-                    ["MultiMask"] = "/Game/Characters/Deadeye/S0/VFX/Texture/DE_MultiMask_TEX.DE_MultiMask_TEX"
+                    ["MultiMask"] = "/Game/Characters/Deadeye/S0/VFX/Texture/DE_MultiMask_TEX.DE_MultiMask_TEX",
+                    ["FP:MultiMask"] = "/Game/Characters/Deadeye/S0/1P/Materials/1P_Deadeye_Tattoo_mask.1P_Deadeye_Tattoo_mask"
                 },
                 new Dictionary<string, object>
                 {
@@ -81,6 +85,7 @@ public static class AgentGlow
                 {
                     ["TattooDecal"] = "/Game/Characters/Terra/S0/1P/Materials/FP_Terra_S0_Tattoo_Decal.FP_Terra_S0_Tattoo_Decal",
                     ["Masks"] = "/Game/Characters/Terra/S0/3P/Materials/TP_Terra_Masks_TFX.TP_Terra_Masks_TFX",
+                    ["FP:Masks"] = "/Game/Characters/Terra/S0/1P/Materials/FP_Terra_Masks_TFX.FP_Terra_Masks_TFX",
                     // her crystal shards are separate pieces (FP_Terra_S0_Floaters_MI); this mask is where they glow
                     ["FloatersMask"] = "/Game/Characters/Terra/S0/1P/Materials/FP_Terra_MasksFloaters_TFX.FP_Terra_MasksFloaters_TFX"
                 },
@@ -97,6 +102,9 @@ public static class AgentGlow
                 {
                     ["UltAlbedo"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_DF.TP_ULT_Smonk_S0_DF",
                     ["UltMask"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_Mask.TP_ULT_Smonk_S0_Mask",
+                    // her 1st person arms: their own glow mask, their own colours glowing
+                    ["FP:UltMask"] = "/Game/Characters/Smonk/S0/1P/Materials/FP_Smonk_VFX_Mask_S0_DF.FP_Smonk_VFX_Mask_S0_DF",
+                    ["FP:UltAlbedo"] = "/Game/Characters/Smonk/S0/1P/Materials/FP_Smonk_S0_DF.FP_Smonk_S0_DF",
                     ["UltHairAlbedo"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_ULT_Smonk_S0_Hair_DF.TP_ULT_Smonk_S0_Hair_DF",
                     ["UltHairMask"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_Ult_Smonk_S0_Hair_Mask.TP_Ult_Smonk_S0_Hair_Mask",
                     ["CMask"] = "/Game/Characters/Smonk/S0/3P/Materials/TP_Smonk_S0_C_Mask.TP_Smonk_S0_C_Mask",
