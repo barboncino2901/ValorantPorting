@@ -2012,7 +2012,13 @@ def import_response(response, holder=None, use_selection=True):
     # (an agent's: her 3rd person rig, e.g. Yoru's ult mask on his head)
     armatures = [p["Parent"] for p in imported_parts if p["Parent"].type == 'ARMATURE']
     rig = next((a for a in armatures if a.name.upper().startswith("TP_")), armatures[0] if armatures else None)
+    first_person_rig = next((a for a in armatures if a.name.upper().startswith("FP_")), None)
     for imported_part in imported_parts:
+        if imported_part.get("Part") == "UltPropFP":
+            # (on the 1st person arms: Viper's valves)
+            if imported_part.get("BoneAttachment") and first_person_rig is not None:
+                attach_part_to_bone(imported_part["Parent"], first_person_rig, imported_part["BoneAttachment"])
+            continue
         if (bone_attachment := imported_part.get("BoneAttachment")) and rig is not None:
             attach_part_to_bone(imported_part["Parent"], rig, bone_attachment)
             if imported_part.get("Part") == "UltProp":

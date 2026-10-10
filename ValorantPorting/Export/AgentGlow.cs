@@ -203,7 +203,9 @@ public static class AgentGlow
                 new Dictionary<string, string>(),
                 new Dictionary<string, object>
                 {
-                    ["MaskAnimation"] = "/Game/Characters/Pandemic/S0/Ability_X/3P/Anims/TP_Pandemic_S0_X_MaskOn_Cosmetic.TP_Pandemic_S0_X_MaskOn_Cosmetic"
+                    ["MaskAnimation"] = "/Game/Characters/Pandemic/S0/Ability_X/3P/Anims/TP_Pandemic_S0_X_MaskOn_Cosmetic.TP_Pandemic_S0_X_MaskOn_Cosmetic",
+                    ["LeftValveAnimation"] = "/Game/Characters/Pandemic/S0/Ability_X/1P/Anims/AB_Pandemic_S0_X_LeftHand_Equip.AB_Pandemic_S0_X_LeftHand_Equip",
+                    ["RightValveAnimation"] = "/Game/Characters/Pandemic/S0/Ability_X/1P/Anims/AB_Pandemic_S0_X_RightHand_Equip.AB_Pandemic_S0_X_RightHand_Equip"
                 }),
             // Veto: his ultimate turns him into his symbiote form (a second model, see UltForms), which spreads over him
             // in bubbling cells with a glowing edge (Pine_UltTeleportWPO_TFX's cells, Pine_LUT_TransformGlow_TFX's
@@ -240,9 +242,22 @@ public static class AgentGlow
             "/Game/Characters/Stealth/S0/3P/Materials/TP_Stealth_S0_Acc_MI.TP_Stealth_S0_Acc_MI", "Head", new FVector(6f, 0f, -3.5f))
     };
 
+    // 1st person props of an ultimate: codename -> (skeletal mesh, bone of the 1st person arms). Viper's valves (the
+    // canisters that unfold into her palms: FXC_Pandemic_X_Equipped_Valves), played by their own animations (sent
+    // with her glow) from a slider
+    private static readonly Dictionary<string, (string Mesh, string Bone)[]> FirstPersonProps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Pandemic"] =
+        [
+            ("/Game/Characters/Pandemic/S0/Ability_X/1P/Models/AB_Pandemic_S0_X_LeftHand_Skelmesh.AB_Pandemic_S0_X_LeftHand_Skelmesh", "L_Hand"),
+            ("/Game/Characters/Pandemic/S0/Ability_X/1P/Models/AB_Pandemic_S0_X_RightHand_Skelmesh.AB_Pandemic_S0_X_RightHand_Skelmesh", "R_Hand")
+        ]
+    };
+
     public static void AddUltForm(List<ExportPart> parts)
     {
         AddUltProp(parts);
+        AddFirstPersonProps(parts);
         var thirdPerson = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/3P/", StringComparison.OrdinalIgnoreCase) &&
                                                                                   p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
         if (thirdPerson is null) return;
@@ -256,6 +271,29 @@ public static class AgentGlow
         catch (Exception)
         {
             // missing from this game version: no ult form
+        }
+    }
+
+    private static void AddFirstPersonProps(List<ExportPart> parts)
+    {
+        var firstPerson = parts.Select(p => p.MeshPath ?? "").FirstOrDefault(p => p.Contains("/1P/", StringComparison.OrdinalIgnoreCase) &&
+                                                                                  p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
+        if (firstPerson is null) return;
+        var codename = firstPerson[(firstPerson.IndexOf("/Characters/", StringComparison.OrdinalIgnoreCase) + "/Characters/".Length)..].Split('/')[0];
+        foreach (var (meshPath, bone) in FirstPersonProps.GetValueOrDefault(codename) ?? [])
+        {
+            try
+            {
+                if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(meshPath, out USkeletalMesh mesh)) continue;
+                var index = ExportHelpers.Mesh(mesh, parts);
+                if (index < 0) continue;
+                parts[index].Part = "UltPropFP";
+                parts[index].AttachToBone = new PartBoneAttachment(bone, FVector.ZeroVector, FRotator.ZeroRotator, FVector.OneVector);
+            }
+            catch (Exception)
+            {
+                // missing from this game version
+            }
         }
     }
 

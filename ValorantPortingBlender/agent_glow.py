@@ -1738,9 +1738,9 @@ def _setup_viper_mask(values, objects):
     with Action constraints: on top of whatever animation she has."""
     from .valorant_psk_psa_b5 import psaimport
     path = values.get("MaskAnimation")
+    done = _setup_viper_first_person(values, objects)
     if not path:
-        return 0
-    done = 0
+        return done
     for rig in {_armature_of(o) for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_")} - {None}:
         if MASK_CONTROL in rig:
             continue
@@ -2145,16 +2145,107 @@ def _gas_group(rig, fps, body=None):
     return group
 
 
-def _add_viper_gas(rig, hand, objects):
+VALVE_CONTROL = "Ult: valves"
+
+
+def _setup_viper_first_person(values, objects):
+    """Her 1st person ult: the valve canisters unfolding into her palms (their own animations, kept in actions played
+    by Action constraints from "Ult: valves" on the arms: 0 hidden, 1 unfolded) and gas from her hands."""
+    from .valorant_psk_psa_b5 import psaimport
+    arms = next((o for o in objects if o.type == 'ARMATURE' and o.name.upper().startswith("FP_")), None)
+    if arms is None:
+        return 0
+    done = 0
+    for side, key in (("LEFT", "LeftValveAnimation"), ("RIGHT", "RightValveAnimation")):
+        valve = next((o for o in objects if o.type == 'ARMATURE' and o.name.upper().startswith(f"AB_PANDEMIC_S0_X_{side}HAND")), None)
+        path = values.get(key)
+        if valve is None or not path:
+            continue
+        if VALVE_CONTROL not in arms:
+            arms[VALVE_CONTROL] = 0.0
+            arms.id_properties_ui(VALVE_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+                                                        description="Viper's ultimate (1st person): the gas canisters unfolding into her palms (0 hidden, 1 out)")
+        try:
+            psaimport(path, context=bpy.context, oArmature=valve, bKeepProportions=False, bRealTime=True,
+                      bUpdateTimelineRange=False, error_callback=print)
+        except Exception as error:
+            print(f"VP: Viper's valve animation not loaded: {error}")
+            continue
+        action = valve.animation_data.action if valve.animation_data else None
+        if action is None:
+            continue
+        valve.animation_data.action = None
+        for bone in valve.pose.bones:
+            bone.location = (0.0, 0.0, 0.0)
+            bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+            bone.scale = (1.0, 1.0, 1.0)
+        action.name = f"VP Viper valve ({side.lower()})"
+        action.use_fake_user = True
+        start, end = action.frame_range
+        # (it unfolds, then folds back at its end: the slider runs to the frame it is most open)
+        bpy.context.view_layer.update()
+        rest = {b.name: b.head.copy() for b in valve.pose.bones}
+        valve.animation_data.action = action
+        widest, widest_frame = -1.0, end
+        for frame in range(int(start), int(end) + 1):
+            bpy.context.scene.frame_set(frame)
+            spread = sum((valve.pose.bones[n].head - h).length for n, h in rest.items())
+            if spread > widest:
+                widest, widest_frame = spread, frame
+        valve.animation_data.action = None
+        bpy.context.scene.frame_set(int(start))
+        for bone in valve.pose.bones:
+            bone.location = (0.0, 0.0, 0.0)
+            bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+            bone.scale = (1.0, 1.0, 1.0)
+        for bone in valve.pose.bones:
+            constraint = bone.constraints.new('ACTION')
+            constraint.name = "VP Viper valve"
+            constraint.action = action
+            if hasattr(constraint, "action_slot") and getattr(action, "slots", None):
+                constraint.action_slot = action.slots[0]
+            constraint.use_eval_time = True
+            constraint.frame_start, constraint.frame_end = int(start), int(widest_frame)
+            constraint.mix_mode = 'BEFORE_FULL'
+            _drive_by_control(constraint, "eval_time", arms, VALVE_CONTROL, "value")
+            done += 1
+        for mesh in valve.children:
+            if mesh.type == 'MESH':
+                for prop in ("hide_viewport", "hide_render"):
+                    _drive_by_control(mesh, prop, arms, VALVE_CONTROL, "value < 0.01")
+        _mask_drivers.append((arms, None))
+    for hand in ("L_Hand", "R_Hand"):
+        if hand in arms.data.bones and not any(o.name == f"VP Viper gas ({hand}) (1st person)" for o in bpy.data.objects):
+            _add_viper_gas(arms, hand, objects, suffix=" (1st person)")
+            done += 1
+    if done:
+        bpy.app.timers.register(_validate_mask_drivers, first_interval=0.05)
+    return done
+
+
+def _drive_by_control(target, path, rig, prop, expression):
+    curve = target.driver_add(path)
+    driver = curve.driver
+    driver.type = 'SCRIPTED'
+    var = driver.variables.new()
+    var.name = "value"
+    var.type = 'SINGLE_PROP'
+    var.targets[0].id_type = 'OBJECT'
+    var.targets[0].id = rig
+    var.targets[0].data_path = f'["{prop}"]'
+    driver.expression = expression
+
+
+def _add_viper_gas(rig, hand, objects, suffix=""):
     """A gas plume on her hand (the valve on her gauntlet), for "FX: hand smoke"."""
     if GAS_CONTROL not in rig:
         rig[GAS_CONTROL] = 0.0
         rig.id_properties_ui(GAS_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
                                                  description="Viper's ultimate: green gas pouring from her hands (0 none, 1 full)")
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
-    mesh = bpy.data.meshes.new(f"VP Viper gas ({hand})")
+    mesh = bpy.data.meshes.new(f"VP Viper gas ({hand}){suffix}")
     mesh.from_pydata([(0.0, 0.0, 0.0)], [], [])
-    obj = bpy.data.objects.new(f"VP Viper gas ({hand})", mesh)
+    obj = bpy.data.objects.new(f"VP Viper gas ({hand}){suffix}", mesh)
     for collection in rig.users_collection:
         collection.objects.link(obj)
     obj.parent = rig
@@ -2167,7 +2258,7 @@ def _add_viper_gas(rig, hand, objects):
     placed.translation = placed.translation + along * 0.06
     obj.matrix_world = placed
     modifier = obj.modifiers.new("VP Viper gas", 'NODES')
-    body = next((o for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_") and _armature_of(o) == rig), None)
+    body = next((o for o in objects if o.type == 'MESH' and o.name.upper().startswith(("TP_", "FP_")) and _armature_of(o) == rig), None)
     modifier.node_group = _gas_group(rig, fps, body)
 
 
@@ -2186,6 +2277,20 @@ def _validate_mask_drivers():
                 curve.driver.is_valid = True
         except ReferenceError:
             pass
+    # (and every driver reading them: on the valves, the gas, its materials, her hair; made during the import)
+    trees = [m.node_tree for m in bpy.data.materials if m.node_tree is not None]
+    for collection in (bpy.data.objects, bpy.data.node_groups, bpy.data.materials, trees):
+        for item in collection:
+            data = getattr(item, "animation_data", None)
+            if data is None:
+                continue
+            for curve in data.drivers:
+                if not curve.driver.is_valid:
+                    curve.driver.is_valid = True
+            if collection is bpy.data.objects:
+                item.update_tag()
+            elif hasattr(item, "update_tag"):
+                item.update_tag()
     try:
         bpy.context.view_layer.update()
     except Exception:
