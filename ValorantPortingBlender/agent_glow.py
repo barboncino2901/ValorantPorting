@@ -1777,41 +1777,6 @@ def _setup_viper_mask(values, objects):
             values_ = [k.co[1] for k in curve.keyframe_points]
             if values_ and max(values_) - min(values_) > 1e-4:
                 moving.add(bone)
-        # when the mask has closed over her head (its pieces at their last pose), and when her hair tucks in: her
-        # hair waits under the mask instead of vanishing as it starts (the game hides that with its smoke)
-        span = max(end - start, 1.0)
-
-        def settle(curves, first):
-            """the first (or last) frame where these curves change"""
-            frames = []
-            for curve in curves:
-                last_value = curve.evaluate(end)
-                first_value = curve.evaluate(start)
-                for f in range(int(start), int(end) + 1):
-                    if abs(curve.evaluate(f) - (first_value if first else last_value)) > 1e-3:
-                        frames.append(f)
-                        break
-            return frames
-
-        mask_curves = [c for c in _action_curves(action, rig) if c.data_path.startswith("pose.bones")
-                       and "mask" in c.data_path.split('"')[1].lower()]
-        hair_curves = [c for c in _action_curves(action, rig) if c.data_path.startswith('pose.bones["Hair"]')]
-        closed = 0.5
-        if mask_curves:
-            latest = []
-            for curve in mask_curves:
-                final = curve.evaluate(end)
-                changing = [f for f in range(int(start), int(end) + 1) if abs(curve.evaluate(f) - final) > 1e-3]
-                if changing:
-                    latest.append(max(changing))
-            closed = (max(latest) + 1 - start) / span if latest else 0.5
-        hair_start = (min(settle(hair_curves, True), default=start) - start) / span
-        hair_end = hair_start
-        for curve in hair_curves:
-            final = curve.evaluate(end)
-            changing = [f for f in range(int(start), int(end) + 1) if abs(curve.evaluate(f) - final) > 1e-3]
-            if changing:
-                hair_end = max(hair_end, (max(changing) + 1 - start) / span)
         rig[MASK_CONTROL] = 0.0
         rig.id_properties_ui(MASK_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
                                                   description="Viper's ultimate: 0 her mouth mask, 1 her full mask closed over her head (keyframe it for her putting it on)")
@@ -1836,15 +1801,7 @@ def _setup_viper_mask(values, objects):
             var.targets[0].id_type = 'OBJECT'
             var.targets[0].id = rig
             var.targets[0].data_path = f'["{MASK_CONTROL}"]'
-            if name.lower() == "hair":
-                # its own motion squeezed into the moment the mask is closed
-                width = 0.04
-                a = max(closed - width, 0.0)
-                driver.expression = (f"{hair_start:.4f} + min(max((value - {a:.4f}) / {width:g}, 0.0), 1.0) * "
-                                     f"{max(hair_end - hair_start, 0.001):.4f}")
-            else:
-                driver.expression = "value"
-            print(f"VP Viper mask: {name} closed at {closed:.2f}, hair {hair_start:.2f}-{hair_end:.2f}") if name.lower() == "hair" else None
+            driver.expression = "value"
             _mask_drivers.append((rig, constraint))
             done += 1
         rig.update_tag()
