@@ -512,7 +512,7 @@ def _build_veto_group(images, values):
     group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
-    for socket_name in ("Form", "Reveal", "Time"):
+    for socket_name in ("Form", "Reveal", "Time", "Swap"):
         face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
     nodes, links = group.nodes, group.links
@@ -566,9 +566,42 @@ def _build_veto_group(images, values):
     links.new(inputs.outputs["Shader"], lit.inputs[0])
     links.new(glow.outputs[0], lit.inputs[1])
     gone = nodes.new("ShaderNodeBsdfTransparent")
+    # Swap 1 (his 1st person human arm: no symbiote model for it): where the symbiote arrives, a symbiote surface
+    # instead of nothing (his symbiote's colours: dark indigo, cyan veins, glossy)
+    veins = nodes.new("ShaderNodeTexVoronoi")
+    veins.feature = 'DISTANCE_TO_EDGE'
+    veins.inputs["Scale"].default_value = 22.0
+    veins.inputs["Randomness"].default_value = 1.0
+    links.new(coords.outputs["Generated"], veins.inputs["Vector"])
+    vein = math_node('SUBTRACT', 1.0, math_node('DIVIDE', veins.outputs["Distance"], 0.035), clamp=True)
+    blotches = nodes.new("ShaderNodeTexNoise")
+    blotches.inputs["Scale"].default_value = 6.0
+    links.new(coords.outputs["Generated"], blotches.inputs["Vector"])
+    shade = nodes.new("ShaderNodeMix")
+    shade.data_type = 'RGBA'
+    links.new(blotches.outputs["Fac"], shade.inputs[0])
+    shade.inputs[6].default_value = (*_color("17151A"), 1.0)
+    shade.inputs[7].default_value = (*_color("2D3769"), 1.0)
+    veined = nodes.new("ShaderNodeMix")
+    veined.data_type = 'RGBA'
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', vein, blotches.outputs["Fac"]), 1.1), veined.inputs[0])
+    links.new(shade.outputs[2], veined.inputs[6])
+    veined.inputs[7].default_value = (*_color("27B7E6"), 1.0)
+    symbiote = nodes.new("ShaderNodeBsdfPrincipled")
+    links.new(veined.outputs[2], symbiote.inputs["Base Color"])
+    symbiote.inputs["Roughness"].default_value = 0.3
+    symbiote.inputs["Emission Color"].default_value = (*_color("27B7E6"), 1.0)
+    links.new(math_node('MULTIPLY', vein, 0.12), symbiote.inputs["Emission Strength"])
+    symbiote_lit = nodes.new("ShaderNodeAddShader")
+    links.new(symbiote.outputs[0], symbiote_lit.inputs[0])
+    links.new(glow.outputs[0], symbiote_lit.inputs[1])
+    instead = nodes.new("ShaderNodeMixShader")
+    links.new(inputs.outputs["Swap"], instead.inputs[0])
+    links.new(gone.outputs[0], instead.inputs[1])
+    links.new(symbiote_lit.outputs[0], instead.inputs[2])
     mix = nodes.new("ShaderNodeMixShader")
     links.new(visible, mix.inputs[0])
-    links.new(gone.outputs[0], mix.inputs[1])
+    links.new(instead.outputs[0], mix.inputs[1])
     links.new(lit.outputs[0], mix.inputs[2])
     links.new(mix.outputs[0], output.inputs[0])
     return group
@@ -778,6 +811,7 @@ def _build_clove_group(images, values):
     opacity = math_node('MAXIMUM', opacity, eyes)
     ghost = mix_shader(opacity, see_through.outputs[0], add(add(ghost_body, ghost_rim), ghost_eyes))
     reveal = inputs.outputs["Reveal"]
+    normal_look = result
     result = mix_shader(reveal, result, ghost)
 
     # which is shown: "Ghost" swaps her model for her ghost from her head down; "Respawn" fades either in from her head
@@ -796,6 +830,11 @@ def _build_clove_group(images, values):
                            math_node('SUBTRACT', math_node('MULTIPLY', reveal, 2.0), 1.0))  # > 0: this one shown
     respawn_side = math_node('SUBTRACT', front(inputs.outputs["Respawn"]), field)
     shown = math_node('MULTIPLY', math_node('GREATER_THAN', ghost_side, 0.0), math_node('GREATER_THAN', respawn_side, 0.0))
+    if first_person:
+        # her 1st person arms have no ghost model: they turn into her ghost themselves where it has arrived
+        ghost_side = math_node('SUBTRACT', front(inputs.outputs["Ghost"]), field)
+        result = mix_shader(math_node('GREATER_THAN', ghost_side, 0.0), normal_look, ghost)
+        shown = math_node('GREATER_THAN', respawn_side, 0.0)
 
     def edge(distance):
         return math_node('POWER', math_node('SUBTRACT', 1.0, math_node('DIVIDE', math_node('ABSOLUTE', distance), width), clamp=True), 3.0)
@@ -2419,6 +2458,7 @@ AGENTS = {
     "pandemic": dict(rig_only=_setup_viper_mask),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True, first_person=True,
+        skip=("fp_pine_s0_sym",),  # (his 1st person left arm is his symbiote arm, always there)
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
 }
 
@@ -2535,8 +2575,9 @@ def apply(glow, objects, load_image):
             if spec.get("per_material"):
                 spec["per_material"](tree, node, name, images)
             if "Reveal" in node.inputs:
-                # (his 1st person arms carry his symbiote material themselves: FP_Pine_S0_Sym_MI)
-                node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name or ("fp_" in name and "_sym" in name) else 0.0
+                node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name else 0.0
+            if "Swap" in node.inputs:
+                node.inputs["Swap"].default_value = 1.0 if obj.name.upper().startswith("FP_") else 0.0
             if spec.get("see_through"):
                 if hasattr(material, "use_transparent_shadow"):
                     material.use_transparent_shadow = True  # its hidden parts cast no shadow (Eevee)
