@@ -85,7 +85,7 @@ public static class AgentEffects
     private static readonly HashSet<string> HeldSystems = new(StringComparer.OrdinalIgnoreCase) { "Pandemic_X_3P_Equip" };
 
     // agents whose effects also go on the 1st person arms
-    private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth" };
+    private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth", "Sprinter" };
 
     // 1st person systems moved (cm, the bone's frame): Yoru's rift pushed back from his eyes so his mask is halfway
     // through it (the game draws it over a closer mask)
@@ -317,7 +317,12 @@ public static class AgentEffects
             {
                 if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(systemPath, out UObject system)) continue;
                 if (Emitters(system) is { Count: > 0 } emitters)
+                {
                     spawns.Add(new Spawn(control, system.Name, bone, offset, FRotator.ZeroRotator, delay, emitters, Repeat: repeat));
+                    // the same on her 1st person arms, where it's on her hands and arms (not her backpack, eyes, hair)
+                    if (FirstPersonAgents.Contains(codename) && System.Text.RegularExpressions.Regex.IsMatch(bone, @"^[LR]_(Hand|Index|Middle|Ring|Pinky|Thumb)"))
+                        spawns.Add(new Spawn(control, system.Name, bone, offset, FRotator.ZeroRotator, delay, emitters, FirstPerson: true, Repeat: repeat));
+                }
             }
             catch (Exception)
             {

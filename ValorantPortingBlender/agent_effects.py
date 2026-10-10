@@ -1241,6 +1241,8 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
                     for particle in particles:
                         particle["size"] = (particle["size"][0] / UNIT, particle["size"][1] / UNIT)
             grow = float(emitter.get("Scale") or 1.0)
+            if spawn.get("FirstPerson") and spawn.get("Repeat"):
+                grow *= 0.5  # (a 3rd person burst borrowed for the arms: sized for the camera right behind them)
             for particle in particles:
                 particle["size"] = (particle["size"][0] * grow, particle["size"][1] * grow)
             if not particles:
@@ -1262,7 +1264,8 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
                 obj.parent = bone_anchor
             else:
                 obj.parent = anchor
-            material = _material(emitter, images, name, float(spawn.get("Boost") or 1.0) * float(emitter.get("Boost") or 1.0))
+            material = _material(emitter, images, name, float(spawn.get("Boost") or 1.0) * float(emitter.get("Boost") or 1.0)
+                                 * (0.6 if spawn.get("FirstPerson") and spawn.get("Repeat") else 1.0))
             obj.data.materials.append(material)
             modifier = obj.modifiers.new("VP Particles", 'NODES')
             modifier.node_group = group.copy()
