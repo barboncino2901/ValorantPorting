@@ -23,7 +23,8 @@ public static class AgentEffects
     // On: its control starts switched on (an idle effect always there in game)
     // FirstPerson: on the 1st person arms (the game's EmitterTemplate1P)
     // Held: played in a loop, its control its strength (0 none .. 1 full) rather than a one-shot's progress
-    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false, bool Held = false, bool Timed = false);
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false, bool Held = false, bool Timed = false, float Repeat = 0f);
+    // (Repeat: a burst played again every so many seconds while its control is on)
 
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
@@ -91,6 +92,33 @@ public static class AgentEffects
     private static readonly Dictionary<string, FVector> FirstPersonShift = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ps_ultMaskPortal_01"] = new FVector(0f, 0f, 6f)
+    };
+
+    // bursts repeated on an agent while an effect is on, borrowed from her character select intro for a fuller look:
+    // codename -> (control, system, bone, offset, first delay, every seconds). Neon's ultimate: zaps hopping over her
+    // hands and backpack, bolts along her arms, her eyes and hair crackling
+    private static readonly Dictionary<string, (string Control, string System, string Bone, FVector Offset, float Delay, float Repeat)[]> Repeated = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Sprinter"] =
+        [
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Index3", new FVector(0.0f, 0.0f, 0.0f), 0.0f, 0.55f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Ring3", new FVector(0.0f, 0.0f, 0.0f), 0.2f, 0.7f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Hand", new FVector(-6f, 0f, 5f), 0.35f, 0.62f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Middle1", new FVector(0.0f, 0.0f, 0.0f), 0.5f, 0.8f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "L_Index3", new FVector(0.0f, 0.0f, 0.0f), 0.1f, 0.58f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "L_Middle3", new FVector(0.0f, 0.0f, 0.0f), 0.42f, 0.74f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "L_Ring3", new FVector(0.0f, 0.0f, 0.0f), 0.27f, 0.66f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "L_Thumb3", new FVector(0.0f, 0.0f, 0.0f), 0.6f, 0.9f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "L_Hand", new FVector(-6f, 0f, 5f), 0.15f, 0.68f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "Backpack", new FVector(0f, 2f, -6f), 0.05f, 0.85f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "Backpack", new FVector(0f, -5f, -6f), 0.48f, 0.95f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "R_Hand", new FVector(5f, 0f, 0f), 0.0f, 1.1f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "R_Hand", new FVector(-10f, -4f, 5f), 0.55f, 1.3f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "L_Hand", new FVector(-5f, 0f, 0f), 0.3f, 1.2f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/CharacterSelect/Sprinter_CS_EyeZap01", "L_Eyeball", new FVector(1f, 0f, 0f), 0.4f, 2.4f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/CharacterSelect/Sprinter_CS_EyeZap01", "R_Eyeball", new FVector(-1f, 0f, 0f), 0.4f, 2.4f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_CS_HairSparkle", "R_Bang1_03", new FVector(-1f, -0.5f, 0f), 1.0f, 2.0f)
+        ]
     };
 
     // systems hung on another bone than the game's: its weapon points only reach the hand in animations (Yoru's rift)
@@ -277,6 +305,19 @@ public static class AgentEffects
                 var emitters = Emitters(system);
                 if (emitters.Count > 0)
                     spawns.Add(new Spawn(control, system.Name, bone, offset, rotation, 0f, emitters, 1f, on, Held: HeldSystems.Contains(system.Name)));
+            }
+            catch (Exception)
+            {
+                // missing from this game version: left out
+            }
+        }
+        foreach (var (control, systemPath, bone, offset, delay, repeat) in Repeated.GetValueOrDefault(codename) ?? [])
+        {
+            try
+            {
+                if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(systemPath, out UObject system)) continue;
+                if (Emitters(system) is { Count: > 0 } emitters)
+                    spawns.Add(new Spawn(control, system.Name, bone, offset, FRotator.ZeroRotator, delay, emitters, Repeat: repeat));
             }
             catch (Exception)
             {

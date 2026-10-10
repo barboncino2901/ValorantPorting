@@ -1147,6 +1147,8 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
     strength = {spawn.get("Effect") or "FX": True for spawn in effects if spawn.get("Held")}
     for spawn in effects:
         control = spawn.get("Effect") or "FX"
+        if spawn.get("Repeat"):
+            continue  # (repeated bursts don't make their effect a one-shot)
         for emitter in spawn.get("Emitters") or []:
             loops = int((_module(emitter, "Required") or {}).get("EmitterLoops") or 0)
             particles = schedule(emitter, seed=0) if loops > 0 else []
@@ -1331,6 +1333,16 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
                 _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, control, f"{seconds} - {delay:g}", variables=[])
                 _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control,
                        f"value * ({seconds} >= {delay:g}) * ({seconds} < {delay + length:g})")
+                made += 1
+                continue
+            if spawn.get("Repeat") and not one_shot.get(control):
+                # a burst played again every so many seconds while its control is on (frame-driven)
+                every = max(float(spawn["Repeat"]), 0.1)
+                t = f"(frame / {fps:g} - {delay:g})"
+                own.nodes["VP Loop"].outputs[0].default_value = 0.0
+                _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, control,
+                       f"{t} - {every:g} * floor({t} / {every:g})", variables=[])
+                _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control, f"value * ({t} >= 0)")
                 made += 1
                 continue
             if one_shot.get(control):
