@@ -643,12 +643,29 @@ def _material(emitter, images, name, boost=1.0):
         drift.operation = 'MULTIPLY_ADD'
         links.new(uv, drift.inputs[0])
         drift.inputs[1].default_value = (1.5, 1.5, 1.0)
+        # (with the timeline, "VP Clock": it keeps moving while the effect is held open)
+        clock = nodes.new("ShaderNodeValue")
+        clock.name = clock.label = "VP Clock"
         offset = nodes.new("ShaderNodeCombineXYZ")
-        links.new(math_node('MULTIPLY', age, 0.4), offset.inputs[0])
-        links.new(drift.outputs[0] if False else offset.outputs[0], drift.inputs[2])
-        depth = nodes.new("ShaderNodeSeparateColor")
-        links.new(sample("NoiseBack", drift.outputs[0], 'REPEAT').outputs["Color"], depth.inputs[0]) if images.get(textures.get("NoiseBack")) else None
-        crystals = math_node('POWER', depth.outputs[2], 3.0) if images.get(textures.get("NoiseBack")) else 0.3
+        links.new(math_node('MULTIPLY', clock.outputs[0], 0.12), offset.inputs[0])
+        links.new(math_node('MULTIPLY', clock.outputs[0], 0.05), offset.inputs[1])
+        links.new(offset.outputs[0], drift.inputs[2])
+        drift_b = nodes.new("ShaderNodeVectorMath")
+        drift_b.operation = 'MULTIPLY_ADD'
+        links.new(uv, drift_b.inputs[0])
+        drift_b.inputs[1].default_value = (2.3, 2.3, 1.0)
+        offset_b = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', clock.outputs[0], -0.09), offset_b.inputs[0])
+        links.new(math_node('MULTIPLY', clock.outputs[0], 0.07), offset_b.inputs[1])
+        links.new(offset_b.outputs[0], drift_b.inputs[2])
+        if images.get(textures.get("NoiseBack")):
+            layer_a, layer_b = nodes.new("ShaderNodeSeparateColor"), nodes.new("ShaderNodeSeparateColor")
+            links.new(sample("NoiseBack", drift.outputs[0], 'REPEAT').outputs["Color"], layer_a.inputs[0])
+            links.new(sample("NoiseBack", drift_b.outputs[0], 'REPEAT').outputs["Color"], layer_b.inputs[0])
+            crystals = math_node('MINIMUM', math_node('ADD', math_node('POWER', layer_a.outputs[2], 3.0),
+                                                       math_node('MULTIPLY', math_node('POWER', layer_b.outputs[1], 4.0), 0.7)), 1.0)
+        else:
+            crystals = 0.3
         inside = nodes.new("ShaderNodeMix")
         inside.data_type = 'RGBA'
         links.new(crystals, inside.inputs[0]) if not isinstance(crystals, float) else None
@@ -656,7 +673,14 @@ def _material(emitter, images, name, boost=1.0):
         inside.inputs[7].default_value = rgb("DepthColor", (0.02, 0.05, 1.0))
         rim = nodes.new("ShaderNodeMix")
         rim.data_type = 'RGBA'
-        links.new(math_node('MINIMUM', math_node('MULTIPLY', edge.outputs[0], 1.5), 1.0), rim.inputs[0])
+        flicker = nodes.new("ShaderNodeTexNoise")
+        flicker.noise_dimensions = '2D'
+        flicker.inputs["Scale"].default_value = 3.0
+        flick_uv = nodes.new("ShaderNodeCombineXYZ")
+        links.new(math_node('MULTIPLY', clock.outputs[0], 4.0), flick_uv.inputs[0])
+        links.new(flick_uv.outputs[0], flicker.inputs["Vector"])
+        edge_amount = math_node('MULTIPLY', edge.outputs[0], math_node('ADD', 1.0, math_node('MULTIPLY', flicker.outputs["Fac"], 1.0)))
+        links.new(math_node('MINIMUM', edge_amount, 1.0), rim.inputs[0])
         links.new(inside.outputs[2], rim.inputs[6])
         rim.inputs[7].default_value = rgb("EdgeColor", (0.33, 0.81, 1.0))
         # it tears open along its length (right to left as he looks, 0 -> 0.4 of its control), stays open, and pinches
@@ -681,9 +705,9 @@ def _material(emitter, images, name, boost=1.0):
         pinched = math_node('MINIMUM', math_node('MAXIMUM', math_node('MULTIPLY', math_node('SUBTRACT', math_node('SUBTRACT', 1.0, closing), across), 12.0), 0.0), 1.0)
         bright = nodes.new("ShaderNodeMix")
         bright.data_type = 'RGBA'
-        links.new(math_node('MAXIMUM', tip, math_node('MULTIPLY', closing, 0.25)), bright.inputs[0])
+        links.new(math_node('MAXIMUM', tip, math_node('MULTIPLY', closing, 0.1)), bright.inputs[0])
         links.new(rim.outputs[2], bright.inputs[6])
-        bright.inputs[7].default_value = (0.8, 0.95, 1.0, 1.0)
+        bright.inputs[7].default_value = (0.25, 0.75, 1.0, 1.0)
         colour = bright.outputs[2]
         mask = math_node('MULTIPLY', math_node('MINIMUM', math_node('MULTIPLY', shape.outputs[0], 1.2), 1.0), math_node('MULTIPLY', shown, pinched))
         boost = boost * 2.0
@@ -876,12 +900,181 @@ def revalidate():
             driver.is_valid = True
         except ReferenceError:
             pass
+        except Exception as error:  # (one bad driver doesn't stop the others)
+            print(f"VP effects: no driver for {path}: {error}")
     return None
 
 
 def _drive(target, path, armature, prop, expression="value", variables=None):
     """A driver from the armature's control, made once the import is over (see revalidate)."""
     _pending.append((armature, target, path, variables or [("value", prop)], expression))
+
+
+def _spark_material():
+    """Yoru's rift sparks: little glowing motes, cyan-white at their core, fading out over their life."""
+    name = "VP FX rift sparks"
+    if bpy.data.materials.get(name) is not None:
+        return bpy.data.materials[name]
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    if hasattr(material, "surface_render_method"):
+        material.surface_render_method = 'BLENDED'
+    tree = material.node_tree
+    nodes, links = tree.nodes, tree.links
+    for node in list(nodes):
+        nodes.remove(node)
+    output = nodes.new("ShaderNodeOutputMaterial")
+    fade = nodes.new("ShaderNodeAttribute")
+    fade.attribute_type = 'INSTANCER'
+    fade.attribute_name = "vp_fade"
+    tone = nodes.new("ShaderNodeAttribute")
+    tone.attribute_type = 'INSTANCER'
+    tone.attribute_name = "vp_tone"
+    colour = nodes.new("ShaderNodeMix")
+    colour.data_type = 'RGBA'
+    links.new(tone.outputs["Fac"], colour.inputs[0])
+    colour.inputs[6].default_value = (0.15, 0.35, 1.0, 1.0)
+    colour.inputs[7].default_value = (0.75, 0.95, 1.0, 1.0)
+    glow = nodes.new("ShaderNodeEmission")
+    links.new(colour.outputs[2], glow.inputs["Color"])
+    strength = nodes.new("ShaderNodeMath")
+    strength.operation = 'MULTIPLY'
+    links.new(fade.outputs["Fac"], strength.inputs[0])
+    strength.inputs[1].default_value = 9.0
+    links.new(strength.outputs[0], glow.inputs["Strength"])
+    see_through = nodes.new("ShaderNodeBsdfTransparent")
+    add = nodes.new("ShaderNodeAddShader")
+    links.new(see_through.outputs[0], add.inputs[0])
+    links.new(glow.outputs[0], add.inputs[1])
+    links.new(add.outputs[0], output.inputs["Surface"])
+    return material
+
+
+def _add_rift_sparks(group, edge_image):
+    """Sparks off Yoru's rift: points on its torn edge (where its edge texture is bright), each a mote drifting out
+    from the rift and up over a second, again and again (with the timeline: "VP Clock"); only where it is torn open
+    ("VP Rift Reveal", its control, as its material), gone as it pinches shut."""
+    nodes, links = group.nodes, group.links
+    output = next(n for n in nodes if n.type == 'GROUP_OUTPUT')
+    rift = output.inputs[0].links[0].from_socket
+    clock = nodes["VP Clock"].outputs[0]
+    reveal = nodes.new("ShaderNodeValue")
+    reveal.name = reveal.label = "VP Rift Reveal"
+    reveal.outputs[0].default_value = 0.5
+
+    def math_node(op, a, b=None):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def clamp01(v):
+        return math_node('MINIMUM', math_node('MAXIMUM', v, 0.0), 1.0)
+
+    real = nodes.new("GeometryNodeRealizeInstances")
+    links.new(rift, real.inputs["Geometry"])
+    spread = nodes.new("GeometryNodeDistributePointsOnFaces")
+    links.new(real.outputs[0], spread.inputs["Mesh"])
+    spread.inputs["Density"].default_value = 40000.0
+    store_normal = nodes.new("GeometryNodeStoreNamedAttribute")
+    store_normal.data_type = 'FLOAT_VECTOR'
+    store_normal.domain = 'POINT'
+    store_normal.inputs["Name"].default_value = "vp_n"
+    links.new(spread.outputs["Points"], store_normal.inputs["Geometry"])
+    links.new(spread.outputs["Normal"], store_normal.inputs["Value"])
+    uv = nodes.new("GeometryNodeInputNamedAttribute")
+    uv.data_type = 'FLOAT_VECTOR'
+    uv.inputs["Name"].default_value = "vp_uv"
+    split = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(uv.outputs["Attribute"], split.inputs[0])
+
+    # kept: on the torn edge (its edge texture), where it is open, a share of them at random
+    keep = 1.0
+    if edge_image is not None:
+        sample = nodes.new("GeometryNodeImageTexture")
+        sample.inputs["Image"].default_value = edge_image
+        sample.extension = 'CLIP'
+        links.new(uv.outputs["Attribute"], sample.inputs["Vector"])
+        tone = nodes.new("FunctionNodeSeparateColor")
+        links.new(sample.outputs["Color"], tone.inputs[0])
+        keep = math_node('GREATER_THAN', tone.outputs[0], 0.35)
+    along = math_node('SUBTRACT', 1.0, split.outputs[1]) if TEAR_FROM_HIGH_V else split.outputs[1]
+    opened = math_node('MULTIPLY', math_node('DIVIDE', reveal.outputs[0], 0.4), 1.15)
+    open_here = math_node('GREATER_THAN', math_node('SUBTRACT', opened, along), 0.0)
+    closing = clamp01(math_node('DIVIDE', math_node('SUBTRACT', reveal.outputs[0], 0.75), 0.25))
+    ident = nodes.new("GeometryNodeInputID")
+    def random(seed, low=0.0, high=1.0):
+        node = nodes.new("FunctionNodeRandomValue")
+        node.data_type = 'FLOAT'
+        live = lambda sockets: [x for x in sockets if x.enabled and x.type == 'VALUE']
+        links.new(ident.outputs[0], node.inputs["ID"])
+        node.inputs["Seed"].default_value = seed
+        low_socket, high_socket = [x for x in live(node.inputs) if x.name in ("Min", "Max")][:2]
+        low_socket.default_value, high_socket.default_value = low, high
+        return live(node.outputs)[0]
+
+    chance = math_node('LESS_THAN', random(11), math_node('SUBTRACT', 1.0, closing))
+    shown = math_node('MULTIPLY', math_node('MULTIPLY', keep, open_here), chance)
+    drop = nodes.new("GeometryNodeDeleteGeometry")
+    drop.domain = 'POINT'
+    links.new(store_normal.outputs[0], drop.inputs["Geometry"])
+    links.new(math_node('LESS_THAN', shown, 0.5), drop.inputs["Selection"])
+
+    # each mote's life: its own phase and speed; drifting out (the rift's normal, either side) and up, a little sideways
+
+    life = math_node('FRACT', math_node('ADD', math_node('MULTIPLY', clock, random(3, 0.6, 1.4)), random(5)))
+    side = math_node('SUBTRACT', math_node('MULTIPLY', math_node('GREATER_THAN', random(7), 0.5), 2.0), 1.0)
+    normal = nodes.new("GeometryNodeInputNamedAttribute")
+    normal.data_type = 'FLOAT_VECTOR'
+    normal.inputs["Name"].default_value = "vp_n"
+    out = nodes.new("ShaderNodeVectorMath")
+    out.operation = 'SCALE'
+    links.new(normal.outputs["Attribute"], out.inputs[0])
+    links.new(math_node('MULTIPLY', math_node('MULTIPLY', life, random(9, 0.02, 0.09)), side), out.inputs["Scale"])
+    lift = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', math_node('SUBTRACT', random(13), 0.5), math_node('MULTIPLY', life, 0.04)), lift.inputs[0])
+    links.new(math_node('MULTIPLY', math_node('SUBTRACT', random(15), 0.5), math_node('MULTIPLY', life, 0.04)), lift.inputs[1])
+    links.new(math_node('MULTIPLY', life, random(17, 0.01, 0.06)), lift.inputs[2])
+    move = nodes.new("ShaderNodeVectorMath")
+    links.new(out.outputs[0], move.inputs[0])
+    links.new(lift.outputs[0], move.inputs[1])
+    moved = nodes.new("GeometryNodeSetPosition")
+    links.new(drop.outputs[0], moved.inputs["Geometry"])
+    links.new(move.outputs[0], moved.inputs["Offset"])
+    # bright as it leaves the edge, fading out; some whiter
+    fade = math_node('MULTIPLY', math_node('SUBTRACT', 1.0, life), math_node('MINIMUM', math_node('MULTIPLY', life, 8.0), 1.0))
+    store_fade = nodes.new("GeometryNodeStoreNamedAttribute")
+    store_fade.data_type = 'FLOAT'
+    store_fade.domain = 'POINT'
+    store_fade.inputs["Name"].default_value = "vp_fade"
+    links.new(moved.outputs[0], store_fade.inputs["Geometry"])
+    links.new(fade, store_fade.inputs["Value"])
+    store_tone = nodes.new("GeometryNodeStoreNamedAttribute")
+    store_tone.data_type = 'FLOAT'
+    store_tone.domain = 'POINT'
+    store_tone.inputs["Name"].default_value = "vp_tone"
+    links.new(store_fade.outputs[0], store_tone.inputs["Geometry"])
+    links.new(random(19), store_tone.inputs["Value"])
+    mote = nodes.new("GeometryNodeMeshIcoSphere")
+    mote.inputs["Radius"].default_value = 1.0
+    mote.inputs["Subdivisions"].default_value = 1
+    on_points = nodes.new("GeometryNodeInstanceOnPoints")
+    links.new(store_tone.outputs[0], on_points.inputs["Points"])
+    links.new(mote.outputs["Mesh"], on_points.inputs["Instance"])
+    links.new(math_node('MULTIPLY', math_node('ADD', math_node('MULTIPLY', fade, 0.7), 0.3), random(21, 0.0015, 0.0045)), on_points.inputs["Scale"])
+    painted = nodes.new("GeometryNodeSetMaterial")
+    links.new(on_points.outputs[0], painted.inputs["Geometry"])
+    painted.inputs["Material"].default_value = _spark_material()
+    join = nodes.new("GeometryNodeJoinGeometry")
+    links.new(rift, join.inputs[0])
+    links.new(painted.outputs[0], join.inputs[0])
+    links.new(join.outputs[0], output.inputs[0])
 
 
 def _bone(rig, name):
@@ -1063,6 +1256,10 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
             own.nodes["VP Camera Offset"].outputs[0].default_value = sample(offset.get("CameraOffset"))[0] if offset else 0.0
             if material.node_tree.nodes.get("VP Reveal") is not None:
                 _drive(material.node_tree, 'nodes["VP Reveal"].outputs[0].default_value', rig, control)
+                _drive(material.node_tree, 'nodes["VP Clock"].outputs[0].default_value', rig, control, f"frame / {fps:g}", variables=[])
+                spark_image = images.get(((emitter.get("Material") or {}).get("Textures") or {}).get("AlphaB"))
+                _add_rift_sparks(own, spark_image)
+                _drive(own, 'nodes["VP Rift Reveal"].outputs[0].default_value', rig, control)
             # the timeline's seconds: shadow smoke keeps drifting and circling while its effect is held
             _drive(own, 'nodes["VP Clock"].outputs[0].default_value', rig, control, f"frame / {fps:g}", variables=[])
             if (emitter.get("Material") or {}).get("BaseMaterial") in SHADOW_MATERIALS:
