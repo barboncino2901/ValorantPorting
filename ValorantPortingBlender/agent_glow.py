@@ -1893,7 +1893,7 @@ def _gas_material():
     return material
 
 
-def _gas_group(rig, fps):
+def _gas_group(rig, fps, body=None):
     """Geometry nodes: a plume of gas puffs from this object (on her hand): each puff born at the hand, rising and
     curling in world space, growing, over its own ~1 s life, again and again with the timeline; facing the camera.
     "VP Amount" (her "FX: hand smoke") thins and fades it; "VP Clock" is the timeline's seconds."""
@@ -1959,7 +1959,10 @@ def _gas_group(rig, fps):
     offset = nodes.new("ShaderNodeCombineXYZ")
     links.new(math_node('MULTIPLY', math_node('SUBTRACT', curl_split.outputs[0], 0.5), math_node('MULTIPLY', spread, 2.0)), offset.inputs[0])
     links.new(math_node('MULTIPLY', math_node('SUBTRACT', curl_split.outputs[1], 0.5), math_node('MULTIPLY', spread, 2.0)), offset.inputs[1])
-    links.new(math_node('MULTIPLY', math_node('POWER', life, 0.8), random(4, 0.16, 0.30)), offset.inputs[2])
+    # ejected downward from the valve (slowed by the air: 1 - e^-6u), then rising as gas (u^2)
+    eject = math_node('MULTIPLY', math_node('SUBTRACT', 1.0, math_node('EXPONENT', math_node('MULTIPLY', life, -6.0))), random(10, -0.16, -0.09))
+    lift = math_node('MULTIPLY', math_node('MULTIPLY', life, life), random(4, 0.35, 0.55))
+    links.new(math_node('ADD', eject, lift), offset.inputs[2])
     world = nodes.new("ShaderNodeVectorMath")
     links.new(info.outputs["Location"], world.inputs[0])
     links.new(offset.outputs[0], world.inputs[1])
@@ -1968,9 +1971,47 @@ def _gas_group(rig, fps):
     local = nodes.new("FunctionNodeTransformPoint")
     links.new(world.outputs[0], local.inputs["Vector"])
     links.new(back.outputs[0], local.inputs["Transform"])
+    size = math_node('MULTIPLY', math_node('ADD', 0.035, math_node('MULTIPLY', life, 0.11)), random(9, 0.7, 1.3))
+    where = local.outputs[0]
+    if body is not None:
+        # it can't go through her: a puff inside her or touching her is pushed out along her surface (her body as
+        # posed, in this object's space)
+        body_info = nodes.new("GeometryNodeObjectInfo")
+        body_info.name = "VP Body"
+        body_info.transform_space = 'RELATIVE'
+        body_info.inputs["Object"].default_value = body
+        nearest = nodes.new("GeometryNodeProximity")
+        nearest.target_element = 'FACES'
+        links.new(body_info.outputs["Geometry"], nearest.inputs[0])
+        links.new(where, nearest.inputs["Source Position"])
+        normal = nodes.new("GeometryNodeInputNormal")
+        surface_normal = nodes.new("GeometryNodeSampleNearestSurface")
+        surface_normal.data_type = 'FLOAT_VECTOR'
+        links.new(body_info.outputs["Geometry"], surface_normal.inputs["Mesh"])
+        links.new(normal.outputs[0], surface_normal.inputs["Value"])
+        links.new(where, surface_normal.inputs["Sample Position"])
+        away = nodes.new("ShaderNodeVectorMath")
+        away.operation = 'SUBTRACT'
+        links.new(where, away.inputs[0])
+        links.new(nearest.outputs["Position"], away.inputs[1])
+        side = nodes.new("ShaderNodeVectorMath")
+        side.operation = 'DOT_PRODUCT'
+        links.new(away.outputs[0], side.inputs[0])
+        links.new(surface_normal.outputs["Value"], side.inputs[1])
+        margin = math_node('MULTIPLY', size, 0.35)
+        push = math_node('MAXIMUM', math_node('SUBTRACT', margin, side.outputs["Value"]), 0.0)
+        pushed = nodes.new("ShaderNodeVectorMath")
+        pushed.operation = 'MULTIPLY_ADD'
+        links.new(surface_normal.outputs["Value"], pushed.inputs[0])
+        combine = nodes.new("ShaderNodeCombineXYZ")
+        for i in range(3):
+            links.new(push, combine.inputs[i])
+        links.new(combine.outputs[0], pushed.inputs[1])
+        links.new(where, pushed.inputs[2])
+        where = pushed.outputs[0]
     placed = nodes.new("GeometryNodeSetPosition")
     links.new(points.outputs[0], placed.inputs["Geometry"])
-    links.new(local.outputs[0], placed.inputs["Position"])
+    links.new(where, placed.inputs["Position"])
     # thinner at lower amounts: a share of the puffs only
     keep = nodes.new("GeometryNodeDeleteGeometry")
     keep.domain = 'POINT'
@@ -2021,7 +2062,7 @@ def _gas_group(rig, fps):
     links.new(stored, on_points.inputs["Points"])
     links.new(painted.outputs[0], on_points.inputs["Instance"])
     links.new(turned.outputs[0], on_points.inputs["Rotation"])
-    links.new(math_node('MULTIPLY', math_node('ADD', 0.035, math_node('MULTIPLY', life, 0.11)), random(9, 0.7, 1.3)), on_points.inputs["Scale"])
+    links.new(size, on_points.inputs["Scale"])
     links.new(on_points.outputs[0], output.inputs[0])
     for value_name, expression, prop in (("Amount", "value", GAS_CONTROL), ("Clock", f"frame / {fps:g}", None)):
         curve = group.driver_add(f'nodes["VP {value_name}"].outputs[0].default_value')
@@ -2061,7 +2102,8 @@ def _add_viper_gas(rig, hand, objects):
     placed.translation = placed.translation + along * 0.06
     obj.matrix_world = placed
     modifier = obj.modifiers.new("VP Viper gas", 'NODES')
-    modifier.node_group = _gas_group(rig, fps)
+    body = next((o for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_") and _armature_of(o) == rig), None)
+    modifier.node_group = _gas_group(rig, fps, body)
 
 
 # Viper's mask drivers: made valid once the import is over (the rig's evaluated copy doesn't have "Ult: mask" before)
