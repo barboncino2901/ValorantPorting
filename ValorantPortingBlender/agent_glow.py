@@ -2340,6 +2340,7 @@ AGENTS = {
                   ("Glow: legs (C)", "Legs", 0.0, "Clove's legs glowing, smoke rising and her trousers' butterflies lit, as with her C")]),
     "sprinter": dict(
         node="VP Neon Glow", build=_build_neon_group, materials="sprinter",
+        first_person=True,
         controls=[("Glow: sprint (E)", "Sprint", 0.0, "Neon's suit lighting up blue, as when she sprints (her E)"),
                   ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit, tattoo and the edges of her skin glowing cyan with electricity, her hair blue to yellow")]),
     "wushu": dict(
@@ -2427,7 +2428,21 @@ def apply(glow, objects, load_image):
             images[role] = load_image(path)
         except Exception:
             images[role] = None
-    group = spec["build"](images, glow.get("Values") or {})
+    group = spec["build"]({k: v for k, v in images.items() if not k.startswith("FP:")}, glow.get("Values") or {})
+    # the 1st person arms' own glow: the same shader with their own masks ("FP:" roles; the others it lacks left out)
+    group_fp = None
+    if spec.get("first_person") and any(k.startswith("FP:") for k in images):
+        name = group.name
+        group.name = name + " (3rd person)"
+        fp_images = {k: v for k, v in images.items() if not k.startswith("FP:")}
+        for k, v in images.items():
+            if k.startswith("FP:"):
+                fp_images[k[3:]] = v
+        for k in ("TattooMask", "HairMask"):
+            fp_images[k] = None
+        group_fp = spec["build"](fp_images, glow.get("Values") or {})
+        group_fp.name = name + " (1st person)"
+        group.name = name
     if spec.get("prepare"):
         objects = spec["prepare"](objects)
     fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
@@ -2458,7 +2473,7 @@ def apply(glow, objects, load_image):
                 continue
             source = out.inputs["Surface"].links[0].from_socket
             node = tree.nodes.new("ShaderNodeGroup")
-            node.node_tree = group
+            node.node_tree = group_fp if (group_fp is not None and obj.name.upper().startswith("FP_")) else group
             node.name = node.label = spec["node"]
             node.location = (out.location.x, out.location.y - 260)
             if "Hair" in node.inputs:

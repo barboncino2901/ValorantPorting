@@ -115,6 +115,9 @@ public static class AgentEffects
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "R_Hand", new FVector(5f, 0f, 0f), 0.0f, 1.1f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "R_Hand", new FVector(-10f, -4f, 5f), 0.55f, 1.3f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "L_Hand", new FVector(-5f, 0f, 0f), 0.3f, 1.2f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "R_Hand", new FVector(0f, 3f, -3f), 0.85f, 0.95f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "L_Hand", new FVector(4f, -3f, 2f), 0.7f, 1.05f),
+            ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_C/work/Sprinter_C_Cast_3P_RArm01", "L_Hand", new FVector(-8f, 2f, 4f), 0.05f, 1.4f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/CharacterSelect/Sprinter_CS_EyeZap01", "L_Eyeball", new FVector(1f, 0f, 0f), 0.4f, 2.4f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/CharacterSelect/Sprinter_CS_EyeZap01", "R_Eyeball", new FVector(-1f, 0f, 0f), 0.4f, 2.4f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_CS_HairSparkle", "R_Bang1_03", new FVector(-1f, -0.5f, 0f), 1.0f, 2.0f)
@@ -161,6 +164,13 @@ public static class AgentEffects
         // her cast's flat background glow and goo cylinder draw as grey rectangles / a white streak in Blender
         ["Vampire_X_Intro|GlowBackground"] = (0f, 0f, null),
         ["Vampire_X_Intro|None|Vampire_X_Goo_Inst"] = (0f, 0f, null),
+        // Neon's borrowed intro zaps: only their lightning strands (their star bursts, muzzle flashes and glows left out)
+        ["Sprinter_X_OutOfAmmo_3P_LHand01|Burst"] = (0f, 0f, null), ["Sprinter_X_OutOfAmmo_3P_LHand01|MFlash"] = (0f, 0f, null),
+        ["Sprinter_X_OutOfAmmo_3P_LHand01|Glow"] = (0f, 0f, null),
+        ["Sprinter_CS_HairSparkle|Burst"] = (0f, 0f, null), ["Sprinter_CS_HairSparkle|MFlash"] = (0f, 0f, null),
+        ["Sprinter_CS_HairSparkle|Glow"] = (0f, 0f, null),
+        ["Sprinter_CS_EyeZap01|Spark Core"] = (0f, 0f, null), ["Sprinter_CS_EyeZap01|Glow"] = (0f, 0f, null),
+        ["Sprinter_CS_EyeZap01|Flare"] = (0f, 0f, null),
         // KAY/O: his sparks (m_lightning_damage colours a grey flipbook with a gradient): his frag blue, his flash
         // lime, his ultimate violet
         ["ps_C_equipElements_3P|None"] = (3f, 1f, "5A8CFF"),

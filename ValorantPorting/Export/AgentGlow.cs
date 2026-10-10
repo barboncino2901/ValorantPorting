@@ -121,7 +121,10 @@ public static class AgentGlow
                     ["UltColors"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Colors_Body01_T.TP_Sprinter_Ult_Colors_Body01_T",
                     ["Bioelectricity"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Bioelectricity01_T.TP_Sprinter_Ult_Bioelectricity01_T",
                     ["TattooMask"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Tattoo01_T.TP_Sprinter_Ult_Masks_Tattoo01_T",
-                    ["HairMask"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Hair01_T.TP_Sprinter_Ult_Masks_Hair01_T"
+                    ["HairMask"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Hair01_T.TP_Sprinter_Ult_Masks_Hair01_T",
+                    // her 1st person arms' own masks ("FP:" roles: the add-on's arms glow uses them instead)
+                    ["FP:UltMasks"] = "/Game/Characters/Sprinter/S0/1P/Materials/FP_Sprinter_Ult_Masks_Body01_T.FP_Sprinter_Ult_Masks_Body01_T",
+                    ["FP:UltColors"] = "/Game/Characters/Sprinter/S0/1P/Materials/FP_Sprinter_Ult_Colors_Body01_T.FP_Sprinter_Ult_Colors_Body01_T"
                 },
                 new Dictionary<string, object>
                 {
