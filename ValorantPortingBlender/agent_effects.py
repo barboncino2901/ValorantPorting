@@ -566,7 +566,11 @@ def _material(emitter, images, name, boost=1.0):
     noise_path = next((path for path in textures.values() if "NoiseDissolve" in path and images.get(path) is not None), None)
     # Omen's shadow (his ult's smoke meshes: a shape mask, wisps of noise drifting through it), dark violet
     shadow = (spec.get("BaseMaterial") or "") in SHADOW_MATERIALS
-    smoke = "Smoke" in (spec.get("BaseMaterial") or "") and noise_path is not None
+    # (Viper's poison gas: drawn the same way, its own soft cloud as the noise, glowing green)
+    gas = "PoisonGas" in (spec.get("Name") or "") and images.get(textures.get("Emissive_Base")) is not None
+    if gas:
+        noise_path = textures["Emissive_Base"]
+    smoke = ("Smoke" in (spec.get("BaseMaterial") or "") or gas) and noise_path is not None
     if shadow:
         mask_path = next((path for key, path in textures.items() if "mask" in key.lower() and "body" not in key.lower()
                           and "arm" not in key.lower() and images.get(path) is not None), None) or             next((path for path in textures.values() if images.get(path) is not None), None)
@@ -847,8 +851,13 @@ def _material(emitter, images, name, boost=1.0):
     glow = nodes.new("ShaderNodeEmission")
     links.new(tint.outputs[2], glow.inputs["Color"])
     opacity = math_node('MULTIPLY', mask, life_alpha, clamp=False) if not isinstance(life_alpha, float) else mask
+    # (an effect held at a strength, like Viper's hand smoke: its control fades it, "VP Fade")
+    fade = nodes.new("ShaderNodeValue")
+    fade.name = fade.label = "VP Fade"
+    fade.outputs[0].default_value = 1.0
+    opacity = math_node('MULTIPLY', opacity, fade.outputs[0])
     # (smoke: barely lit, it darkens what's behind it)
-    links.new(math_node('MULTIPLY', opacity, 0.04 if smoke else 0.15 if shadow else min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
+    links.new(math_node('MULTIPLY', opacity, 0.04 if smoke and not gas else 2.0 * boost if gas else 0.15 if shadow else min(brightest, BRIGHTEST) * boost), glow.inputs["Strength"])
     if boost > 1.0:
         opacity = math_node('MULTIPLY', opacity, min(boost, 2.0))  # (and less see-through)
     see_through = nodes.new("ShaderNodeBsdfTransparent")
@@ -1095,6 +1104,8 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
     # effects whose emitters all play once (a cast burst): their control is how far through the burst (0 -> 1) they
     # are, to keyframe; the others switch on (1) and keep going with the timeline
     one_shot, lengths, counts, held = {}, {}, {}, {}
+    # effects held at a strength (0 none .. 1 full), playing in a loop: "Held" (Viper's hand smoke)
+    strength = {spawn.get("Effect") or "FX": True for spawn in effects if spawn.get("Held")}
     for spawn in effects:
         control = spawn.get("Effect") or "FX"
         for emitter in spawn.get("Emitters") or []:
@@ -1111,7 +1122,7 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
     # one-shot when most of its emitters play once (a few looping embers in a burst, like Yoru's rift, don't make it
     # an on/off effect) and none of them stays
     for control, (once, total) in counts.items():
-        one_shot[control] = not held.get(control) and once >= 0.6 * total
+        one_shot[control] = not held.get(control) and not strength.get(control) and once >= 0.6 * total
     if modes is not None:
         for control, (shot, length) in modes.items():
             one_shot[control], lengths[control] = shot, length
@@ -1246,8 +1257,11 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
                 if not type_data.get("bCameraFacing"):
                     own.nodes["VP Mesh Fixed"].outputs[0].default_value = 1.0
             loops = int((_module(emitter, "Required") or {}).get("EmitterLoops") or 0)
-            if loops > 0:
+            if loops > 0 and not spawn.get("Held"):
                 own.nodes["VP Loop"].outputs[0].default_value = 0.0
+            if spawn.get("Held"):
+                _drive(material.node_tree, 'nodes["VP Fade"].outputs[0].default_value', rig, control)
+                own.nodes["VP Active"].outputs[0].default_value = 1.0
             pivot = (_module(emitter, "PivotOffset") or {}).get("PivotOffset") or {}
             # (the game's card spans offset .. offset + 1, -0.5 centring it; its V runs down the screen)
             own.nodes["VP Pivot X"].outputs[0].default_value = 0.5 + float(pivot.get("X", -0.5))
@@ -1277,7 +1291,9 @@ def apply(effects, rig, load_image, attach, collection, load_mesh=None, modes=No
             else:
                 _drive(own, 'nodes["VP Time"].outputs[0].default_value', rig, control, f"frame / {fps:g} - {delay:g}",
                        variables=[])
-                _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control)
+                # (held at a strength: on from anything above 0)
+                _drive(own, 'nodes["VP Active"].outputs[0].default_value', rig, control,
+                       "(value > 0.0) * 1.0" if spawn.get("Held") else "value")
             made += 1
     rig.update_tag()
     return made

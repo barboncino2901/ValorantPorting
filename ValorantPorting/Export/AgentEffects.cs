@@ -22,7 +22,8 @@ public static class AgentEffects
     // Boost: how much brighter than the game's values it's drawn in Blender (the game adds bloom; some effects need it)
     // On: its control starts switched on (an idle effect always there in game)
     // FirstPerson: on the 1st person arms (the game's EmitterTemplate1P)
-    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false);
+    // Held: played in a loop, its control its strength (0 none .. 1 full) rather than a one-shot's progress
+    public record Spawn(string Effect, string System, string Socket, FVector Offset, FRotator Rotation, float Delay, List<JObject> Emitters, float Boost = 1f, bool On = false, bool FirstPerson = false, bool Held = false);
 
     // agent codename -> effect containers to send, by the name of the control that switches them on in Blender
     private static readonly Dictionary<string, (string Control, string Container)[]> Agents = new(StringComparer.OrdinalIgnoreCase)
@@ -60,6 +61,10 @@ public static class AgentEffects
             ("Face: knife (E)", "/Game/Characters/Grenadier/S0/VFX/ps_E_faceExpression_01", "Head", false, FVector.ZeroVector, FRotator.ZeroRotator),
             ("Face: ultimate", "/Game/Characters/Grenadier/S0/VFX/ps_X_faceExpression_01", "Head", false, FVector.ZeroVector, FRotator.ZeroRotator)
         ],
+        // Viper: green smoke pouring from her hands while she holds her ultimate (FXC_Pandemic_X_EquippedUntilCast;
+        // its emitters hang on her hands themselves: LocationBoneSocket); the pit itself (a map-sized smoke field) is left out
+        ["Pandemic"] = [("FX: hand smoke", "/Game/Characters/Pandemic/S0/VFX/Ability_X/Pandemic_X_3P_Equip", "Root", false,
+            FVector.ZeroVector, FRotator.ZeroRotator)],
         // Yoru: his rift seen in 3rd person too (the game shows its 1st person version only to him), where his left
         // hand tears it in his mask-pulling animation
         // (fixed in front of him where it opens, as in game: where his mask-pulling animation has his left weapon point
@@ -75,6 +80,9 @@ public static class AgentEffects
             ("FX: ult arrive", "/Game/Characters/Wraith/S0/VFX/Ability_X/Specter_Arrive", "Root", false, FVector.ZeroVector, FRotator.ZeroRotator)
         ]
     };
+
+    // systems played in a loop at a strength (their control: 0 none .. 1 full)
+    private static readonly HashSet<string> HeldSystems = new(StringComparer.OrdinalIgnoreCase) { "Pandemic_X_3P_Equip" };
 
     // agents whose effects also go on the 1st person arms
     private static readonly HashSet<string> FirstPersonAgents = new(StringComparer.OrdinalIgnoreCase) { "Stealth" };
@@ -144,6 +152,11 @@ public static class AgentEffects
         ["ps_ultMaskPortal_01|None|m_ripples_01"] = (0f, 0f, null),
         ["ps_ultMaskPortal_3P|None|mi_flipbookQuad_18"] = (0f, 0f, null),
         ["ps_sparkles|Glow"] = (5f, 2f, "C8A8FF"),
+        // Viper's hand smoke: its gas strands brighter and bigger (the game's bloom and distortion)
+        ["Pandemic_X_3P_Equip|GasUP_L_Loop"] = (2.5f, 1.4f, null),
+        ["Pandemic_X_3P_Equip|GasUP_R_Loop"] = (2.5f, 1.4f, null),
+        ["Pandemic_X_3P_Equip|GasUP_L_Intro"] = (2.5f, 1.4f, null),
+        ["Pandemic_X_3P_Equip|GasUP_Intro"] = (2.5f, 1.4f, null),
         ["ps_sparkles1|Glow"] = (5f, 2f, "C8A8FF")
     };
 
@@ -185,7 +198,7 @@ public static class AgentEffects
                 if (!AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(systemPath, out UObject system)) continue;
                 var emitters = Emitters(system);
                 if (emitters.Count > 0)
-                    spawns.Add(new Spawn(control, system.Name, bone, offset, rotation, 0f, emitters, 1f, on));
+                    spawns.Add(new Spawn(control, system.Name, bone, offset, rotation, 0f, emitters, 1f, on, Held: HeldSystems.Contains(system.Name)));
             }
             catch (Exception)
             {
