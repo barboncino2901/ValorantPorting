@@ -512,7 +512,7 @@ def _build_veto_group(images, values):
     group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
     face = group.interface
     face.new_socket("Shader", in_out='INPUT', socket_type='NodeSocketShader')
-    for socket_name in ("Form", "Reveal", "Time"):
+    for socket_name in ("Form", "Reveal", "Time", "Along"):
         face.new_socket(socket_name, in_out='INPUT', socket_type='NodeSocketFloat').default_value = 0.0
     face.new_socket("Shader", in_out='OUTPUT', socket_type='NodeSocketShader')
     nodes, links = group.nodes, group.links
@@ -546,7 +546,15 @@ def _build_veto_group(images, values):
     cells.projection_blend = 0.3
     links.new(scaled.outputs[0], cells.inputs[0])
     cell_value = cells.outputs[1] if cells.image is not None else 0.5  # alpha: the cells
-    field = math_node('ADD', math_node('MULTIPLY', generated.outputs[2], 0.75), math_node('MULTIPLY', cell_value, 0.25))
+    # (Along 1: his 1st person symbiote arm, spreading from his shoulder to his fingertips: "vp_along", 0 .. 1)
+    along = nodes.new("ShaderNodeAttribute")
+    along.attribute_type = 'GEOMETRY'
+    along.attribute_name = "vp_along"
+    height = nodes.new("ShaderNodeMix")
+    links.new(inputs.outputs["Along"], height.inputs[0])
+    links.new(generated.outputs[2], height.inputs[2])
+    links.new(along.outputs["Fac"], height.inputs[3])
+    field = math_node('ADD', math_node('MULTIPLY', height.outputs[0], 0.75), math_node('MULTIPLY', cell_value, 0.25))
     # the front: below it the symbiote form, above it his normal model
     front = math_node('SUBTRACT', math_node('MULTIPLY', inputs.outputs["Form"], 1.0 + 2.0 * width), width)
     distance = math_node('SUBTRACT', field, front)
@@ -704,6 +712,13 @@ def _add_veto_symbiote_arm(objects):
         face.material_index = 0
     bm.to_mesh(data)
     bm.free()
+    # how far along the arm each point is, his shoulder 0 .. his fingertips 1 (at rest): where the spread runs
+    if "R_Shoulder" in rig.data.bones or "R_Clavicle" in rig.data.bones:
+        start = to_mesh @ rig.data.bones["R_Shoulder" if "R_Shoulder" in rig.data.bones else "R_Clavicle"].head_local
+        distances = [(v.co - start).length for v in data.vertices]
+        farthest = max(distances, default=0.0) or 1.0
+        attribute = data.attributes.new("vp_along", 'FLOAT', 'POINT')
+        attribute.data.foreach_set("value", [d / farthest for d in distances])
     if not data.polygons:
         bpy.data.meshes.remove(data)
         return None
@@ -2647,6 +2662,8 @@ def apply(glow, objects, load_image):
                 spec["per_material"](tree, node, name, images)
             if "Reveal" in node.inputs:
                 node.inputs["Reveal"].default_value = 1.0 if ULT_FORM_TAG in name else 0.0
+            if "Along" in node.inputs:
+                node.inputs["Along"].default_value = 1.0 if "vp_along" in obj.data.attributes else 0.0
             if spec.get("see_through"):
                 if hasattr(material, "use_transparent_shadow"):
                     material.use_transparent_shadow = True  # its hidden parts cast no shadow (Eevee)
