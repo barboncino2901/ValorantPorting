@@ -111,7 +111,9 @@ public static class AgentGlow
                     ["Waves"] = "/Game/Characters/Smonk/S0/VFX/C/Textures/SMO_C_HUD_Waves_TFX.SMO_C_HUD_Waves_TFX",
                     // her ghost: its colours from its middle to its outline, its eyes
                     ["GhostLut"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/SMO_X_Color-Soft_LUT.SMO_X_Color-Soft_LUT",
-                    ["GhostEyes"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_Smonk_S0_Resurrection_Eyes_Mask_DF.TP_Smonk_S0_Resurrection_Eyes_Mask_DF"
+                    ["GhostEyes"] = "/Game/Characters/Smonk/S0/VFX/X/Textures/TP_Smonk_S0_Resurrection_Eyes_Mask_DF.TP_Smonk_S0_Resurrection_Eyes_Mask_DF",
+                    // her butterflies (SMO_Butterfly-VAT_Continuous_MI's sprite): rebuilt as their own effect in the add-on
+                    ["Butterfly"] = "/Game/Characters/Smonk/S0/VFX/E/WIP/Butterflies/SMO_Butterfly_TFX.SMO_Butterfly_TFX"
                 },
                 new Dictionary<string, object>
                 {

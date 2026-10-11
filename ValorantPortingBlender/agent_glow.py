@@ -852,6 +852,251 @@ def _build_clove_group(images, values):
     return group
 
 
+BUTTERFLY_CONTROL = "FX: butterflies"
+BUTTERFLY_COUNT = 40
+
+
+def _add_clove_butterflies(images, values, objects):
+    """Clove's butterflies (the game's are a vertex-animated mesh flying off her, SMO_ButterflyV2_VAT_SM: their flight
+    and wing beat live in a texture Blender can't play). Rebuilt with her butterfly sprite (SMO_Butterfly_TFX): each
+    takes off from a random spot of her body, flutters up and away beating its wings, fades and comes back elsewhere;
+    "FX: butterflies" sets how many (0 none .. 1 all). They follow her animation, seen from any side (two crossed
+    sprites each)."""
+    image = _image(images, "Butterfly")
+    body = next((o for o in objects if o.type == 'MESH' and o.name.upper().startswith("TP_") and _armature_of(o) is not None
+                 and ULT_FORM_TAG not in o.name), None)
+    if image is None or body is None:
+        return 0
+    rig = _armature_of(body)
+    name = f"VP Clove butterflies ({rig.name})"
+    if bpy.data.objects.get(name) is not None:
+        return 0
+    if BUTTERFLY_CONTROL not in rig:
+        rig[BUTTERFLY_CONTROL] = 0.0
+        rig.id_properties_ui(BUTTERFLY_CONTROL).update(min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+                                                       description="Clove's butterflies fluttering off her (0 none .. 1 all)")
+    fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(0.0, 0.0, 0.0)] * BUTTERFLY_COUNT, [], [])
+    obj = bpy.data.objects.new(name, mesh)
+    for collection in rig.users_collection:
+        collection.objects.link(obj)
+
+    group = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+    group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+    group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    nodes, links = group.nodes, group.links
+    inputs, output = nodes.new("NodeGroupInput"), nodes.new("NodeGroupOutput")
+
+    def math_node(op, a, b=None, c=None):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        for i, v in enumerate((a, b, c)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    def vec_node(op, a, b=None, scale=None):
+        node = nodes.new("ShaderNodeVectorMath")
+        node.operation = op
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, tuple):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        if scale is not None:
+            if isinstance(scale, (int, float)):
+                node.inputs["Scale"].default_value = scale
+            else:
+                links.new(scale, node.inputs["Scale"])
+        return node.outputs[0] if op not in ("LENGTH", "DOT_PRODUCT") else node.outputs[1]
+
+    def socket(node, name, kind, outputs=False):
+        sockets = node.outputs if outputs else node.inputs
+        return next(x for x in sockets if x.name == name and x.type == kind and getattr(x, "enabled", True))
+
+    index = nodes.new("GeometryNodeInputIndex").outputs[0]
+
+    def random(low, high, key, ident=None, vector=False):
+        node = nodes.new("FunctionNodeRandomValue")
+        node.data_type = 'FLOAT_VECTOR' if vector else 'FLOAT'
+        kind = 'VECTOR' if vector else 'VALUE'
+        socket(node, "Min", kind).default_value = low
+        socket(node, "Max", kind).default_value = high
+        links.new(ident if ident is not None else index, node.inputs["ID"])
+        node.inputs["Seed"].default_value = key
+        return socket(node, "Value", kind, outputs=True)
+
+    clock = nodes.new("ShaderNodeValue")
+    clock.name = clock.label = "VP Clock"
+    amount = nodes.new("ShaderNodeValue")
+    amount.name = amount.label = "VP Amount"
+
+    # each butterfly's life (1.1 .. 1.7 s, as the game's 1 .. 1.5 with its fade), where it is in it
+    life = random(1.1, 1.7, 1)
+    phase = random(0.0, 1.0, 2)
+    cycle_time = math_node('ADD', math_node('DIVIDE', clock.outputs[0], life), phase)
+    progress = math_node('FRACT', cycle_time)  # 0 born .. 1 gone
+    cycle = math_node('FLOOR', cycle_time)
+    age = math_node('MULTIPLY', progress, life)
+    # each life a new spot of her body (her deformed model, in this object's space)
+    info = nodes.new("GeometryNodeObjectInfo")
+    info.transform_space = 'RELATIVE'
+    info.inputs["Object"].default_value = body
+    count = nodes.new("GeometryNodeAttributeDomainSize")
+    count.component = 'MESH'
+    links.new(info.outputs["Geometry"], count.inputs[0])
+    ident = math_node('ADD', math_node('MULTIPLY', index, 7919.0), cycle)
+    to_int = nodes.new("FunctionNodeFloatToInt")
+    links.new(ident, to_int.inputs[0])
+    spot = math_node('FLOOR', math_node('MULTIPLY', random(0.0, 0.9999, 3, to_int.outputs[0]), count.outputs["Point Count"]))
+    spot_int = nodes.new("FunctionNodeFloatToInt")
+    links.new(spot, spot_int.inputs[0])
+    sampled = {}
+    for key, field in (("position", nodes.new("GeometryNodeInputPosition").outputs[0]),
+                       ("normal", nodes.new("GeometryNodeInputNormal").outputs[0])):
+        sample = nodes.new("GeometryNodeSampleIndex")
+        sample.data_type = 'FLOAT_VECTOR'
+        sample.domain = 'POINT'
+        links.new(info.outputs["Geometry"], sample.inputs["Geometry"])
+        links.new(field, socket(sample, "Value", 'VECTOR'))
+        links.new(spot_int.outputs[0], sample.inputs["Index"])
+        sampled[key] = socket(sample, "Value", 'VECTOR', outputs=True)
+    # its flight: off her body and up, a little sideways, slowing as it goes; fluttering
+    sideways = random((-1.0, -1.0, -0.2), (1.0, 1.0, 0.4), 4, to_int.outputs[0], vector=True)
+    heading = vec_node('NORMALIZE', vec_node('ADD', vec_node('ADD', vec_node('SCALE', sampled["normal"], scale=0.7), (0.0, 0.0, 0.9)),
+                                             vec_node('SCALE', sideways, scale=0.45)))
+    speed = random(0.35, 0.8, 5, to_int.outputs[0])
+    travelled = math_node('MULTIPLY', speed, math_node('MULTIPLY', age, math_node('SUBTRACT', 1.2, math_node('MULTIPLY', progress, 0.5))))
+    flutter = nodes.new("ShaderNodeCombineXYZ")
+    for axis, (rate, size) in enumerate(((7.0, 0.035), (5.5, 0.035), (9.0, 0.025))):
+        wave = math_node('SINE', math_node('ADD', math_node('MULTIPLY', age, rate), math_node('MULTIPLY', phase, 6.28 + axis)))
+        links.new(math_node('MULTIPLY', math_node('MULTIPLY', wave, size), progress), flutter.inputs[axis])
+    where = vec_node('ADD', vec_node('ADD', sampled["position"], vec_node('SCALE', heading, scale=travelled)), flutter.outputs[0])
+    placed = nodes.new("GeometryNodeSetPosition")
+    links.new(inputs.outputs[0], placed.inputs["Geometry"])
+    links.new(where, placed.inputs["Position"])
+    # how many: the first ones by number, up to "FX: butterflies"
+    keep = nodes.new("GeometryNodeDeleteGeometry")
+    keep.domain = 'POINT'
+    links.new(placed.outputs[0], keep.inputs["Geometry"])
+    links.new(math_node('GREATER_THAN', index, math_node('MULTIPLY', amount.outputs[0], BUTTERFLY_COUNT - 0.5)), keep.inputs["Selection"])
+    # the butterfly: two crossed sprites, beating (narrowing) its wings, growing in and shrinking out
+    sprite = nodes.new("GeometryNodeMeshGrid")
+    sprite.inputs["Size X"].default_value = 1.0
+    sprite.inputs["Size Y"].default_value = 1.0
+    # (its texture coordinates kept for the material: the grid doesn't store them itself)
+    uv = nodes.new("GeometryNodeStoreNamedAttribute")
+    uv.data_type = 'FLOAT2'
+    uv.domain = 'CORNER'
+    uv.inputs["Name"].default_value = "vp_uv"
+    links.new(sprite.outputs["Mesh"], uv.inputs["Geometry"])
+    links.new(sprite.outputs["UV Map"], uv.inputs["Value"])
+    stood = nodes.new("GeometryNodeTransform")
+    links.new(uv.outputs[0], stood.inputs["Geometry"])
+    stood.inputs["Rotation"].default_value = (math.pi / 2, 0.0, 0.0)
+    crossed = nodes.new("GeometryNodeTransform")
+    links.new(stood.outputs[0], crossed.inputs["Geometry"])
+    crossed.inputs["Rotation"].default_value = (0.0, 0.0, math.pi / 2)
+    both = nodes.new("GeometryNodeJoinGeometry")
+    links.new(stood.outputs[0], both.inputs[0])
+    links.new(crossed.outputs[0], both.inputs[0])
+    painted = nodes.new("GeometryNodeSetMaterial")
+    links.new(both.outputs[0], painted.inputs["Geometry"])
+    painted.inputs["Material"].default_value = _butterfly_material(image)
+    instances = nodes.new("GeometryNodeInstanceOnPoints")
+    links.new(keep.outputs[0], instances.inputs["Points"])
+    links.new(painted.outputs[0], instances.inputs["Instance"])
+    turn = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', random(-0.4, 0.4, 6, to_int.outputs[0]), 1.0), turn.inputs[0])
+    links.new(math_node('MULTIPLY', random(0.0, 6.28, 7, to_int.outputs[0]), 1.0), turn.inputs[2])
+    links.new(turn.outputs[0], instances.inputs["Rotation"])
+    grow = math_node('MINIMUM', math_node('MULTIPLY', progress, 8.0), math_node('MULTIPLY', math_node('SUBTRACT', 1.0, progress), 4.0))
+    grow = math_node('MINIMUM', grow, 1.0)
+    size = math_node('MULTIPLY', random(0.09, 0.15, 8), grow)  # (the butterfly fills ~40% of its sprite)
+    beat = math_node('ADD', 0.3, math_node('MULTIPLY', 0.7, math_node('ABSOLUTE', math_node('SINE', math_node('ADD', math_node('MULTIPLY', age, 22.0), math_node('MULTIPLY', phase, 20.0))))))
+    scale = nodes.new("ShaderNodeCombineXYZ")
+    links.new(math_node('MULTIPLY', size, beat), scale.inputs[0])
+    links.new(math_node('MULTIPLY', size, beat), scale.inputs[1])
+    links.new(size, scale.inputs[2])
+    links.new(scale.outputs[0], instances.inputs["Scale"])
+    links.new(instances.outputs[0], output.inputs[0])
+
+    modifier = obj.modifiers.new("VP Clove butterflies", 'NODES')
+    modifier.node_group = group
+    for node_name, expression, prop in (("VP Clock", f"frame / {fps:g}", None), ("VP Amount", "value", BUTTERFLY_CONTROL)):
+        curve = group.driver_add(f'nodes["{node_name}"].outputs[0].default_value')
+        driver = curve.driver
+        driver.type = 'SCRIPTED'
+        if prop:
+            var = driver.variables.new()
+            var.name = "value"
+            var.type = 'SINGLE_PROP'
+            var.targets[0].id_type = 'OBJECT'
+            var.targets[0].id = rig
+            var.targets[0].data_path = f'["{prop}"]'
+        driver.expression = expression
+    _mask_drivers.append((rig, None))
+    bpy.app.timers.register(_validate_mask_drivers, first_interval=0.05)
+    return 1
+
+
+def _butterfly_material(image):
+    """Her butterfly sprite glowing: its wings (red: their pattern, cyan in its colour) and a blue halo (blue), the rest
+    see-through."""
+    name = "VP Clove butterfly"
+    material = bpy.data.materials.get(name)
+    if material is not None:
+        return material
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    material.surface_render_method = 'BLENDED'
+    material.use_backface_culling = False
+    tree = material.node_tree
+    nodes, links = tree.nodes, tree.links
+    for node in list(nodes):
+        nodes.remove(node)
+    out = nodes.new("ShaderNodeOutputMaterial")
+    texture = nodes.new("ShaderNodeTexImage")
+    texture.image = image
+    texture.extension = 'CLIP'
+    coords = nodes.new("ShaderNodeAttribute")
+    coords.attribute_type = 'GEOMETRY'
+    coords.attribute_name = "vp_uv"
+    links.new(coords.outputs["Vector"], texture.inputs[0])
+    channels = nodes.new("ShaderNodeSeparateColor")
+    links.new(texture.outputs[0], channels.inputs[0])
+    wings = nodes.new("ShaderNodeEmission")
+    links.new(texture.outputs[0], wings.inputs["Color"])
+    wings.inputs["Strength"].default_value = 4.0
+    halo = nodes.new("ShaderNodeEmission")
+    halo.inputs["Color"].default_value = (0.015, 0.17, 1.0, 1.0)
+    halo_strength = nodes.new("ShaderNodeMath")
+    halo_strength.operation = 'MULTIPLY'
+    links.new(channels.outputs[2], halo_strength.inputs[0])
+    halo_strength.inputs[1].default_value = 0.6
+    links.new(halo_strength.outputs[0], halo.inputs["Strength"])
+    glow = nodes.new("ShaderNodeAddShader")
+    links.new(wings.outputs[0], glow.inputs[0])
+    links.new(halo.outputs[0], glow.inputs[1])
+    seen = nodes.new("ShaderNodeMath")
+    seen.operation = 'MAXIMUM'
+    links.new(channels.outputs[1], seen.inputs[0])
+    links.new(channels.outputs[2], seen.inputs[1])
+    mix = nodes.new("ShaderNodeMixShader")
+    links.new(seen.outputs[0], mix.inputs[0])
+    links.new(nodes.new("ShaderNodeBsdfTransparent").outputs[0], mix.inputs[1])
+    links.new(glow.outputs[0], mix.inputs[2])
+    links.new(mix.outputs[0], out.inputs["Surface"])
+    return material
+
+
 def _prepare_clove(objects):
     """Her ghost (the resurrection model) on her rig."""
     return _put_form_on_rig(objects, "resurrection", "smonk")
@@ -2423,6 +2668,7 @@ AGENTS = {
         controls=[("Glow: tattoos", "Tattoos", 0.0, "Waylay's crystal tattoos, nails and hair tips glowing, as when she uses her abilities")]),
     "smonk": dict(
         node="VP Clove Glow", build=_build_clove_group, materials="smonk", prepare=_prepare_clove, first_person=True,
+        extra=_add_clove_butterflies,
         fp_none=("UltHairMask", "CMask", "GhostEyes"),
         per_material=_swap_clove_albedo, see_through=True,
         extra_drivers=[("VP Clove Ult Colours", "Factor", "Ult: active")],
@@ -2594,6 +2840,9 @@ def apply(glow, objects, load_image):
                     tree.links.new(found.outputs[0], node.inputs[role])
             pending.append((material, armature, fps, spec))
             done += 1
+    if spec.get("extra"):
+        # (something of its own on her: Clove's butterflies)
+        done += spec["extra"](images, glow.get("Values") or {}, objects) or 0
     return done
 
 
