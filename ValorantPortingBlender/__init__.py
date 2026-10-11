@@ -352,6 +352,8 @@ EFFECT_SHELL = re.compile(r"vfx|liquid|appear|dissolve|reveal|hologram|distort|r
 def effect_kind(material_data, mat_type=None):
     blend = (material_data.get("BlendMode") or "").lower()
     names = f'{material_data.get("BaseMaterial") or ""} {material_data.get("ParentName") or ""} {material_data.get("MaterialName") or ""}'
+    if [t for t in material_data.get("Textures") or [] if (t.get("Name") or "").startswith("Combined Sphere")]:
+        return "orb"  # Sage's orbs (TP_Thorne_Orb): their own shader
     if blend == "additive":
         return "glow"
     if mat_type == "Ability" and not material_data.get("Textures"):
@@ -392,6 +394,10 @@ def build_effect_material(target_slot, material_data, kind):
     textures = {t.get("Name"): t.get("Value") for t in material_data.get("Textures") or []}
     vectors = {v.get("Name"): v.get("Value") for v in material_data.get("Vectors") or []}
     scalars = {v.get("Name"): v.get("Value") for v in material_data.get("Scalars") or []}
+    if kind == "orb":
+        build_orb_material(material, nodes, links, output, textures, vectors, scalars)
+        material["vp_built"] = True
+        return
     texture_path = next((textures[n] for n in textures if re.search(r"albedo|diffuse|emissive|color|base", n, re.I)),
                         next(iter(textures.values()), None))
     color_value = next((vectors[n] for n in vectors if re.search(r"emissive|color|tint", n, re.I)), None)
@@ -454,6 +460,95 @@ def build_effect_material(target_slot, material_data, kind):
             links.new(color, bsdf.inputs["Base Color"])
         links.new(bsdf.outputs[0], output.inputs["Surface"])
     material["vp_built"] = True
+
+
+def build_orb_material(material, nodes, links, output, textures, vectors, scalars):
+    """Sage's orbs (TP_Thorne_Orb): a glossy shell tinted "Diffuse Tint" with the cell pattern of its combined texture
+    (red) and its bubbles (green) glinting, over a cloudy core (blue) glowing "Inner Color", brightest at the middle
+    ("Core Pow", "Inner Brightness"): her waist's teal-green orbs."""
+    material.surface_render_method = 'DITHERED'
+    material.use_backface_culling = True
+
+    def color_of(name, default):
+        value = vectors.get(name)
+        return (value["R"], value["G"], value["B"], 1.0) if value else default
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    path = next((v for n, v in textures.items() if n.startswith("Combined Sphere")), None)
+    image = import_texture(path) if path else None
+    texture = nodes.new("ShaderNodeTexImage")
+    texture.image = image
+    if image is not None:
+        image.colorspace_settings.name = 'Non-Color'
+    # (laid on by position: the orbs' own texture coordinates cover too little of it to show its patches)
+    where = nodes.new("ShaderNodeTexCoord")
+    spread = nodes.new("ShaderNodeVectorMath")
+    spread.operation = 'SCALE'
+    spread.inputs["Scale"].default_value = 9.0
+    links.new(where.outputs["Object"], spread.inputs[0])
+    texture.projection = 'BOX'
+    texture.projection_blend = 0.4
+    links.new(spread.outputs[0], texture.inputs[0])
+    layers = nodes.new("ShaderNodeSeparateColor")
+    links.new(texture.outputs[0], layers.inputs[0])
+    cells, bubbles, cloud = layers.outputs[0], layers.outputs[1], layers.outputs[2]
+    rim = nodes.new("ShaderNodeLayerWeight")
+    rim.inputs["Blend"].default_value = 0.5
+    middle = math_node('SUBTRACT', 1.0, rim.outputs["Facing"])  # 1 facing the camera, 0 at its outline
+
+    # the shell: deep teal, darker toward its outline and in its cells' lines, a glassy coat
+    tint = color_of("Diffuse Tint", (0.0, 0.67, 0.99, 1.0))
+    inner = color_of("Inner Color", (0.0, 0.69, 0.31, 1.0))
+    teal = [(i * 0.55 + t * 0.45) for i, t in zip(inner[:3], tint[:3])]
+    shell = nodes.new("ShaderNodeMix")
+    shell.data_type = 'RGBA'
+    links.new(math_node('MULTIPLY', math_node('POWER', middle, 0.7), math_node('ADD', math_node('MULTIPLY', cells, 0.6), 0.5)), shell.inputs[0])
+    shell.inputs[6].default_value = tuple(c * 0.02 for c in teal) + (1.0,)
+    shell.inputs[7].default_value = tuple(c * 0.12 for c in teal) + (1.0,)
+    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+    links.new(shell.outputs[2], bsdf.inputs["Base Color"])
+    bsdf.inputs["Roughness"].default_value = 0.08
+    bsdf.inputs["Coat Weight"].default_value = 0.5
+    bsdf.inputs["Coat Roughness"].default_value = 0.02
+    # the core: bright patches of its cloud glowing its inner colour (lighter toward cyan), strongest at the middle;
+    # the bubbles glinting
+    patches = math_node('MULTIPLY', math_node('SUBTRACT', cloud, 0.45), 2.5, clamp=True)
+    core = math_node('POWER', middle, max(float(scalars.get("Core Pow", 6.8)) / 3.0, 0.5))
+    glow = math_node('MULTIPLY', math_node('MULTIPLY', math_node('ADD', math_node('MULTIPLY', patches, 0.85), 0.15), core),
+                     float(scalars.get("Inner Brightness", 6.6)) * 0.22)
+    light = nodes.new("ShaderNodeMix")
+    light.data_type = 'RGBA'
+    light.blend_type = 'ADD'
+    light.inputs[0].default_value = 1.0
+    core_color = nodes.new("ShaderNodeMix")
+    core_color.data_type = 'RGBA'
+    core_color.blend_type = 'MULTIPLY'
+    core_color.inputs[0].default_value = 1.0
+    core_color.inputs[6].default_value = tuple(i * 0.85 + t * 0.15 for i, t in zip(inner[:3], tint[:3])) + (1.0,)
+    links.new(glow, core_color.inputs[7])
+    sparkle = nodes.new("ShaderNodeMix")
+    sparkle.data_type = 'RGBA'
+    sparkle.blend_type = 'MULTIPLY'
+    sparkle.inputs[0].default_value = 1.0
+    sparkle.inputs[6].default_value = (0.6, 1.0, 0.95, 1.0)
+    links.new(math_node('MULTIPLY', bubbles, 0.5), sparkle.inputs[7])
+    links.new(core_color.outputs[2], light.inputs[6])
+    links.new(sparkle.outputs[2], light.inputs[7])
+    links.new(light.outputs[2], bsdf.inputs["Emission Color"])
+    bsdf.inputs["Emission Strength"].default_value = 1.0
+    links.new(bsdf.outputs[0], output.inputs["Surface"])
 
 
 def place_part(obj, placement):

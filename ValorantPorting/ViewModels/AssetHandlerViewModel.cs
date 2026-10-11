@@ -118,6 +118,8 @@ public class AssetHandlerData
                 {
                     var objectPath = variable.ObjectPath;
                     if (objectPath.Contains("/_Core/", StringComparison.OrdinalIgnoreCase)) continue; // base templates, not real items
+                    // a game mode's stand-in (KAY/O's arms on a training bot's body): listed as a second KAY/O
+                    if (objectPath.Contains("/AbilityDraftAgent/", StringComparison.OrdinalIgnoreCase)) continue;
                     var itemKey = objectPath.EndsWith("_C") ? objectPath[..^2] : objectPath; // "X" and "X_C" are the same item
                     if (addedPaths.Add(itemKey))
                         items.Add(variable);
