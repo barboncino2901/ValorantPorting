@@ -112,6 +112,22 @@ public static class AgentEffects
     // hands and backpack, bolts along her arms, her eyes and hair crackling
     private static readonly Dictionary<string, (string Control, string System, string Bone, FVector Offset, float Delay, float Repeat)[]> Repeated = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Jett's ultimate: the wind of her character select intro wrapping her hands (Hand_Tornado_Loop: one wind
+        // mesh playing ~6 s; two on each hand, half a turn apart, so it never stops)
+        ["Wushu"] =
+        [
+            ("FX: ultimate", "/Game/Characters/Wushu/S0/CharSelect/VFX/Hand_Tornado_Loop", "R_Hand", new FVector(0f, 0f, 0f), 0.0f, 6.2f),
+            ("FX: ultimate", "/Game/Characters/Wushu/S0/CharSelect/VFX/Hand_Tornado_Loop", "R_Hand", new FVector(0f, 0f, 0f), 3.1f, 6.2f),
+            ("FX: ultimate", "/Game/Characters/Wushu/S0/CharSelect/VFX/Hand_Tornado_Loop", "L_Hand", new FVector(0f, 0f, 0f), 1.5f, 6.2f),
+            ("FX: ultimate", "/Game/Characters/Wushu/S0/CharSelect/VFX/Hand_Tornado_Loop", "L_Hand", new FVector(0f, 0f, 0f), 4.6f, 6.2f),
+        ],
+        // Reyna's ultimate: her character select intro's soul wisps, dark purple smoke at her eyes and hands
+        ["Vampire"] =
+        [
+            ("FX: ultimate", "/Game/Characters/Vampire/S0/VFX/CS/Vampire_CS_EyeTrail", "Head", new FVector(0f, 0f, 0f), 0.0f, 2.0f),
+            ("FX: ultimate", "/Game/Characters/Vampire/S0/VFX/CS/Vampire_CS_HandTrail", "R_Hand", new FVector(0f, 0f, 0f), 0.3f, 2.2f),
+            ("FX: ultimate", "/Game/Characters/Vampire/S0/VFX/CS/Vampire_CS_HandTrail", "L_Hand", new FVector(0f, 0f, 0f), 1.2f, 2.3f)
+        ],
         // KAY/O's ultimate: a few of his lightning bursts (ps_nanogel, EtherBurst) crackling on his arms and chest
         ["Grenadier"] =
         [
