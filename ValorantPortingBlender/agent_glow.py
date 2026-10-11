@@ -853,7 +853,7 @@ def _build_clove_group(images, values):
 
 
 BUTTERFLY_CONTROL = "FX: butterflies"
-BUTTERFLY_COUNT = 40
+BUTTERFLY_COUNT = 14
 
 
 def _add_clove_butterflies(images, values, objects):
