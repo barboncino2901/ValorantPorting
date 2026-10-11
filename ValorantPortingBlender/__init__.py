@@ -609,14 +609,15 @@ def import_shaders(shaderName):
 
 
 AGENT_SHADER = "3P_Character_Mat_V5"
-GLOW_REFERENCE = 30.0  # the most common "Emissive Brightness" on agents: their glow as the shader had it (1.5)
+GLOW_REFERENCE = 30.0  # the most common "Emissive Brightness" on agents
+GLOW_GAIN = 3.0  # their glowing parts' strength at GLOW_REFERENCE (screens, lights, trims: their colour x this)
 
 
 def add_emissive_brightness():
     """Agents' materials say how bright their glowing parts are ("Emissive Brightness": 1.2 for Gekko's suit up to
     150 for Fade's or Cypher's); the agent shader had a fixed glow strength. It gets that input (by name, the material's
-    value reaches it) and the glow follows it gently: 1.5 x sqrt(value / 30), so 30 stays as it was, 150 is ~2.2x
-    brighter and 1.2 ~5x dimmer."""
+    value reaches it) and the glow follows it gently: GLOW_GAIN x sqrt(value / 30), so 150 is ~2.2x brighter than 30
+    and 1.2 ~5x dimmer. Their glowing parts (screens, lights, trims: Brimstone's wrist device) read as lit."""
     group = bpy.data.node_groups.get(AGENT_SHADER)
     if group is None or [i for i in group.interface.items_tree if getattr(i, "name", "") == "Emissive Brightness"]:
         return  # (this module has its own any())
@@ -624,7 +625,6 @@ def add_emissive_brightness():
     inputs = next((n for n in group.nodes if n.type == 'GROUP_INPUT'), None)
     if bsdf is None or inputs is None:
         return
-    base = bsdf.inputs["Emission Strength"].default_value
     socket = group.interface.new_socket("Emissive Brightness", in_out='INPUT', socket_type='NodeSocketFloat')
     socket.default_value = GLOW_REFERENCE
     ratio = group.nodes.new("ShaderNodeMath")
@@ -637,9 +637,21 @@ def add_emissive_brightness():
     group.links.new(ratio.outputs[0], root.inputs[0])
     strength = group.nodes.new("ShaderNodeMath")
     strength.operation = 'MULTIPLY'
-    strength.inputs[1].default_value = base
+    strength.name = strength.label = "VP Glow Gain"
+    strength.inputs[1].default_value = GLOW_GAIN
     group.links.new(root.outputs[0], strength.inputs[0])
     group.links.new(strength.outputs[0], bsdf.inputs["Emission Strength"])
+    # the glow mask: the MRAE's green above 0.54 (below it, its roughness); a fully glowing part reached only 0.46 of
+    # its colour: it now reaches all of it, as in game
+    for node in group.nodes:
+        if node.type == 'MATH' and node.operation == 'SUBTRACT' and node.inputs[0].is_linked and                 node.inputs[0].links[0].from_node.type == 'CLAMP' and abs(node.inputs[1].default_value - 0.54) < 0.01:
+            full = group.nodes.new("ShaderNodeMath")
+            full.operation = 'DIVIDE'
+            full.inputs[1].default_value = 0.46
+            for link in list(node.outputs[0].links):
+                group.links.new(full.outputs[0], link.to_socket)
+            group.links.new(node.outputs[0], full.inputs[0])
+            break
 
 
 def create_collection(name):
