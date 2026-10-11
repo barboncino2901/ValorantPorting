@@ -293,9 +293,21 @@ public class AssetHandlerData
         var packagePath = resolved.MainAsset.Owner?.Name ?? string.Empty;
         var uiAsset = resolved.UiAsset;
         var resolver = CreateResolver(firstTag);
-        await Application.Current.Dispatcher.InvokeAsync(
-            () => TargetCollection.Add(new AssetSelectorItem(packagePath, uiAsset, previewImage, random, resolver) { ObjectPath = firstTag }),
-            DispatcherPriority.Background);
+        await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var item = new AssetSelectorItem(packagePath, uiAsset, previewImage, random, resolver) { ObjectPath = firstTag };
+            if (AssetType != EAssetType.Character)
+            {
+                TargetCollection.Add(item);
+                return;
+            }
+            // agents in alphabetical order (they load in the game files' order)
+            var index = 0;
+            while (index < TargetCollection.Count &&
+                   string.Compare(TargetCollection[index].DisplayName, item.DisplayName, StringComparison.CurrentCultureIgnoreCase) <= 0)
+                index++;
+            TargetCollection.Insert(index, item);
+        }, DispatcherPriority.Background);
     }
 
     // Built in its own method so the delegate captures only the path. A lambda written inside DoLoad would share

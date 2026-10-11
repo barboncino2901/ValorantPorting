@@ -585,11 +585,11 @@ def _build_veto_group(images, values):
 ULT_FORM_TAG = " (ult form)"
 
 
-def _put_form_on_rig(objects, form_word, codename, offset=0.0):
+def _put_form_on_rig(objects, form_word, codename, offset=0.0, first_person=False):
     """Puts an agent's other model (Veto's symbiote form, Clove's ghost; it comes with its own copy of the same
     skeleton) on the rig of her normal model, gives it its own materials (tagged "(ult form)") and gives the shared
     eye overlay a copy of its own (named after the agent, so it gets the layer)."""
-    meshes = [o for o in objects if o.type == 'MESH' and not o.name.upper().startswith("FP_")]
+    meshes = [o for o in objects if o.type == 'MESH' and o.name.upper().startswith("FP_") == first_person]
     form = next((o for o in meshes if form_word in o.name.lower()), None)
     body = next((o for o in sorted(meshes, key=lambda o: 0 if o.name.upper().startswith("TP") else 1)
                  if o is not form and _armature_of(o) is not None), None)  # (the 3rd person model, not character select)
@@ -631,117 +631,38 @@ def _put_form_on_rig(objects, form_word, codename, offset=0.0):
 
 def _prepare_veto(objects):
     """His symbiote form on his rig; its outfit is his normal outfit's shape exactly: pushed out 1 mm so the renderers
-    can tell the two apart (where it is hidden, the outfit under it must show). In 1st person: his right arm's
-    symbiote version (see _add_veto_symbiote_arm)."""
+    can tell the two apart (where it is hidden, the outfit under it must show). In 1st person the same with his
+    symbiote arms (FP_Pine_Sym_S0_Skelmesh: both arms transformed, his normal ones have only the left), spreading from
+    his shoulders to his fingertips."""
     objects = _put_form_on_rig(objects, "pine_sym", "pine", offset=0.001)
-    arm = _add_veto_symbiote_arm(objects)
-    return objects + [arm] if arm is not None else objects
+    objects = _put_form_on_rig(objects, "pine_sym", "pine", offset=0.001, first_person=True)
+    for obj in objects:
+        if obj.type == 'MESH' and obj.name.upper().startswith("FP_"):
+            _mark_along_arms(obj)
+    return objects
 
 
-def _add_veto_symbiote_arm(objects):
-    """In 1st person his left arm is his symbiote arm (FP_Pine_S0_Sym_MI); in his ultimate the right one turns into
-    it too, but the game has no model for that. Rebuilt: a copy of his right arm wearing the symbiote arm's material,
-    its texture taken from the left arm mirrored across him (each face of the right arm reads the left arm's texture
-    where its mirror image lands), tagged "(ult form)" so "Ult form" spreads it over him like his 3rd person form."""
-    import bmesh
-    from mathutils import Vector
-    from mathutils.bvhtree import BVHTree
-    from mathutils.geometry import barycentric_transform
-    arm = next((o for o in objects if o.type == 'MESH' and o.name.upper().startswith("FP_") and
-                any(m and "fp_pine_s0_sym" in m.name.lower() for m in o.data.materials)), None)
-    rig = _armature_of(arm) if arm is not None else None
-    if rig is None or "L_Hand" not in rig.data.bones or "R_Hand" not in rig.data.bones:
-        return None
-    name = f"VP {arm.name} symbiote arm"
-    if bpy.data.objects.get(name) is not None:
-        return None
-    materials = list(arm.data.materials)
-    sym_index = next(i for i, m in enumerate(materials) if m and "fp_pine_s0_sym" in m.name.lower())
-    me = arm.data
-    if not me.uv_layers:
-        return None
-    uv_name = me.uv_layers[0].name
-
-    # the mirror across him: from his hands' rest positions, in the mesh's own space
-    to_mesh = arm.matrix_world.inverted() @ rig.matrix_world
-    left, right = to_mesh @ rig.data.bones["L_Hand"].head_local, to_mesh @ rig.data.bones["R_Hand"].head_local
-    axis = max(range(3), key=lambda i: abs(left[i] - right[i]))
-    middle = (left[axis] + right[axis]) / 2.0
-
-    def mirror(co):
-        co = Vector(co)
-        co[axis] = 2.0 * middle - co[axis]
-        return co
-
-    # the left (symbiote) arm's triangles and their texture coordinates
-    me.calc_loop_triangles()
-    uv_data = me.uv_layers[uv_name].data
-    tris = [t for t in me.loop_triangles if t.material_index == sym_index]
-    if not tris:
-        return None
-    tree = BVHTree.FromPolygons([v.co for v in me.vertices], [tuple(t.vertices) for t in tris])
-    tri_uvs = [[Vector((*uv_data[i].uv, 0.0)) for i in t.loops] for t in tris]
-
-    # his right arm (the faces of his other material on his right side) as its own object
-    groups = {g.index: g.name for g in arm.vertex_groups}
-    data = me.copy()
-    data.name = name
-    data.use_auto_texspace = False  # (same "where on him" as the arms: the spread lines up)
-    data.texspace_location, data.texspace_size = me.texspace_location[:], me.texspace_size[:]
-    bm = bmesh.new()
-    bm.from_mesh(data)
-    deform = bm.verts.layers.deform.active
-    uv_layer = bm.loops.layers.uv[uv_name]
-
-    def on_right(face):
-        if face.material_index == sym_index or deform is None:
-            return False
-        sides = [groups.get(max(v[deform].items(), key=lambda x: x[1])[0], "")[:2] for v in face.verts if v[deform]]
-        return sides.count("R_") * 2 > len(sides)
-
-    bmesh.ops.delete(bm, geom=[f for f in bm.faces if not on_right(f)], context='FACES')
-    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
-    for face in bm.faces:
-        found = tree.find_nearest(mirror(face.calc_center_median()))
-        if found[2] is None:
-            continue
-        corners = [me.vertices[i].co for i in tris[found[2]].vertices]
-        for loop in face.loops:
-            uv = barycentric_transform(mirror(loop.vert.co), *corners, *tri_uvs[found[2]])
-            loop[uv_layer].uv = (uv[0], uv[1])
-        face.material_index = 0
-    bm.to_mesh(data)
-    bm.free()
-    # how far along the arm each point is, his shoulder 0 .. his fingertips 1 (at rest): where the spread runs
-    if "R_Shoulder" in rig.data.bones or "R_Clavicle" in rig.data.bones:
-        start = to_mesh @ rig.data.bones["R_Shoulder" if "R_Shoulder" in rig.data.bones else "R_Clavicle"].head_local
-        distances = [(v.co - start).length for v in data.vertices]
-        farthest = max(distances, default=0.0) or 1.0
-        attribute = data.attributes.new("vp_along", 'FLOAT', 'POINT')
-        attribute.data.foreach_set("value", [d / farthest for d in distances])
-    if not data.polygons:
-        bpy.data.meshes.remove(data)
-        return None
-    data.materials.clear()
-    material = materials[sym_index].copy()
-    material.name = f"Pine symbiote right arm{ULT_FORM_TAG}"
-    data.materials.append(material)
-    copy = bpy.data.objects.new(name, data)
-    copy.parent = arm.parent
-    copy.matrix_world = arm.matrix_world.copy()
-    for group in arm.vertex_groups:
-        copy.vertex_groups.new(name=group.name)
-    for modifier in arm.modifiers:
-        if modifier.type == 'ARMATURE':
-            new = copy.modifiers.new(modifier.name, 'ARMATURE')
-            new.object = modifier.object
-    displace = copy.modifiers.new("VP Ult Form Offset", 'DISPLACE')
-    displace.direction = 'NORMAL'
-    displace.mid_level = 0.0
-    displace.strength = 0.001
-    for collection in arm.users_collection:
-        collection.objects.link(copy)
-    return copy
+def _mark_along_arms(obj):
+    """How far along its arm each point of a 1st person model is, its shoulder 0 .. its fingertips 1 (at rest), in
+    "vp_along": where an effect spreading down the arms has got to."""
+    rig = _armature_of(obj)
+    if rig is None or "vp_along" in obj.data.attributes:
+        return
+    to_mesh = obj.matrix_world.inverted() @ rig.matrix_world
+    starts = {side: to_mesh @ rig.data.bones[f"{side}_Shoulder"].head_local
+              for side in ("L", "R") if f"{side}_Shoulder" in rig.data.bones}
+    if not starts:
+        return
+    groups = {g.index: g.name for g in obj.vertex_groups}
+    sides = []
+    for vertex in obj.data.vertices:
+        main = max(vertex.groups, key=lambda g: g.weight).group if vertex.groups else None
+        side = groups.get(main, "")[:1]
+        sides.append(side if side in starts else next(iter(starts)))
+    distances = [(v.co - starts[side]).length for v, side in zip(obj.data.vertices, sides)]
+    farthest = {side: max((d for d, s in zip(distances, sides) if s == side), default=1.0) or 1.0 for side in starts}
+    attribute = obj.data.attributes.new("vp_along", 'FLOAT', 'POINT')
+    attribute.data.foreach_set("value", [min(d / farthest[side], 1.0) for d, side in zip(distances, sides)])
 
 
 def _build_clove_group(images, values):
@@ -2542,9 +2463,6 @@ AGENTS = {
     "pandemic": dict(rig_only=_setup_viper_mask),
     "pine": dict(
         node="VP Veto Ult Form", build=_build_veto_group, materials="pine", prepare=_prepare_veto, see_through=True, first_person=True,
-        # (in 1st person: his left arm is his symbiote arm, always there; his right arm stays under its symbiote
-        # version, its skin showing where the symbiote's material leaves it: as on the left arm)
-        skip=("fp_pine_s0_sym", "fp_pine_s0_mi"),
         controls=[("Ult form", "Form", 0.0, "Veto's ultimate: from 0 to 1 his symbiote form spreads over him from his feet up, with a glowing edge")]),
 }
 

@@ -265,6 +265,12 @@ public static class AgentGlow
         ]
     };
 
+    // the same for the 1st person arms: Veto's symbiote arms (both arms transformed; his normal ones have only the left)
+    private static readonly Dictionary<string, string> FirstPersonUltForms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Pine"] = "/Game/Characters/Pine/S0/1P/Models/FP_Pine_Sym_S0_Skelmesh.FP_Pine_Sym_S0_Skelmesh"
+    };
+
     public static void AddUltForm(List<ExportPart> parts)
     {
         AddUltProp(parts);
@@ -291,6 +297,18 @@ public static class AgentGlow
                                                                                   p.Contains("/Characters/", StringComparison.OrdinalIgnoreCase));
         if (firstPerson is null) return;
         var codename = firstPerson[(firstPerson.IndexOf("/Characters/", StringComparison.OrdinalIgnoreCase) + "/Characters/".Length)..].Split('/')[0];
+        if (FirstPersonUltForms.TryGetValue(codename, out var formPath))
+        {
+            try
+            {
+                if (AppVM.CUE4ParseVM.Provider.TryLoadPackageObject(formPath, out USkeletalMesh form))
+                    ExportHelpers.Mesh(form, parts);
+            }
+            catch (Exception)
+            {
+                // missing from this game version: no 1st person ult form
+            }
+        }
         foreach (var (meshPath, bone) in FirstPersonProps.GetValueOrDefault(codename) ?? [])
         {
             try

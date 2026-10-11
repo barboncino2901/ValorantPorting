@@ -112,26 +112,14 @@ public static class AgentEffects
     // hands and backpack, bolts along her arms, her eyes and hair crackling
     private static readonly Dictionary<string, (string Control, string System, string Bone, FVector Offset, float Delay, float Repeat)[]> Repeated = new(StringComparer.OrdinalIgnoreCase)
     {
-        // KAY/O's ultimate: his lightning bursts (ps_nanogel, EtherBurst) and sparkles hopping all over him
+        // KAY/O's ultimate: a few of his lightning bursts (ps_nanogel, EtherBurst) crackling on his arms and chest
         ["Grenadier"] =
         [
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Hand", new FVector(0f, 0f, 0f), 0.0f, 0.7f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Hand", new FVector(0f, 0f, 0f), 0.3f, 0.8f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Elbow", new FVector(0f, 0f, 0f), 0.15f, 0.95f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Elbow", new FVector(0f, 0f, 0f), 0.55f, 0.9f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Shoulder", new FVector(0f, 0f, 0f), 0.4f, 1.1f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Shoulder", new FVector(0f, 0f, 0f), 0.75f, 1.05f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "Spine3", new FVector(0f, 0f, 0f), 0.2f, 1.2f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "Spine1", new FVector(0f, 0f, 0f), 0.65f, 1.3f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Hip", new FVector(0f, 0f, 0f), 0.35f, 1.25f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Hip", new FVector(0f, 0f, 0f), 0.9f, 1.15f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Knee", new FVector(0f, 0f, 0f), 0.1f, 1.4f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Knee", new FVector(0f, 0f, 0f), 0.5f, 1.35f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "Head", new FVector(0f, 0f, 0f), 0.8f, 1.6f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_sparkles", "Spine3", new FVector(0f, 0f, 0f), 0.0f, 1.0f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_sparkles1", "Spine2", new FVector(0f, 0f, 0f), 0.5f, 1.1f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_sparkles", "R_Hand", new FVector(0f, 0f, 0f), 0.25f, 0.9f),
-            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_sparkles1", "L_Hand", new FVector(0f, 0f, 0f), 0.7f, 0.95f)
+            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Hand", new FVector(0f, 0f, 0f), 0.0f, 1.3f),
+            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Hand", new FVector(0f, 0f, 0f), 0.7f, 1.4f),
+            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "L_Elbow", new FVector(0f, 0f, 0f), 0.45f, 1.5f),
+            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "R_Shoulder", new FVector(0f, 0f, 0f), 0.95f, 1.7f),
+            ("FX: ultimate", "/Game/Characters/Grenadier/S0/VFX/Ability_X/ps_nanogel_R_3P", "Spine3", new FVector(0f, 0f, 0f), 0.25f, 1.6f)
         ],
         // Phoenix's ultimate: sparks off his hands and chest, embers at his collar and hips (his character select
         // intro's)
