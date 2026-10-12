@@ -954,6 +954,10 @@ def import_animation(data, armature=None):
     if action is not None:
         add_animation_sounds(data, action, owner=armature.name, start=sounds_start)
         add_animation_effects(data, action, armature, start=sounds_start)
+        try:
+            agent_glow.add_footprints(armature, action)
+        except Exception as e:
+            Log.error(f"Could not add the footprints: {e}")
         record_preset_step(armature, data, mode if base is not None else "Replace", cut_used)
 
 

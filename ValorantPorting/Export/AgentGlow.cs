@@ -134,7 +134,10 @@ public static class AgentGlow
                     ["HairMask"] = "/Game/Characters/Sprinter/S0/3P/Materials/TP_Sprinter_Ult_Masks_Hair01_T.TP_Sprinter_Ult_Masks_Hair01_T",
                     // her 1st person arms' own masks ("FP:" roles: the add-on's arms glow uses them instead)
                     ["FP:UltMasks"] = "/Game/Characters/Sprinter/S0/1P/Materials/FP_Sprinter_Ult_Masks_Body01_T.FP_Sprinter_Ult_Masks_Body01_T",
-                    ["FP:UltColors"] = "/Game/Characters/Sprinter/S0/1P/Materials/FP_Sprinter_Ult_Colors_Body01_T.FP_Sprinter_Ult_Colors_Body01_T"
+                    ["FP:UltColors"] = "/Game/Characters/Sprinter/S0/1P/Materials/FP_Sprinter_Ult_Colors_Body01_T.FP_Sprinter_Ult_Colors_Body01_T",
+                    // the glowing footprints she leaves while sprinting (Sprinter_E_3P_L/RFootprint_Decal: a decal at each
+                    // step); the add-on lays them where her animation's feet land
+                    ["Footprint"] = "/Game/Characters/Sprinter/S0/VFX/Textures/Sprinter_E_Footprint01_T.Sprinter_E_Footprint01_T"
                 },
                 new Dictionary<string, object>
                 {

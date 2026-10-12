@@ -20,6 +20,7 @@ Phoenix: flames over him in his ultimate ("Glow: ultimate") and while healing in
 Veto ("Pine"): his ultimate's symbiote form (a second model, put on his rig), spreading over him ("Ult form")."""
 import math
 import bpy
+from mathutils import Vector
 
 GROUP = "VP Reyna Glow"
 HEART = "Glow: heart"
@@ -850,6 +851,164 @@ def _build_clove_group(images, values):
     result = mix_shader(shown, gone.outputs[0], add(result, sparks))
     links.new(result, output.inputs[0])
     return group
+
+
+FOOTPRINT_TAG = "vp_footprint"
+FOOTPRINT_LIFE = 1.0  # seconds a footprint glows before it's gone
+
+
+def _mark_neon_footprints(images, values, objects):
+    """Neon's sprint footprints: her rig remembers their texture; they're laid when an animation is applied
+    (add_footprints)."""
+    image = _image(images, "Footprint")
+    if image is None:
+        return 0
+    for obj in objects:
+        if obj.type == 'ARMATURE' and obj.name.upper().startswith("TP_"):
+            obj[FOOTPRINT_TAG] = image.name
+    return 0
+
+
+def add_footprints(rig, action):
+    """Neon's sprint footprints (the game's decal at each step while she sprints): where her animation's feet land, a
+    glowing blue footprint on the floor, appearing as the foot lands and fading over a second; shown with "Glow:
+    sprint (E)". Made again for each animation applied to her."""
+    image = bpy.data.images.get(rig.get(FOOTPRINT_TAG) or "")
+    old = bpy.data.objects.get(f"VP Neon footprints ({rig.name})")
+    if old is not None:
+        bpy.data.objects.remove(old)
+    if image is None or action is None:
+        return 0
+    feet = [(side, f"{side}_Foot", f"{side}_Toe") for side in ("L", "R")
+            if f"{side}_Foot" in rig.pose.bones and f"{side}_Toe" in rig.pose.bones]
+    if not feet:
+        return 0
+    scene = bpy.context.scene
+    fps = scene.render.fps / scene.render.fps_base
+    first, last = int(action.frame_range[0]), int(action.frame_range[1])
+    current = scene.frame_current
+    samples = {side: [] for side, _, _ in feet}
+    for frame in range(first, last + 1):
+        scene.frame_set(frame)
+        for side, foot, toe in feet:
+            heel = rig.matrix_world @ rig.pose.bones[foot].head
+            tip = rig.matrix_world @ rig.pose.bones[toe].head
+            samples[side].append((frame, heel.copy(), tip.copy()))
+    scene.frame_set(current)
+    lowest = min(min(h.z, t.z) for side in samples for _, h, t in samples[side])
+    ground = rig.matrix_world.translation.z
+    # a step: the foot coming down to the floor (its heel or toe within 3 cm of its lowest), after being up
+    prints = []
+    for side, rows in samples.items():
+        down = False
+        for frame, heel, tip in rows:
+            low = min(heel.z, tip.z) < lowest + 0.03
+            if low and not down:
+                prints.append((side, frame, heel, tip))
+            down = low
+    if not prints:
+        return 0
+    verts, faces, births, sides = [], [], [], []
+    for side, frame, heel, tip in prints:
+        heel.z = tip.z = ground + 0.004
+        along = (tip - heel)
+        along.z = 0.0
+        if along.length < 1e-4:
+            continue
+        along.normalize()
+        across = along.cross(Vector((0.0, 0.0, 1.0)))
+        middle = (heel + tip) / 2 + along * 0.03
+        half_length, half_width = 0.16, 0.07
+        base = len(verts)
+        for u, v in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            verts.append(middle + along * (u * half_length) + across * (v * half_width))
+        faces.append((base, base + 1, base + 2, base + 3))
+        births.append(float(frame))
+        sides.append(1.0 if side == "L" else 0.0)
+    mesh = bpy.data.meshes.new(f"VP Neon footprints ({rig.name})")
+    mesh.from_pydata([tuple(v) for v in verts], [], faces)
+    layer = mesh.uv_layers.new(name="UVMap")
+    for face in mesh.polygons:
+        for k, loop in enumerate(face.loop_indices):
+            layer.data[loop].uv = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))[k]
+    for name, values in (("vp_birth", births), ("vp_left", sides)):
+        attribute = mesh.attributes.new(name, 'FLOAT', 'FACE')
+        attribute.data.foreach_set("value", values)
+    obj = bpy.data.objects.new(f"VP Neon footprints ({rig.name})", mesh)
+    for collection in rig.users_collection:
+        collection.objects.link(obj)
+    world = obj.matrix_world.copy()
+    obj.parent = rig
+    obj.matrix_parent_inverse = rig.matrix_world.inverted() @ world
+    obj.data.materials.append(_footprint_material(rig, image, fps))
+    return len(faces)
+
+
+def _footprint_material(rig, image, fps):
+    """A footprint glowing Neon's blue where its texture is (its toe and heel), from the moment its foot lands
+    ("vp_birth", a frame) fading out over FOOTPRINT_LIFE; all of them as bright as "Glow: sprint (E)"."""
+    name = f"VP Neon footprint ({rig.name})"
+    old = bpy.data.materials.get(name)
+    if old is not None:
+        bpy.data.materials.remove(old)
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    material.surface_render_method = 'BLENDED'
+    tree = material.node_tree
+    nodes, links = tree.nodes, tree.links
+    for node in list(nodes):
+        nodes.remove(node)
+    out = nodes.new("ShaderNodeOutputMaterial")
+
+    def math_node(op, a, b=None, clamp=False):
+        node = nodes.new("ShaderNodeMath")
+        node.operation = op
+        node.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                node.inputs[i].default_value = v
+            else:
+                links.new(v, node.inputs[i])
+        return node.outputs[0]
+
+    texture = nodes.new("ShaderNodeTexImage")
+    texture.image = image
+    texture.extension = 'CLIP'
+    image.colorspace_settings.name = 'Non-Color'
+    birth = nodes.new("ShaderNodeAttribute")
+    birth.attribute_type = 'GEOMETRY'
+    birth.attribute_name = "vp_birth"
+    clock = nodes.new("ShaderNodeValue")
+    clock.name = clock.label = "VP Frame"
+    amount = nodes.new("ShaderNodeValue")
+    amount.name = amount.label = "VP Amount"
+    age = math_node('DIVIDE', math_node('SUBTRACT', clock.outputs[0], birth.outputs["Fac"]), fps)
+    fade = math_node('MULTIPLY', math_node('GREATER_THAN', age, -0.001),
+                     math_node('SUBTRACT', 1.0, math_node('DIVIDE', age, FOOTPRINT_LIFE), clamp=True))
+    seen = math_node('MULTIPLY', math_node('MULTIPLY', texture.outputs["Color"], fade), amount.outputs[0])
+    glow = nodes.new("ShaderNodeEmission")
+    glow.inputs["Color"].default_value = (0.08, 0.45, 1.0, 1.0)
+    glow.inputs["Strength"].default_value = 6.0
+    mix = nodes.new("ShaderNodeMixShader")
+    links.new(math_node('MINIMUM', seen, 1.0), mix.inputs[0])
+    links.new(nodes.new("ShaderNodeBsdfTransparent").outputs[0], mix.inputs[1])
+    links.new(glow.outputs[0], mix.inputs[2])
+    links.new(mix.outputs[0], out.inputs["Surface"])
+    for node_name, expression, prop in (("VP Frame", "frame", None), ("VP Amount", "value", "Glow: sprint (E)")):
+        curve = tree.driver_add(f'nodes["{node_name}"].outputs[0].default_value')
+        driver = curve.driver
+        driver.type = 'SCRIPTED'
+        if prop:
+            var = driver.variables.new()
+            var.name = "value"
+            var.type = 'SINGLE_PROP'
+            var.targets[0].id_type = 'OBJECT'
+            var.targets[0].id = rig
+            var.targets[0].data_path = f'["{prop}"]'
+        driver.expression = expression
+    return material
 
 
 BUTTERFLY_CONTROL = "FX: butterflies"
@@ -2677,7 +2836,7 @@ AGENTS = {
                   ("Ult: active", "Ult", 0.0, "Clove's ultimate is on: her ult colours and glow, until she gets a kill"),
                   ("Glow: legs (C)", "Legs", 0.0, "Clove's legs glowing, smoke rising and her trousers' butterflies lit, as with her C")]),
     "sprinter": dict(
-        node="VP Neon Glow", build=_build_neon_group, materials="sprinter",
+        node="VP Neon Glow", build=_build_neon_group, materials="sprinter", extra=_mark_neon_footprints,
         first_person=True, fp_none=("TattooMask", "HairMask"),
         controls=[("Glow: sprint (E)", "Sprint", 0.0, "Neon's suit lighting up blue, as when she sprints (her E)"),
                   ("Glow: ultimate", "Ult", 0.0, "Neon's ultimate: her suit, tattoo and the edges of her skin glowing cyan with electricity, her hair blue to yellow")]),
