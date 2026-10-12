@@ -879,13 +879,17 @@ def add_footprints(rig, action):
         bpy.data.objects.remove(old)
     if image is None or action is None:
         return 0
+    rig["vp_footprint_motion"] = _motion_signature(rig)
+    _watch_footprints()
     feet = [(side, f"{side}_Foot", f"{side}_Toe") for side in ("L", "R")
             if f"{side}_Foot" in rig.pose.bones and f"{side}_Toe" in rig.pose.bones]
     if not feet:
         return 0
     scene = bpy.context.scene
     fps = scene.render.fps / scene.render.fps_base
-    first, last = int(action.frame_range[0]), int(action.frame_range[1])
+    # (over her animation and the scene's range: a looping animation run along a path the user keyed)
+    first = int(min(action.frame_range[0], scene.frame_start))
+    last = int(max(action.frame_range[1], scene.frame_end))
     current = scene.frame_current
     samples = {side: [] for side, _, _ in feet}
     for frame in range(first, last + 1):
@@ -893,23 +897,23 @@ def add_footprints(rig, action):
         for side, foot, toe in feet:
             heel = rig.matrix_world @ rig.pose.bones[foot].head
             tip = rig.matrix_world @ rig.pose.bones[toe].head
-            samples[side].append((frame, heel.copy(), tip.copy()))
+            samples[side].append((frame, heel.copy(), tip.copy(), rig.matrix_world.translation.z))
     scene.frame_set(current)
-    lowest = min(min(h.z, t.z) for side in samples for _, h, t in samples[side])
-    ground = rig.matrix_world.translation.z
+    # (the floor: under her where she is at each step, her rig's origin; the feet's lowest above it, per clip)
+    lowest = min(min(h.z, t.z) - g for side in samples for _, h, t, g in samples[side])
     # a step: the foot coming down to the floor (its heel or toe within 3 cm of its lowest), after being up
     prints = []
     for side, rows in samples.items():
         down = False
-        for frame, heel, tip in rows:
-            low = min(heel.z, tip.z) < lowest + 0.03
+        for frame, heel, tip, ground in rows:
+            low = min(heel.z, tip.z) - ground < lowest + 0.03
             if low and not down:
-                prints.append((side, frame, heel, tip))
+                prints.append((side, frame, heel, tip, ground))
             down = low
     if not prints:
         return 0
     verts, faces, births, sides = [], [], [], []
-    for side, frame, heel, tip in prints:
+    for side, frame, heel, tip, ground in prints:
         heel.z = tip.z = ground + 0.004
         along = (tip - heel)
         along.z = 0.0
@@ -937,11 +941,61 @@ def add_footprints(rig, action):
     obj = bpy.data.objects.new(f"VP Neon footprints ({rig.name})", mesh)
     for collection in rig.users_collection:
         collection.objects.link(obj)
-    world = obj.matrix_world.copy()
-    obj.parent = rig
-    obj.matrix_parent_inverse = rig.matrix_world.inverted() @ world
+    # (left in the world where she stepped: not on her rig, so they stay behind as she moves on)
+    obj["vp_footprints_of"] = rig.name
     obj.data.materials.append(_footprint_material(rig, image, fps))
     return len(faces)
+
+
+def _motion_signature(rig):
+    """How she's moved through the scene: the keys and values of her rig's (and its parents') own position, turn and
+    size, not her pose. When it changes, her footprints are laid again."""
+    parts = []
+    item = rig
+    while item is not None:
+        keyed = set()
+        action = item.animation_data.action if item.animation_data else None
+        for curve in (_action_curves(action, item) if action else []):
+            if curve.data_path.startswith(("location", "rotation", "scale", "delta_")):
+                keyed.add(curve.data_path)
+                parts.append((curve.data_path, curve.array_index,
+                              tuple((round(k.co[0], 3), round(k.co[1], 4)) for k in curve.keyframe_points)))
+        for path in ("location", "rotation_euler", "rotation_quaternion", "scale"):
+            if path not in keyed:
+                parts.append((path, tuple(round(v, 4) for v in getattr(item, path))))
+        item = item.parent
+    return str(hash(tuple(parts)))
+
+
+_footprint_rebuild = set()
+
+
+def _watch_footprints():
+    if _footprints_moved not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_footprints_moved)
+
+
+def _footprints_moved(scene, depsgraph=None):
+    """(a handler) A rig with footprints moved or re-keyed: its footprints are laid again, a moment later."""
+    for obj in [o for o in bpy.data.objects if o.get("vp_footprints_of")]:
+        rig = bpy.data.objects.get(obj["vp_footprints_of"])
+        if rig is None or rig.name in _footprint_rebuild:
+            continue
+        if _motion_signature(rig) != rig.get("vp_footprint_motion"):
+            _footprint_rebuild.add(rig.name)
+            bpy.app.timers.register(_rebuild_footprints, first_interval=0.6)
+
+
+def _rebuild_footprints():
+    while _footprint_rebuild:
+        rig = bpy.data.objects.get(_footprint_rebuild.pop())
+        action = rig.animation_data.action if rig is not None and rig.animation_data else None
+        if action is not None:
+            try:
+                add_footprints(rig, action)
+            except Exception as error:
+                print(f"VP: footprints not laid again: {error}")
+    return None
 
 
 def _footprint_material(rig, image, fps):
@@ -987,14 +1041,49 @@ def _footprint_material(rig, image, fps):
     age = math_node('DIVIDE', math_node('SUBTRACT', clock.outputs[0], birth.outputs["Fac"]), fps)
     fade = math_node('MULTIPLY', math_node('GREATER_THAN', age, -0.001),
                      math_node('SUBTRACT', 1.0, math_node('DIVIDE', age, FOOTPRINT_LIFE), clamp=True))
-    seen = math_node('MULTIPLY', math_node('MULTIPLY', texture.outputs["Color"], fade), amount.outputs[0])
+    shape = separate = nodes.new("ShaderNodeSeparateColor")
+    links.new(texture.outputs["Color"], separate.inputs[0])
+    shape = separate.outputs[0]
+    seen = math_node('MULTIPLY', math_node('MULTIPLY', shape, fade), amount.outputs[0])
     glow = nodes.new("ShaderNodeEmission")
     glow.inputs["Color"].default_value = (0.08, 0.45, 1.0, 1.0)
     glow.inputs["Strength"].default_value = 6.0
+    # electricity: thin bright arcs flickering over the print and around it (cells' edges changing every frame),
+    # strongest as the foot lands
+    coords = nodes.new("ShaderNodeTexCoord")
+    arcs = nodes.new("ShaderNodeTexVoronoi")
+    arcs.voronoi_dimensions = '4D'
+    arcs.feature = 'DISTANCE_TO_EDGE'
+    arcs.inputs["Scale"].default_value = 4.0
+    links.new(coords.outputs["UV"], arcs.inputs["Vector"])
+    links.new(math_node('MULTIPLY', clock.outputs[0], 0.37), arcs.inputs["W"])
+    line = math_node('SUBTRACT', 1.0, math_node('DIVIDE', arcs.outputs["Distance"], 0.018), clamp=True)
+    # (only a few at a time: patches of them flickering on and off)
+    flicker = nodes.new("ShaderNodeTexNoise")
+    flicker.noise_dimensions = '4D'
+    flicker.inputs["Scale"].default_value = 3.0
+    links.new(coords.outputs["UV"], flicker.inputs["Vector"])
+    links.new(math_node('MULTIPLY', clock.outputs[0], 0.9), flicker.inputs["W"])
+    line = math_node('MULTIPLY', line, math_node('MULTIPLY', math_node('SUBTRACT', flicker.outputs["Fac"], 0.55), 8.0, clamp=True))
+    # (around the print's edge and its soft rim, not over its toe and heel)
+    near = math_node('MULTIPLY', math_node('MULTIPLY', shape, 4.0, clamp=True),
+                     math_node('SUBTRACT', 1.0, math_node('MULTIPLY', math_node('SUBTRACT', shape, 0.55), 3.0, clamp=True)))
+    spark = math_node('MULTIPLY', math_node('MULTIPLY', line, near),
+                      math_node('MULTIPLY', math_node('POWER', fade, 2.0), amount.outputs[0]))
+    zap = nodes.new("ShaderNodeEmission")
+    zap.inputs["Color"].default_value = (0.55, 0.85, 1.0, 1.0)
+    zap.inputs["Strength"].default_value = 14.0
+    lit = nodes.new("ShaderNodeAddShader")
+    links.new(glow.outputs[0], lit.inputs[0])
+    links.new(zap.outputs[0], lit.inputs[1])
+    # (each as strong as it is: the mix below shows the stronger of the two, so they're weighed by it)
+    shown = math_node('ADD', math_node('MAXIMUM', seen, spark), 0.0001)
+    links.new(math_node('MULTIPLY', math_node('DIVIDE', seen, shown), 6.0), glow.inputs["Strength"])
+    links.new(math_node('MULTIPLY', math_node('DIVIDE', spark, shown), 14.0), zap.inputs["Strength"])
     mix = nodes.new("ShaderNodeMixShader")
-    links.new(math_node('MINIMUM', seen, 1.0), mix.inputs[0])
+    links.new(math_node('MINIMUM', shown, 1.0), mix.inputs[0])
     links.new(nodes.new("ShaderNodeBsdfTransparent").outputs[0], mix.inputs[1])
-    links.new(glow.outputs[0], mix.inputs[2])
+    links.new(lit.outputs[0], mix.inputs[2])
     links.new(mix.outputs[0], out.inputs["Surface"])
     for node_name, expression, prop in (("VP Frame", "frame", None), ("VP Amount", "value", "Glow: sprint (E)")):
         curve = tree.driver_add(f'nodes["{node_name}"].outputs[0].default_value')

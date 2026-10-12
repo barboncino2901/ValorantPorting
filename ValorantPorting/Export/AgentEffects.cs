@@ -133,6 +133,12 @@ public static class AgentEffects
         ],
         ["Sprinter"] =
         [
+            // her sprint (with "Glow: sprint (E)"): her footsteps' zaps (the game's footprint effect: its decal is laid by
+            // the add-on) crackling at her feet
+            ("Glow: sprint (E)", "/Game/Characters/Sprinter/S0/VFX/Ability_E/work/Sprinter_E_3P_LFootprint_Decal1", "L_Foot", new FVector(0f, 0f, 0f), 0.0f, 0.46f),
+            ("Glow: sprint (E)", "/Game/Characters/Sprinter/S0/VFX/Ability_E/work/Sprinter_E_3P_RFootprint_Decal", "R_Foot", new FVector(0f, 0f, 0f), 0.23f, 0.46f),
+            ("Glow: sprint (E)", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "L_Toe", new FVector(0f, 0f, 0f), 0.1f, 0.7f),
+            ("Glow: sprint (E)", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Toe", new FVector(0f, 0f, 0f), 0.45f, 0.75f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Index3", new FVector(0.0f, 0.0f, 0.0f), 0.0f, 0.55f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Ring3", new FVector(0.0f, 0.0f, 0.0f), 0.2f, 0.7f),
             ("FX: ultimate", "/Game/Characters/Sprinter/S0/VFX/Ability_X/work/Sprinter_X_OutOfAmmo_3P_LHand01", "R_Hand", new FVector(-6f, 0f, 5f), 0.35f, 0.62f),
@@ -184,6 +190,9 @@ public static class AgentEffects
     {
         ["Wushu_X_3P_DaggerFloat|GlowFlareLoop"] = (3f, 1.5f, null), // the glow at each knife's ring
         ["ULT_LimbFlames|None"] = (2f, 1f, "FF8A2E"), // Phoenix's flames on his shoulders and elbows (solar_flare_4x4: grey)
+        // Neon's footprints' decals: laid by the add-on on the floor (only their zaps play at her feet)
+        ["Sprinter_E_3P_LFootprint_Decal1|Decal_Footprint"] = (0f, 1f, null),
+        ["Sprinter_E_3P_RFootprint_Decal|Decal_Footprint"] = (0f, 1f, null),
         // Reyna: grey flipbooks her materials colour pink
         // (her ult's big radianite scribbles and star sparkle don't look like the game in Blender: left out)
         ["Vampire_X_3p_ChestFlare|radianite"] = (0f, 0f, null),
