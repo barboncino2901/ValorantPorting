@@ -4,6 +4,36 @@ What changed in each version. The app shows the new version's section when an up
 updating; the release workflow puts the same text on the GitHub release. Add a `## <version>` section before
 running the release workflow with that version.
 
+## 1.16.0
+
+**After this update: close Blender and open it again** (the Blender add-on updates itself).
+
+### Agent VFX
+Ult and ability looks are rebuilt from the game's own shaders and particles. Each one has a slider on the armature
+(keyframe it), in 3rd and 1st person.
+- **Reyna**: heart, eyes and tattoos glow; ult wisps and eye trail; Dismiss as a see-through ghost.
+- **Neon**: suit lights up when sprinting, with glowing footprints left behind and electricity at her feet; ult with
+  lightning over her body.
+- **Jett**: wind on her arms in her ult; Blade Storm knives with wind and glow.
+- **Phoenix**: fire crawling over his body; flames on his arms, chest and legs.
+- **KAY/O**: panels and face screen per ability; ult lightning.
+- **Omen**: ult cast (turns to shadow and fades), ghost form, shadow smoke.
+- **Yoru**: ult as a glitching hologram with his mask; the rift he tears open.
+- **Viper**: ult mask; heavy green gas from her hands.
+- **Veto**: symbiote form spreading over him.
+- **Clove**: ghost form, ult glow, butterflies.
+- **Chamber, Waylay, Iso**: tattoos, crystals and outfit glows.
+
+### Improvements
+- Glowing parts of every agent's outfit (screens, lights, trims) now actually glow.
+- Animations bring their particle effects (e.g. character select intros).
+- Sage's orbs are no longer black.
+- Agents list is in alphabetical order.
+- Large exports no longer lose pieces on the way to Blender.
+
+### Fixes
+- Removed a duplicate KAY/O from the agents list.
+
 ## 1.15.0
 
 **After this update: close Blender and open it again** (the Blender add-on updates itself).
