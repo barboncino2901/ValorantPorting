@@ -958,8 +958,12 @@ def _motion_signature(rig):
         for curve in (_action_curves(action, item) if action else []):
             if curve.data_path.startswith(("location", "rotation", "scale", "delta_")):
                 keyed.add(curve.data_path)
-                parts.append((curve.data_path, curve.array_index,
-                              tuple((round(k.co[0], 3), round(k.co[1], 4)) for k in curve.keyframe_points)))
+                # (each key's value, and how it gets there: interpolation, easing, handles; the curve's modifiers)
+                parts.append((curve.data_path, curve.array_index, curve.extrapolation,
+                              tuple((round(k.co[0], 3), round(k.co[1], 4), k.interpolation, k.easing,
+                                     tuple(round(v, 3) for v in (*k.handle_left, *k.handle_right)))
+                                    for k in curve.keyframe_points),
+                              tuple((m.type, m.mute) for m in curve.modifiers)))
         for path in ("location", "rotation_euler", "rotation_quaternion", "scale"):
             if path not in keyed:
                 parts.append((path, tuple(round(v, 4) for v in getattr(item, path))))
